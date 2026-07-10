@@ -47,8 +47,14 @@ CI(GitHub Actions)에서는 `CHROMIUM_PATH` 없이 `npx playwright install --wit
 
 GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
-- 저장소 **Settings → Pages → Source**를 **"GitHub Actions"** 로 설정해야 합니다.
+- **최초 1회 설정**: 저장소 **Settings → Pages → Source**를 **"GitHub Actions"** 로 설정해야
+  합니다. 이 설정 전에는 CI의 `Deploy to GitHub Pages` 잡이 시작 단계에서 거부되어
+  실패합니다 (빌드·테스트 잡은 정상 동작).
+- 설정 후 Actions 탭에서 실패한 워크플로를 **Re-run** 하거나 아무 커밋이나 push하면
+  배포됩니다. 배포 주소: `https://<계정>.github.io/lyrics/`
 - 기본 브랜치(default branch)에 push될 때마다 테스트 통과 후 자동으로 배포됩니다.
+- 배포가 계속 거부되면 **Settings → Environments → github-pages → Deployment branches**에서
+  기본 브랜치가 허용되어 있는지 확인하세요.
 
 ## 참고
 
