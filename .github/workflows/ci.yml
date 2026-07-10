@@ -75,6 +75,11 @@ jobs:
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          # Try to enable Pages automatically on first deploy; if the token
+          # lacks permission, enable it once in Settings → Pages → Source:
+          # "GitHub Actions".
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
