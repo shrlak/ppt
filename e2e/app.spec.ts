@@ -2,8 +2,10 @@ import { test, expect, type Page, type Download } from '@playwright/test';
 import JSZip from 'jszip';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const SAMPLE_PDF = path.join(__dirname, '..', 'samples', 'conti-example.pdf');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 
 // PDF parsing (pdf.js on scanned pages) can be slow, especially in CI.
 const PARSE_TIMEOUT = 30_000;
@@ -71,9 +73,12 @@ test('generates a valid pptx from the parsed conti', async ({ page }, testInfo) 
   await page.getByTestId('generate-pptx').click();
   const download = await dlPromise;
 
+  // The app derives the file name from the conti date.
+  await expect(page.getByTestId('filename-input')).toHaveValue('7.11.26 찬양 가사.pptx');
+  // Headless Chromium reports non-ASCII blob download names as the literal
+  // fallback "download"; real browsers use the Korean file name.
   const suggested = download.suggestedFilename();
-  expect(suggested).toMatch(/\.pptx$/);
-  expect(suggested).toContain('7.11.26');
+  expect(suggested).toMatch(/\.pptx$|^download$/);
 
   const zip = await loadPptx(download, testInfo.outputPath('conti.pptx'));
 

@@ -20,26 +20,39 @@ interface TextItemLike {
   str: string;
   hasEOL?: boolean;
   transform?: number[];
+  width?: number;
 }
 
 async function extractPageText(page: pdfjs.PDFPageProxy): Promise<string> {
   const content = await page.getTextContent();
   let text = '';
   let lastY: number | null = null;
+  let lastEndX: number | null = null;
   for (const raw of content.items) {
     const item = raw as TextItemLike;
     if (typeof item.str !== 'string') continue;
-    const y = item.transform ? item.transform[5] : null;
-    if (text.length > 0) {
+    const tf = item.transform;
+    const x = tf ? tf[4] : null;
+    const y = tf ? tf[5] : null;
+    const fontSize = tf ? Math.abs(tf[0]) || Math.abs(tf[3]) || 10 : 10;
+    if (text.length > 0 && !text.endsWith('\n')) {
       if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {
         text += '\n';
-      } else if (!text.endsWith('\n')) {
+      } else if (
+        // Items are often per-glyph with explicit space items in between;
+        // only a real horizontal gap means a missing word break.
+        lastEndX !== null &&
+        x !== null &&
+        x - lastEndX > 0.3 * fontSize &&
+        !/\s$/.test(text)
+      ) {
         text += ' ';
       }
     }
     text += item.str;
     if (item.hasEOL) text += '\n';
     if (y !== null) lastY = y;
+    lastEndX = x !== null ? x + (item.width ?? 0) : null;
   }
   return text;
 }
@@ -52,7 +65,7 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
     cMapPacked: true,
     standardFontDataUrl: BASE + 'standard_fonts/',
   });
-  const doc = await loadingTask.getPromise();
+  const doc = await loadingTask.promise;
 
   const pageTexts: string[] = [];
   for (let n = 1; n <= doc.numPages; n++) {
