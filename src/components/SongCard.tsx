@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Song } from '../lib/types';
 import { formatOrder, parseOrder } from '../lib/orderParser';
 import { planSlides, unmatchedTokens } from '../lib/slidePlanner';
+import { nextAvailableLabel } from './songLabels';
 
 interface Props {
   song: Song;
@@ -54,7 +55,8 @@ export default function SongCard({
   }
 
   function addSection(label: string) {
-    onChange({ ...song, sections: [...song.sections, { label, lines: [] }] });
+    const finalLabel = label ? nextAvailableLabel(song.sections.map((s) => s.label), label) : '';
+    onChange({ ...song, sections: [...song.sections, { label: finalLabel, lines: [] }] });
   }
 
   function removeSection(i: number) {
@@ -122,6 +124,7 @@ export default function SongCard({
                 className="section-label"
                 value={sec.label}
                 placeholder="파트"
+                title="파트 이름을 자유롭게 입력할 수 있습니다 (예: V3, PC2, C3, Bridge2 등)"
                 onChange={(e) => setSection(i, { label: e.target.value.toUpperCase() })}
               />
               <textarea

@@ -71,6 +71,11 @@ export function buildVerseSlidePlan(
         rangeEn,
         body: group.map((v) => v.text).join(' '),
         body1: group.map((v) => v.text).join(' '),
+        // The template's verse slide always has {{BODY2}}/{{BODY3}} slots for a
+        // 2nd/3rd translation; default them to '' so deselecting a translation
+        // clears the placeholder instead of leaving it literal on the slide.
+        body2: '',
+        body3: '',
       };
       for (let t = 1; t < translations.length; t++) {
         const other = bibles.get(translations[t]);

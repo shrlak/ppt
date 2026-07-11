@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
+const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 
-// PDF parsing (pdf.js on scanned pages) can be slow, especially in CI.
+// PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
+// slow, especially in CI.
 const PARSE_TIMEOUT = 30_000;
 
 async function uploadExamplePdf(page: Page): Promise<void> {
@@ -27,12 +29,18 @@ function slideFileNames(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
 }
 
-test('loads the app shell', async ({ page }) => {
+test('loads the app shell with every section on one page', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
-  await expect(page.getByTestId('tab-lyrics')).toBeVisible();
-  await expect(page.getByTestId('tab-bible')).toBeVisible();
+  await expect(page.getByText('🎵 찬양')).toBeVisible();
+  await expect(page.getByText('📖 성경 말씀')).toBeVisible();
+  await expect(page.getByText('🎤 설교')).toBeVisible();
+  await expect(page.getByText('📢 광고')).toBeVisible();
   await expect(page.getByTestId('generate-pptx')).toBeVisible();
+  // Everything lives on one page — the lyrics upload and the bible verse
+  // input are both present without switching tabs.
+  await expect(page.getByTestId('pdf-input')).toBeAttached();
+  await expect(page.getByTestId('bible-verse-input')).toBeVisible();
 });
 
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
@@ -62,7 +70,7 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
   });
 });
 
-test('generates a valid pptx from the parsed conti', async ({ page }, testInfo) => {
+test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {
   await page.goto('./');
   await uploadExamplePdf(page);
 
@@ -77,30 +85,23 @@ test('generates a valid pptx from the parsed conti', async ({ page }, testInfo) 
 
   // The app derives the file name from the conti date.
   await expect(page.getByTestId('filename-input')).toHaveValue('7.11.26 찬양 가사.pptx');
-  // Headless Chromium reports non-ASCII blob download names as the literal
-  // fallback "download"; real browsers use the Korean file name.
-  const suggested = download.suggestedFilename();
-  expect(suggested).toMatch(/\.pptx$|^download$/);
 
   const zip = await loadPptx(download, testInfo.outputPath('conti.pptx'));
 
   expect(zip.file('ppt/presentation.xml')).not.toBeNull();
   expect(zip.file('[Content_Types].xml')).not.toBeNull();
 
+  // Combined deck = fixed service slides (intro ×4 + prayer ×2 = 6) + lyrics slides.
   const slides = slideFileNames(zip);
   expect(slides.length).toBeGreaterThanOrEqual(10);
-
-  const slide1 = await zip.file('ppt/slides/slide1.xml')!.async('string');
-  expect(slide1).toContain('주님의 사랑');
 
   const presentationXml = await zip.file('ppt/presentation.xml')!.async('string');
   const sldIdCount = (presentationXml.match(/<p:sldId /g) ?? []).length;
   expect(sldIdCount).toBe(slides.length);
 
-  const notesSlides = Object.keys(zip.files).filter((name) =>
-    name.startsWith('ppt/notesSlides/'),
-  );
-  expect(notesSlides).toHaveLength(0);
+  const allText = (await Promise.all(slides.map((f) => zip.file(f)!.async('string')))).join('\n');
+  expect(allText).toContain('주님의 사랑');
+  expect(allText).toContain('기도');
 });
 
 test('manual flow without a PDF', async ({ page }, testInfo) => {
@@ -127,16 +128,14 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
   expect(slideFileNames(zip).length).toBeGreaterThanOrEqual(2);
 });
 
-test('generates a bible verse slide deck', async ({ page }, testInfo) => {
+test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   await page.goto('./');
-  await page.getByTestId('tab-bible').click();
 
   await page.getByTestId('bible-verse-input').fill('요3:16');
   await expect(page.getByTestId('bible-verse-preview')).toContainText('요한복음 3:16');
 
   const dlPromise = page.waitForEvent('download');
-  await page.getByTestId('bible-generate').click();
-  // Fetching + parsing a ~4MB translation JSON can take a moment in CI.
+  await page.getByTestId('generate-pptx').click();
   const download = await dlPromise;
 
   const zip = await loadPptx(download, testInfo.outputPath('bible.pptx'));
@@ -144,9 +143,45 @@ test('generates a bible verse slide deck', async ({ page }, testInfo) => {
   const slides = slideFileNames(zip);
   expect(slides.length).toBeGreaterThan(0);
 
-  const allText = (
-    await Promise.all(slides.map((f) => zip.file(f)!.async('string')))
-  ).join('\n');
+  const allText = (await Promise.all(slides.map((f) => zip.file(f)!.async('string')))).join('\n');
   expect(allText).toContain('요한복음 3:16');
   expect(allText).not.toContain('{{BODY}}');
+});
+
+test('generates one combined deck from lyrics, bible verses, and announcements together', async ({
+  page,
+}, testInfo) => {
+  await page.goto('./');
+  await uploadExamplePdf(page);
+
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  await expect(page.getByTestId('bible-verse-preview')).toContainText('요한복음 3:16');
+
+  const announcementsText = await fs.readFile(ANNOUNCEMENTS_TEXT, 'utf-8');
+  await page.getByTestId('announcement-input').fill(announcementsText);
+  await expect(page.getByTestId('announcement-preview')).toContainText('새가족 환영');
+
+  await expect(page.getByTestId('slide-count')).toContainText('말씀 1구절');
+  await expect(page.getByTestId('slide-count')).toContainText('광고 5건');
+
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('combined.pptx'));
+  const slides = slideFileNames(zip);
+  // Fixed slides (intro 4 + prayer 2 + announcement title 1 = 7) + lyrics + bible + 5 announcement slides.
+  expect(slides.length).toBeGreaterThanOrEqual(7 + 5);
+
+  const presentationXml = await zip.file('ppt/presentation.xml')!.async('string');
+  expect((presentationXml.match(/<p:sldId /g) ?? []).length).toBe(slides.length);
+  // Two slide masters: the service template's own, plus the lyrics/bible decks' merged-in ones.
+  expect((presentationXml.match(/<p:sldMasterId /g) ?? []).length).toBeGreaterThanOrEqual(2);
+
+  const allText = (await Promise.all(slides.map((f) => zip.file(f)!.async('string')))).join('\n');
+  expect(allText).toContain('빛주사랑'); // fixed intro slide
+  expect(allText).toContain('주님의 사랑'); // lyrics
+  expect(allText).toContain('요한복음 3:16'); // bible verse
+  expect(allText).toContain('새가족 환영'); // announcement item
+  expect(allText).toContain('기도'); // fixed prayer slides
 });

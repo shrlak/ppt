@@ -68,6 +68,13 @@ describe('buildVerseSlidePlan', () => {
     expect(plan.globalData.rangeKo).toBe('요한복음 3:16');
   });
 
+  it('defaults body2/body3 to empty string when only one translation is selected', () => {
+    const bibles = new Map([['nkrv', johnBook(KO_VERSES)]]);
+    const plan = buildVerseSlidePlan([ref], ['nkrv'], bibles, '', 4);
+    expect(plan.verseSlides[0].body2).toBe('');
+    expect(plan.verseSlides[0].body3).toBe('');
+  });
+
   it('throws when no refs are given', () => {
     expect(() => buildVerseSlidePlan([], ['nkrv'], new Map(), '', 1)).toThrow();
   });

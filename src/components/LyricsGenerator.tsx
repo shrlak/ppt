@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContiInfo, LibraryEntry, Song } from '../lib/types';
 import { loadConti, type ContiDocument } from '../lib/contiPdf';
 import {
@@ -10,8 +10,6 @@ import {
   saveUserLibrary,
   upsertEntry,
 } from '../lib/library';
-import { planAllSlides, unmatchedTokens } from '../lib/slidePlanner';
-import { buildPptx, suggestFileName } from '../lib/pptxBuilder';
 import SongCard from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
@@ -40,14 +38,19 @@ function blankSong(title = ''): Song {
   };
 }
 
-export default function LyricsGenerator() {
+interface Props {
+  /** Fired whenever the song list changes, so the parent can build the combined deck. */
+  onSongsChange: (songs: Song[]) => void;
+  /** Fired once the conti cover date is known, so the parent can suggest a file name. */
+  onDateDetected?: (date: string | undefined) => void;
+}
+
+export default function LyricsGenerator({ onSongsChange, onDateDetected }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [pageImages, setPageImages] = useState<Record<number, string>>({});
-  const [fileName, setFileName] = useState(suggestFileName());
   const [parsing, setParsing] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -64,6 +67,10 @@ export default function LyricsGenerator() {
     })();
     return () => docRef.current?.destroy();
   }, []);
+
+  useEffect(() => {
+    onSongsChange(songs);
+  }, [songs, onSongsChange]);
 
   const saveToLibrary = useCallback((song: Song) => {
     if (!song.title.trim()) return;
@@ -147,8 +154,8 @@ export default function LyricsGenerator() {
       setInfo(parsed.info);
       setSongs(next);
       setEdited(false);
-      setFileName(suggestFileName(parsed.info.date));
       setPageImages({});
+      onDateDetected?.(parsed.info.date);
 
       // Render score previews in the background.
       void (async () => {
@@ -192,44 +199,9 @@ export default function LyricsGenerator() {
     setSongs((list) => list.filter((s) => s.id !== id));
   }
 
-  const allPlans = useMemo(() => planAllSlides(songs), [songs]);
-  const allWarnings = useMemo(
-    () =>
-      songs
-        .map((s) => ({ title: s.title, tokens: unmatchedTokens(s) }))
-        .filter((w) => w.tokens.length > 0),
-    [songs],
-  );
-
-  async function generate() {
-    setGenerating(true);
-    setError(null);
-    try {
-      const res = await fetch(`${BASE}template.pptx`);
-      if (!res.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
-      const template = await res.arrayBuffer();
-      const out = await buildPptx(template, songs);
-      const blob = new Blob([out.buffer as ArrayBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   return (
     <div className="tool">
-      <p className="tool-intro">찬양 콘티 PDF를 업로드하면 가사 슬라이드 PPT를 자동으로 만들어 드립니다.</p>
+      <p className="tool-intro">찬양 콘티 PDF를 업로드하면 가사 슬라이드를 자동으로 만들어 드립니다.</p>
 
       {error && (
         <div className="banner banner-error" data-testid="error-banner">
@@ -330,7 +302,8 @@ export default function LyricsGenerator() {
         {songs.length === 0 && (
           <p className="empty-hint">
             콘티를 업로드하거나, 아래 버튼으로 곡을 직접 추가하세요. V(절)·PC(프리코러스)·C(후렴)·
-            B(브릿지)·I(간주) 파트로 가사를 나누고 순서를 정하면 그대로 슬라이드가 됩니다.
+            B(브릿지)·I(간주) 등 파트 이름을 자유롭게 정하고 순서를 적으면 그대로 슬라이드가
+            됩니다. 절·후렴이 여러 개면 버튼을 다시 눌러 V2, C2처럼 이어서 추가할 수 있어요.
           </p>
         )}
         {songs.map((song, idx) => (
@@ -387,48 +360,11 @@ export default function LyricsGenerator() {
               ))}
             </select>
           </label>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>
-          <span className="step">3</span> PPT 생성
-        </h2>
-        {allWarnings.length > 0 && (
-          <div className="banner banner-warn">
-            일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-            {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
-          </div>
-        )}
-        <div className="generate-row">
-          <label>
-            파일명
-            <input
-              data-testid="filename-input"
-              value={fileName}
-              onChange={(e) => setFileName(e.target.value)}
-            />
-          </label>
-          <div className="slide-count" data-testid="slide-count">
-            총 {allPlans.length}장의 슬라이드 (찬양 {songs.length}곡)
-          </div>
-          <button
-            className="btn btn-primary"
-            data-testid="generate-pptx"
-            disabled={generating || songs.length === 0}
-            onClick={() => void generate()}
-          >
-            {generating ? '생성 중…' : '⬇ PPTX 생성 및 다운로드'}
+          <button className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
+            📚 라이브러리 관리
           </button>
         </div>
       </section>
-
-      <footer className="footer">
-        <button className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
-          📚 라이브러리 관리
-        </button>
-        <span>템플릿: template.pptx · 순서 표기: V/PC/C/B/I, 간주, Cx2</span>
-      </footer>
 
       {libraryOpen && (
         <Modal title="곡 라이브러리" onClose={() => setLibraryOpen(false)}>

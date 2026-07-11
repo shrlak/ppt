@@ -1,91 +1,57 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TRANSLATIONS } from '../bible/books';
 import { parseVerseInput, displayRef } from '../bible/refParser';
-import { loadTranslation } from '../bible/bibleData';
-import { buildVerseSlidePlan } from '../bible/versePlanner';
-import { buildBiblePptx, suggestBibleFileName } from '../bible/pptxBuilder';
 
-const BASE: string = import.meta.env.BASE_URL || '/';
 const KO_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'ko');
 const EN_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'en');
 
-export default function BibleSlideGenerator() {
+export interface BibleGeneratorState {
+  verseInput: string;
+  sermonTitle: string;
+  translations: string[];
+  versesPerSlide: number;
+  customTemplate: { name: string; data: ArrayBuffer } | null;
+}
+
+interface Props {
+  /** Fired whenever any input changes, so the parent can build the combined deck. */
+  onStateChange: (state: BibleGeneratorState) => void;
+}
+
+export default function BibleSlideGenerator({ onStateChange }: Props) {
   const [verseInput, setVerseInput] = useState('');
   const [sermonTitle, setSermonTitle] = useState('');
   const [koTranslation, setKoTranslation] = useState('nkrv');
   const [enTranslation, setEnTranslation] = useState<string | null>('esv');
   const [versesPerSlide, setVersesPerSlide] = useState(1);
   const [customTemplate, setCustomTemplate] = useState<{ name: string; data: ArrayBuffer } | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { refs, invalidTokens } = verseInput.trim() ? parseVerseInput(verseInput) : { refs: [], invalidTokens: [] };
+  const { invalidTokens } = verseInput.trim() ? parseVerseInput(verseInput) : { invalidTokens: [] as string[] };
   const previewTokens = verseInput.trim().split(/\s+/).filter(Boolean);
   const translations = enTranslation ? [koTranslation, enTranslation] : [koTranslation];
-  const canGenerate = verseInput.trim().length > 0 && refs.length > 0 && !generating;
+
+  useEffect(() => {
+    onStateChange({ verseInput, sermonTitle, translations, versesPerSlide, customTemplate });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verseInput, sermonTitle, translations.join(','), versesPerSlide, customTemplate, onStateChange]);
 
   async function handleTemplateUpload(file: File) {
     if (!file.name.endsWith('.pptx')) return;
     const data = await file.arrayBuffer();
     setCustomTemplate({ name: file.name, data });
-    setStatus(`'${file.name}' 템플릿을 이번 세션에서 사용합니다.`);
-  }
-
-  async function generate() {
-    if (!canGenerate) return;
-    setGenerating(true);
-    setError(null);
-    setStatus(null);
-    try {
-      const bibles = new Map();
-      for (const id of translations) {
-        bibles.set(id, await loadTranslation(BASE, id));
-      }
-      const plan = buildVerseSlidePlan(refs, translations, bibles, sermonTitle, versesPerSlide);
-
-      const templateData = customTemplate
-        ? customTemplate.data
-        : await fetch(`${BASE}bible-template.pptx`).then((r) => {
-            if (!r.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
-            return r.arrayBuffer();
-          });
-
-      const out = await buildBiblePptx(templateData, plan);
-      const blob = new Blob([out.buffer as ArrayBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = suggestBibleFileName();
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setStatus('슬라이드 생성 완료!');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGenerating(false);
-    }
+    setNotice(`'${file.name}' 템플릿을 이번 세션에서 사용합니다.`);
   }
 
   return (
     <div className="tool">
-      <p className="tool-intro">성경 구절을 입력하면 말씀 슬라이드 PPT를 자동으로 만들어 드립니다.</p>
+      <p className="tool-intro">성경 구절을 입력하면 말씀 슬라이드를 자동으로 만들어 드립니다.</p>
 
-      {error && (
-        <div className="banner banner-error" data-testid="bible-error-banner">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>✕</button>
-        </div>
-      )}
-      {status && (
+      {notice && (
         <div className="banner banner-notice">
-          <span>{status}</span>
-          <button onClick={() => setStatus(null)}>✕</button>
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
@@ -100,9 +66,6 @@ export default function BibleSlideGenerator() {
           placeholder="행1:8-10 요3:16 롬8:28"
           value={verseInput}
           onChange={(e) => setVerseInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && canGenerate) void generate();
-          }}
         />
         <p className="input-hint">공백으로 구분해서 여러 구절을 입력할 수 있습니다.</p>
         {previewTokens.length > 0 && (
@@ -170,7 +133,7 @@ export default function BibleSlideGenerator() {
 
       <section className="card">
         <h2>
-          <span className="step">3</span> PPT 생성
+          <span className="step">3</span> 옵션
         </h2>
         <div className="option-row">
           <label htmlFor="bible-verses-per-slide">슬라이드당 절 수</label>
@@ -210,15 +173,6 @@ export default function BibleSlideGenerator() {
             }}
           />
         </div>
-
-        <button
-          className="btn btn-primary btn-block"
-          data-testid="bible-generate"
-          disabled={!canGenerate}
-          onClick={() => void generate()}
-        >
-          {generating ? '생성 중…' : '⬇ 슬라이드 생성'}
-        </button>
       </section>
     </div>
   );

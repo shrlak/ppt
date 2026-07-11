@@ -4,14 +4,23 @@
 
 :root {
   --accent: #0071e3;
+  --accent-2: #5e5ce6;
   --accent-dark: #0059b3;
+  --accent-soft: #e8f2fd;
   --ink: #1d1d1f;
   --ink-muted: #6e6e73;
   --ink-faint: #86868b;
-  --hairline: #e5e5ea;
+  --hairline: rgba(0, 0, 0, 0.1);
   --surface: #ffffff;
   --canvas: #f5f5f7;
-  --radius: 18px;
+  --radius: 20px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 20px 60px rgba(0, 0, 0, 0.07);
+  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* {
+  transition-timing-function: var(--ease);
 }
 
 body {
@@ -19,32 +28,42 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Pretendard', 'Apple SD Gothic Neo',
-    'Malgun Gothic', sans-serif;
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Pretendard',
+    'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  font-size: 16px;
   line-height: 1.5;
+  letter-spacing: -0.012em;
   -webkit-font-smoothing: antialiased;
 }
 
 .app {
   max-width: 760px;
   margin: 0 auto;
-  padding: 56px 20px 72px;
+  padding: 0 20px 72px;
 }
 
 .header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   text-align: center;
-  padding: 0 0 28px;
+  margin: 0 -20px;
+  padding: 22px 20px 20px;
+  background: rgba(245, 245, 247, 0.78);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hairline);
 }
 .header h1 {
-  margin: 0 0 8px;
-  font-size: 2.1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  font-size: 2rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
 }
 .header p {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 0.98rem;
+  font-size: 0.94rem;
 }
 
 .tabbar {
@@ -84,13 +103,49 @@ body {
   margin: 0 0 24px;
 }
 
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 44px 0 0;
+  font-size: 1.32rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.section-title:first-of-type {
+  margin-top: 32px;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--hairline), transparent);
+  margin-left: 4px;
+}
+
+.announcement-textarea {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 0.94rem;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+.announcement-textarea:focus {
+  border-color: var(--accent);
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow);
   padding: 24px 26px;
-  margin-top: 20px;
+  margin-top: 16px;
+  transition: box-shadow 0.4s var(--ease);
 }
 .card h2 {
   display: flex;
@@ -98,8 +153,8 @@ body {
   gap: 10px;
   margin: 0 0 16px;
   font-size: 1.08rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 .step {
   display: inline-flex;
@@ -108,9 +163,10 @@ body {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   font-size: 0.82rem;
+  font-weight: 600;
   flex: none;
 }
 
@@ -147,17 +203,20 @@ body {
 
 .dropzone {
   border: 1.5px dashed #c7c7cc;
-  border-radius: 14px;
+  border-radius: 18px;
   padding: 36px 20px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.25s var(--ease), background 0.25s var(--ease), transform 0.25s var(--ease);
   position: relative;
 }
 .dropzone:hover,
 .dropzone.dragover {
   border-color: var(--accent);
-  background: #f5faff;
+  background: var(--accent-soft);
+}
+.dropzone.dragover {
+  transform: scale(1.005);
 }
 .dropzone-title {
   margin: 0 0 6px;
@@ -255,12 +314,13 @@ body {
   cursor: pointer;
   border: 1px solid var(--hairline);
   background: var(--surface);
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease), color 0.2s var(--ease);
 }
 .chip-radio input {
   display: none;
 }
 .chip-radio.active {
-  background: #eef4ff;
+  background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent-dark);
 }
@@ -274,9 +334,14 @@ body {
 
 .song-card {
   border: 1px solid var(--hairline);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 16px;
   margin-bottom: 18px;
+  transition: box-shadow 0.3s var(--ease), border-color 0.3s var(--ease);
+}
+.song-card:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--hairline));
+  box-shadow: var(--shadow-lift);
 }
 .song-card-head {
   display: flex;
@@ -602,16 +667,21 @@ body {
 .btn {
   border: 1px solid var(--hairline);
   background: var(--surface);
-  border-radius: 10px;
-  padding: 8px 14px;
+  border-radius: 999px;
+  padding: 8px 16px;
   font-family: inherit;
   font-size: 0.9rem;
+  font-weight: 550;
   cursor: pointer;
   color: var(--ink);
-  transition: background 0.15s;
+  transition: background 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 .btn:hover:not(:disabled) {
   background: var(--canvas);
+  transform: translateY(-1px);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -621,17 +691,20 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-  font-weight: 600;
-  padding: 11px 22px;
+  font-weight: 650;
+  padding: 12px 24px;
+  box-shadow: 0 8px 20px rgba(0, 113, 227, 0.28);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-dark);
+  box-shadow: 0 10px 26px rgba(0, 113, 227, 0.36);
 }
 .btn-block {
   width: 100%;
 }
 .btn-icon {
   padding: 6px 9px;
+  border-radius: 50%;
 }
 .btn-danger {
   color: #d70015;
@@ -679,6 +752,7 @@ body {
 .modal {
   background: var(--surface);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-lift), 0 30px 90px rgba(0, 0, 0, 0.18);
   max-width: 560px;
   width: 100%;
   max-height: 85vh;
