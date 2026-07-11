@@ -8,11 +8,12 @@
 ## 생성되는 슬라이드 순서
 
 ```
-표지 · 신앙고백  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  광고
+Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  광고  →  Back slides
 ```
 
-표지·신앙고백, 기도(×2) 슬라이드는 `public/service-template.pptx`(교회 자체 서식)에서 그대로
-가져옵니다. 찬양·말씀·설교·광고 중 입력한 항목만 그 사이에 끼워 넣어 하나의 `.pptx`로 내려받습니다.
+Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
+포함합니다. 기도(×2)와 광고 서식은 `public/service-template.pptx`에서 가져오며, 나머지 입력을
+고정 순서에 맞춰 하나의 `.pptx`로 내려받습니다.
 
 ## 🎵 찬양
 
@@ -27,6 +28,8 @@
 - **곡 라이브러리** — 입력한 곡을 저장하고 다음 콘티에서 재사용할 수 있습니다. 라이브러리에 있는
   곡은 업로드 직후 가사가 자동으로 채워집니다.
 - **악보 페이지 미리보기** — 스캔된 악보 페이지를 보면서 가사를 입력할 수 있습니다.
+- **공동체 고백송 제외** — 콘티의 마지막 찬양은 공동체 고백송으로 간주해 일반 찬양 가사
+  슬라이드에서는 제외합니다. 해당 순서는 고정 Back slides에 포함됩니다.
 
 순서 토큰 참고표:
 
@@ -48,6 +51,8 @@
 
 - **구절 입력** — `행1:8-10 요3:16 롬8:28` 처럼 여러 구절을 공백으로 구분해 입력합니다. 입력하는
   즉시 인식된 구절 목록을 미리 보여줍니다.
+- **콘티 자동 입력** — 찬양 콘티를 업로드하면 표지의 본문과 설교 제목이 성경 말씀 1·2단계에
+  자동으로 채워집니다 (`로마서 5장 1-11절` → `롬5:1-11`).
 - **번역본** — 한국어(개역개정·개역한글·새번역)와 영어(ESV·NIV·KJV) 중 최대 2개를 함께 표시할 수
   있습니다.
 - **설교 제목** — 선택 입력. 비워두면 해당 자리에 빈칸으로 표시됩니다.
@@ -107,13 +112,20 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
 ## 참고
 
-- 예배 서식(표지·신앙고백·기도·광고 제목·항목 슬라이드): `public/service-template.pptx`
+- 기도·광고 제목·광고 항목 서식: `public/service-template.pptx`
+- 필수 Front slides: `public/front-slides.pptx`
+- 필수 Back slides: `public/back-slides.pptx`
 - 찬양 슬라이드 템플릿: `public/template.pptx` (교체 가능)
 - 기본 곡 라이브러리: `public/library.json` (교체 가능)
 - 성경 슬라이드 템플릿: `public/bible-template.pptx` (교체 가능, 앱에서 세션별 업로드도 지원)
 - 성경 본문 데이터: `public/bible-text/*.json` (번역본별 전체 본문, 실제 사용 시에만 지연 로드)
 - 서로 다른 템플릿에서 생성된 슬라이드 묶음은 `src/lib/pptxMerge.ts`가 하나의 파일로 합칩니다
   (레이아웃·마스터·테마·이미지가 겹치지 않도록 이름을 바꿔 복사합니다).
+- `src/lib/pptxPackage.ts`는 노트/댓글 관계를 함께 정리하고, 다운로드 직전에 모든 내부 관계와
+  슬라이드 목록을 검증해 PowerPoint 복구 경고가 발생하는 손상 파일을 차단합니다.
+- Back deck 원본은 저장소의 파일 크기 전송 제약을 피하기 위해 `assets/pptx/back-slides/*.b64`에
+  분할 보관하며, `scripts/assemble-pptx-assets.mjs`가 개발·테스트·빌드 전에 체크섬을 확인해
+  `public/back-slides.pptx`로 자동 복원합니다.
 - 데스크톱 앱(별도 프로젝트): `desktop/` — Tauri 기반 예배 셋리스트 관리 앱, 자세한 내용은
   `desktop/README.md` 참고
 
@@ -122,18 +134,18 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 ## English Summary
 
 **KCCP PPT Generator** is a single-page app that combines four inputs into one downloaded
-`.pptx`, in this fixed order: **cover/creed → praise (찬양) → prayer → scripture (말씀) →
-sermon (설교) → prayer → announcements (광고)**. The cover, creed, and prayer slides are pulled
-as-is from `public/service-template.pptx` (the church's own weekly deck); everything else is
-generated from what you fill in and spliced into place:
+`.pptx`, in this fixed order: **front slides → praise (찬양) → prayer → scripture (말씀) →
+sermon (설교) → prayer → announcements (광고) → back slides**. The supplied front and back decks
+are mandatory; the prayer and announcement layouts come from `public/service-template.pptx`.
 
 1. **Praise lyrics** — a praise set-list (콘티) PDF becomes per-section lyric slides. Auto-detects
    date, sermon title, song list, and keys from the cover page, pre-fills lyrics from a bundled
-   song library, and supports section tokens (V/PC/C/B/I) — each part renders once, in its
-   first-appearance order, regardless of repeats in the conti order.
+   song library, excludes the final community-confession song, and supports section tokens
+   (V/PC/C/B/I) — each part renders once, in its first-appearance order.
 2. **Scripture** (ported from
    [edcho1012/kccp-bible-slide](https://github.com/edcho1012/kccp-bible-slide)) — free-text verse
-   references (`행1:8-10 요3:16`) become verse slides in up to two translations.
+   references (`행1:8-10 요3:16`) become verse slides in up to two translations. The conti's
+   scripture reference and sermon title automatically populate the two scripture input steps.
 3. **Sermon** — an uploaded `.pptx` from the pastor is inserted verbatim right after the scripture
    slides.
 4. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split

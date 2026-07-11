@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { classifyPages, matchSongsToPages, parseCoverText } from '../src/lib/contiText';
+import {
+  classifyPages,
+  matchSongsToPages,
+  parseCoverText,
+  splitLyricsAndConfessionSongs,
+} from '../src/lib/contiText';
 
 const coverText = readFileSync(join(__dirname, 'fixtures', 'cover.txt'), 'utf-8');
 const notesText = readFileSync(join(__dirname, 'fixtures', 'notes.txt'), 'utf-8');
@@ -56,5 +61,18 @@ describe('matchSongsToPages', () => {
     expect(info.songs.find((s) => s.title === '주 은혜임을')?.pageIndex).toBe(4);
     expect(info.songs.find((s) => s.title === '주님의 사랑')?.pageIndex).toBe(3);
     expect(info.songs.find((s) => s.title === '입례')?.pageIndex).toBe(5);
+  });
+});
+
+describe('splitLyricsAndConfessionSongs', () => {
+  it('excludes the final conti song from generated lyrics', () => {
+    const info = parseCoverText(coverText)!;
+    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(info.songs);
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '주 은혜임을']);
+    expect(confessionSong?.title).toBe('입례');
+  });
+
+  it('handles an empty conti', () => {
+    expect(splitLyricsAndConfessionSongs([])).toEqual({ lyricsSongs: [] });
   });
 });

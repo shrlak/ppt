@@ -16,9 +16,17 @@ export interface BibleGeneratorState {
 interface Props {
   /** Fired whenever any input changes, so the parent can build the combined deck. */
   onStateChange: (state: BibleGeneratorState) => void;
+  autoFillVersion?: number;
+  autoVerseInput?: string;
+  autoSermonTitle?: string;
 }
 
-export default function BibleSlideGenerator({ onStateChange }: Props) {
+export default function BibleSlideGenerator({
+  onStateChange,
+  autoFillVersion = 0,
+  autoVerseInput = '',
+  autoSermonTitle = '',
+}: Props) {
   const [verseInput, setVerseInput] = useState('');
   const [sermonTitle, setSermonTitle] = useState('');
   const [koTranslation, setKoTranslation] = useState('nkrv');
@@ -31,6 +39,13 @@ export default function BibleSlideGenerator({ onStateChange }: Props) {
   const { invalidTokens } = verseInput.trim() ? parseVerseInput(verseInput) : { invalidTokens: [] as string[] };
   const previewTokens = verseInput.trim().split(/\s+/).filter(Boolean);
   const translations = enTranslation ? [koTranslation, enTranslation] : [koTranslation];
+
+  useEffect(() => {
+    if (autoFillVersion === 0) return;
+    setVerseInput(autoVerseInput);
+    setSermonTitle(autoSermonTitle);
+    setNotice('찬양 콘티의 본문과 설교 제목을 자동으로 채웠습니다.');
+  }, [autoFillVersion, autoVerseInput, autoSermonTitle]);
 
   useEffect(() => {
     onStateChange({ verseInput, sermonTitle, translations, versesPerSlide, customTemplate });

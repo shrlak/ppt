@@ -51,11 +51,16 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await expect(contiInfo).toContainText('하나님과 화평을 누리자', { timeout: PARSE_TIMEOUT });
   await expect(contiInfo).toContainText('7/11/26', { timeout: PARSE_TIMEOUT });
 
-  // Cover lists 3 songs; a 4th stub may be created from the extra music page.
+  // The final cover song is the 공동체 고백송 and is intentionally excluded.
   const songCards = page.getByTestId('song-card');
   await expect
     .poll(async () => songCards.count(), { timeout: PARSE_TIMEOUT })
-    .toBeGreaterThanOrEqual(3);
+    .toBeGreaterThanOrEqual(2);
+
+  const titles = await songCards
+    .getByTestId('song-title-input')
+    .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
+  expect(titles).not.toContain('입례');
 
   const firstCard = songCards.first();
   await expect(firstCard.getByTestId('song-title-input')).toHaveValue('주님의 사랑', {
@@ -68,6 +73,8 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await expect(page.getByTestId('slide-count')).toContainText(/총 \d+장/, {
     timeout: PARSE_TIMEOUT,
   });
+  await expect(page.getByTestId('bible-verse-input')).toHaveValue('롬5:1-11');
+  await expect(page.getByTestId('bible-sermon-title-input')).toHaveValue('하나님과 화평을 누리자');
 });
 
 test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {
@@ -91,9 +98,9 @@ test('generates a valid pptx from the parsed conti alone', async ({ page }, test
   expect(zip.file('ppt/presentation.xml')).not.toBeNull();
   expect(zip.file('[Content_Types].xml')).not.toBeNull();
 
-  // Combined deck = fixed service slides (intro ×4 + prayer ×2 = 6) + lyrics slides.
+  // Combined deck = front 4 + back 21 + prayer 2 + generated content.
   const slides = slideFileNames(zip);
-  expect(slides.length).toBeGreaterThanOrEqual(10);
+  expect(slides.length).toBeGreaterThanOrEqual(27);
 
   const presentationXml = await zip.file('ppt/presentation.xml')!.async('string');
   const sldIdCount = (presentationXml.match(/<p:sldId /g) ?? []).length;
@@ -170,8 +177,8 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
 
   const zip = await loadPptx(download, testInfo.outputPath('combined.pptx'));
   const slides = slideFileNames(zip);
-  // Fixed slides (intro 4 + prayer 2 + announcement title 1 = 7) + lyrics + bible + 5 announcement slides.
-  expect(slides.length).toBeGreaterThanOrEqual(7 + 5);
+  // Fixed slides (front 4 + back 21 + prayer 2 + announcement title 1) + generated content.
+  expect(slides.length).toBeGreaterThanOrEqual(28 + 5);
 
   const presentationXml = await zip.file('ppt/presentation.xml')!.async('string');
   expect((presentationXml.match(/<p:sldId /g) ?? []).length).toBe(slides.length);
@@ -184,4 +191,5 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
   expect(allText).toContain('요한복음 3:16'); // bible verse
   expect(allText).toContain('새가족 환영'); // announcement item
   expect(allText).toContain('기도'); // fixed prayer slides
+  expect(allText).toContain('공동체 고백송'); // mandatory back slides
 });

@@ -114,3 +114,19 @@ export function matchSongsToPages(
     }
   }
 }
+
+/**
+ * The final song on a KCCP conti is the 공동체 고백송. It is supplied by the
+ * fixed back-slides deck, so only the preceding entries need generated lyric
+ * slides.
+ */
+export function splitLyricsAndConfessionSongs(songs: ContiSongEntry[]): {
+  lyricsSongs: ContiSongEntry[];
+  confessionSong?: ContiSongEntry;
+} {
+  if (songs.length === 0) return { lyricsSongs: [] };
+  return {
+    lyricsSongs: songs.slice(0, -1),
+    confessionSong: songs[songs.length - 1],
+  };
+}

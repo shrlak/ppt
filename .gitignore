@@ -7,3 +7,4 @@ playwright-report
 tsconfig*.tsbuildinfo
 desktop/src-tauri/target
 desktop/src-tauri/gen/schemas
+public/back-slides.pptx

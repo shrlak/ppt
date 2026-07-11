@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRefToken, parseVerseInput, displayRef } from '../src/bible/refParser';
+import { displayRef, normalizeContiScripture, parseRefToken, parseVerseInput } from '../src/bible/refParser';
 
 describe('parseRefToken', () => {
   it('parses a single verse', () => {
@@ -98,5 +98,27 @@ describe('displayRef', () => {
 
   it('flags an unrecognized token', () => {
     expect(displayRef('zzz')).toBe('"zzz" 알 수 없음');
+  });
+});
+
+describe('normalizeContiScripture', () => {
+  it('converts the cover-page chapter/verse style to parser tokens', () => {
+    expect(normalizeContiScripture('로마서 5장 1-11절')).toBe('롬5:1-11');
+    expect(normalizeContiScripture('시편 13편 1-6절')).toBe('시13:1-6');
+    expect(normalizeContiScripture('요한복음 20장 21절')).toBe('요20:21');
+    expect(normalizeContiScripture('로마서 5장 1절-11절')).toBe('롬5:1-11');
+  });
+
+  it('supports cross-chapter ranges and multiple references', () => {
+    expect(normalizeContiScripture('본문: 로마서 8장 28절-9장 1절, 요한복음 3장 16절')).toBe(
+      '롬8:28-9:1 요3:16',
+    );
+  });
+
+  it('produces values accepted by parseVerseInput', () => {
+    const normalized = normalizeContiScripture('로마서 5장 1-11절');
+    const parsed = parseVerseInput(normalized);
+    expect(parsed.invalidTokens).toEqual([]);
+    expect(parsed.refs[0]).toMatchObject({ startChapter: 5, startVerse: 1, endVerse: 11 });
   });
 });

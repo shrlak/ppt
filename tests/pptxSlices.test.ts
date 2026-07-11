@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { extractSlideSubset } from '../src/lib/pptxSlices';
+import { findBrokenRelationships } from '../src/lib/pptxPackage';
 
 const serviceTemplate = readFileSync(join(__dirname, '..', 'public', 'service-template.pptx'));
 
@@ -57,6 +58,8 @@ describe('extractSlideSubset', () => {
         expect(zip.file(resolved), `${path} references missing part ${resolved}`).not.toBeNull();
       }
     }
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+    expect(Object.keys(zip.files).some((path) => path.startsWith('ppt/notesSlides/'))).toBe(false);
   });
 
   it('adds a Content_Types override for every extracted slide', async () => {

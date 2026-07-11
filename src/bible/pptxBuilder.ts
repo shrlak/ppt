@@ -4,6 +4,7 @@
 import JSZip from 'jszip';
 import type { VerseSlideData } from './types';
 import type { VerseSlidePlan } from './versePlanner';
+import { stripNonVisualParts } from '../lib/pptxPackage';
 
 const PLACEHOLDERS: Record<string, string> = {
   title: '{{TITLE}}',
@@ -98,6 +99,7 @@ export async function buildBiblePptx(
 ): Promise<Uint8Array> {
   const { globalData, verseSlides } = plan;
   const zip = await JSZip.loadAsync(templateData);
+  await stripNonVisualParts(zip);
 
   const slideFiles = Object.keys(zip.files)
     .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
@@ -133,7 +135,8 @@ export async function buildBiblePptx(
   const existingNums = slideFiles.map((f) => parseInt(f.match(/\d+/)![0], 10));
   let nextNum = Math.max(...existingNums) + 1;
   let nextRid = Math.max(...[...presRels.matchAll(/rId(\d+)/g)].map((m) => parseInt(m[1], 10))) + 1;
-  let nextSid = Math.max(...[...presentation.matchAll(/id="(\d+)"/g)].map((m) => parseInt(m[1], 10))) + 1;
+  const slideIdSection = presentation.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/)?.[1] ?? '';
+  let nextSid = Math.max(255, ...[...slideIdSection.matchAll(/<p:sldId\b[^>]*id="(\d+)"/g)].map((m) => parseInt(m[1], 10))) + 1;
 
   const getRels = async (name: string): Promise<string | null> => {
     const path = `ppt/slides/_rels/${name}.rels`;

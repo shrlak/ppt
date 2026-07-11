@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContiInfo, LibraryEntry, Song } from '../lib/types';
 import { loadConti, type ContiDocument } from '../lib/contiPdf';
+import { splitLyricsAndConfessionSongs } from '../lib/contiText';
 import {
   fetchBundledLibrary,
   findEntry,
@@ -43,9 +44,11 @@ interface Props {
   onSongsChange: (songs: Song[]) => void;
   /** Fired once the conti cover date is known, so the parent can suggest a file name. */
   onDateDetected?: (date: string | undefined) => void;
+  /** Supplies the sermon title/scripture to the Bible section for automatic filling. */
+  onContiInfoDetected?: (info: ContiInfo) => void;
 }
 
-export default function LyricsGenerator({ onSongsChange, onDateDetected }: Props) {
+export default function LyricsGenerator({ onSongsChange, onDateDetected, onContiInfoDetected }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -123,7 +126,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected }: Props
 
       const next: Song[] = [];
       const assigned = new Set<number>();
-      for (const entry of parsed.info.songs) {
+      const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(parsed.info.songs);
+      const excludedPages = new Set<number>();
+      if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
+
+      for (const entry of lyricsSongs) {
         const hit = findEntry(library, entry.title);
         const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
         song.title = entry.title;
@@ -136,13 +143,14 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected }: Props
       // Music pages the cover didn't list: match against the library by page text,
       // else add a stub the user can fill in while looking at the score image.
       for (const page of parsed.musicPages) {
-        if (assigned.has(page)) continue;
+        if (assigned.has(page) || excludedPages.has(page)) continue;
         const pageText = normalizeTitle(parsed.pageTexts[page - 1] ?? '');
         const hit = library.find((e) => {
           const t = normalizeTitle(e.title);
           return t.length >= 2 && pageText.includes(t);
         });
         if (hit) {
+          if (confessionSong && normalizeTitle(hit.title) === normalizeTitle(confessionSong.title)) continue;
           next.push(songFromLibrary(hit, page));
         } else {
           const stub = blankSong(`새 찬양 (p.${page})`);
@@ -156,6 +164,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected }: Props
       setEdited(false);
       setPageImages({});
       onDateDetected?.(parsed.info.date);
+      onContiInfoDetected?.(parsed.info);
+      if (confessionSong) {
+        setNotice(`마지막 곡 '${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다.`);
+      }
 
       // Render score previews in the background.
       void (async () => {

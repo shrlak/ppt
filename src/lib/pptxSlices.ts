@@ -4,6 +4,7 @@
 // slides (intro, 기도, 광고 title) out of the weekly service template so
 // they can be spliced into the combined deck via mergePptxDecks.
 import JSZip from 'jszip';
+import { stripNonVisualParts } from './pptxPackage';
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -36,6 +37,7 @@ export async function extractSlideSubset(
   if (slideNumbers.length === 0) throw new Error('추출할 슬라이드 번호가 없습니다.');
 
   const zip = await JSZip.loadAsync(templateData);
+  await stripNonVisualParts(zip);
   const orderedNames = await slideOrderOf(zip);
   const keepNames = slideNumbers.map((n) => {
     const name = orderedNames[n - 1];

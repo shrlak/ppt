@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { buildBiblePptx } from '../src/bible/pptxBuilder';
 import type { VerseSlidePlan } from '../src/bible/versePlanner';
+import { findBrokenRelationships } from '../src/lib/pptxPackage';
 
 const template = readFileSync(join(__dirname, '..', 'public', 'bible-template.pptx'));
 
@@ -32,6 +33,8 @@ describe('buildBiblePptx', () => {
     const presentation = await zip.file('ppt/presentation.xml')!.async('string');
     expect(presentation.match(/<p:sldId /g)).toHaveLength(slideFiles.length);
     expect(zip.file('[Content_Types].xml')).not.toBeNull();
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+    expect(Object.keys(zip.files).some((path) => path.startsWith('ppt/notesSlides/'))).toBe(false);
   });
 
   it('substitutes verse body text and range into the right slides', async () => {

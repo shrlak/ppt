@@ -6,6 +6,7 @@
 // download. Notes masters/slides are dropped (cosmetic only, not shown to
 // the congregation).
 import JSZip from 'jszip';
+import { stripNonVisualParts } from './pptxPackage';
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -19,6 +20,7 @@ interface LoadedPkg {
 
 async function loadPkg(data: ArrayBuffer | Uint8Array): Promise<LoadedPkg> {
   const zip = await JSZip.loadAsync(data);
+  await stripNonVisualParts(zip);
   const presentationXml = await zip.file('ppt/presentation.xml')!.async('string');
   const presentationRels = await zip.file('ppt/_rels/presentation.xml.rels')!.async('string');
   return { zip, presentationXml, presentationRels };
@@ -34,11 +36,31 @@ function maxNumberIn(text: string, re: RegExp): number {
 }
 
 function resolveRelTarget(relsXml: string, rId: string): string | null {
-  const m = relsXml.match(new RegExp(`Id="${rId}"[^>]*Target="([^"]+)"`));
-  return m ? m[1] : null;
+  for (const match of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    if (xmlAttr(match[0], 'Id') === rId) return xmlAttr(match[0], 'Target');
+  }
+  return null;
 }
 
-const SUPPORT_DIRS = ['slideLayouts', 'slideMasters', 'theme', 'media', 'fonts'];
+function xmlAttr(tag: string, name: string): string | null {
+  return tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] ?? null;
+}
+
+const SUPPORT_DIRS = [
+  'slideLayouts',
+  'slideMasters',
+  'theme',
+  'media',
+  'fonts',
+  'charts',
+  'embeddings',
+  'diagrams',
+  'activeX',
+  'ctrlProps',
+  'ink',
+  'models',
+  'oleObjects',
+];
 
 /**
  * Merge two standalone .pptx decks: `addition`'s slides are appended after
@@ -89,9 +111,21 @@ export async function mergePptxDecks(
   }
 
   // ---- Renumber addition's slides to continue after base's ----
-  const addSlideFiles = Object.keys(addP.zip.files)
-    .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
-    .sort((a, b) => parseInt(a.match(/\d+/)![0], 10) - parseInt(b.match(/\d+/)![0], 10));
+  const addSlideFiles: string[] = [];
+  const addSlideSection = addP.presentationXml.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);
+  if (addSlideSection) {
+    for (const match of addSlideSection[1].matchAll(/r:id="([^"]+)"/g)) {
+      const target = resolveRelTarget(addP.presentationRels, match[1]);
+      if (target && /^slides\/slide\d+\.xml$/.test(target)) addSlideFiles.push(`ppt/${target}`);
+    }
+  }
+  if (addSlideFiles.length === 0) {
+    addSlideFiles.push(
+      ...Object.keys(addP.zip.files)
+        .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+        .sort((a, b) => parseInt(a.match(/\d+/)![0], 10) - parseInt(b.match(/\d+/)![0], 10)),
+    );
+  }
 
   const slideRenameMap = new Map<string, string>();
   const slideNewNumbers: number[] = [];
@@ -136,10 +170,16 @@ export async function mergePptxDecks(
 
   // ---- [Content_Types].xml: carry over Overrides for renamed parts + any new Default extensions ----
   const addContentTypes = await addP.zip.file('[Content_Types].xml')!.async('string');
+  const addOverrides = new Map<string, string>();
+  for (const match of addContentTypes.matchAll(/<Override\b[^>]*\/>/g)) {
+    const partName = xmlAttr(match[0], 'PartName');
+    const contentType = xmlAttr(match[0], 'ContentType');
+    if (partName && contentType) addOverrides.set(partName, contentType);
+  }
   for (const [oldPath, newPath] of allRenames) {
-    const m = addContentTypes.match(new RegExp(`<Override PartName="/${escapeRegExp(oldPath)}" ContentType="([^"]+)"/>`));
-    if (m) {
-      contentTypes = contentTypes.replace('</Types>', `<Override PartName="/${newPath}" ContentType="${m[1]}"/></Types>`);
+    const contentType = addOverrides.get(`/${oldPath}`);
+    if (contentType) {
+      contentTypes = contentTypes.replace('</Types>', `<Override PartName="/${newPath}" ContentType="${contentType}"/></Types>`);
     }
   }
   for (const newPath of slideRenameMap.values()) {

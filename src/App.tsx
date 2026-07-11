@@ -3,29 +3,31 @@ import LyricsGenerator from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
 import AnnouncementSection from './components/AnnouncementSection';
-import type { Song } from './lib/types';
+import type { ContiInfo, Song } from './lib/types';
 import { planAllSlides, unmatchedTokens } from './lib/slidePlanner';
 import { buildPptx, suggestFileName } from './lib/pptxBuilder';
 import { extractSlideSubset } from './lib/pptxSlices';
 import { mergePptxDecks } from './lib/pptxMerge';
 import { parseAnnouncements, buildAnnouncementDeck } from './lib/announcementBuilder';
 import { loadTranslation } from './bible/bibleData';
-import { parseVerseInput } from './bible/refParser';
+import { normalizeContiScripture, parseVerseInput } from './bible/refParser';
 import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
+import { assertPptxIntegrity } from './lib/pptxPackage';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 
-// Fixed positions (1-based, presentation order) of the reusable slides
-// pulled from public/service-template.pptx. See tests/pptxSlices.test.ts
-// for how these were identified.
+// Fixed positions (1-based, presentation order) of reusable prayer and
+// announcement slides pulled from public/service-template.pptx.
 const SERVICE_SLIDES = {
-  intro: [1, 2, 3, 4],
   prayer1: [17],
   prayer2: [31],
   announcementTitle: [32],
   announcementItemTemplate: 33,
 };
+
+const FRONT_SLIDE_COUNT = 4;
+const BACK_SLIDE_COUNT = 21;
 
 export default function App() {
   const [songs, setSongs] = useState<Song[]>([]);
@@ -43,6 +45,11 @@ export default function App() {
   const [fileNameEdited, setFileNameEdited] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contiBibleAutoFill, setContiBibleAutoFill] = useState({
+    version: 0,
+    verseInput: '',
+    sermonTitle: '',
+  });
 
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
   const handleDateDetected = useCallback(
@@ -53,6 +60,13 @@ export default function App() {
     [fileNameEdited],
   );
   const handleBibleStateChange = useCallback((state: BibleGeneratorState) => setBibleState(state), []);
+  const handleContiInfoDetected = useCallback((info: ContiInfo) => {
+    setContiBibleAutoFill((previous) => ({
+      version: previous.version + 1,
+      verseInput: normalizeContiScripture(info.scripture ?? ''),
+      sermonTitle: info.sermonTitle ?? '',
+    }));
+  }, []);
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
@@ -68,12 +82,22 @@ export default function App() {
     setGenerating(true);
     setError(null);
     try {
-      const serviceTemplate = await fetch(`${BASE}service-template.pptx`).then((r) => {
-        if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
-        return r.arrayBuffer();
-      });
+      const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
+        fetch(`${BASE}service-template.pptx`).then((r) => {
+          if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
+          return r.arrayBuffer();
+        }),
+        fetch(`${BASE}front-slides.pptx`).then((r) => {
+          if (!r.ok) throw new Error('Front slides 파일을 불러오지 못했습니다.');
+          return r.arrayBuffer();
+        }),
+        fetch(`${BASE}back-slides.pptx`).then((r) => {
+          if (!r.ok) throw new Error('Back slides 파일을 불러오지 못했습니다.');
+          return r.arrayBuffer();
+        }),
+      ]);
 
-      let merged: Uint8Array = await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.intro);
+      let merged: Uint8Array = new Uint8Array(frontSlides);
 
       if (songs.length > 0) {
         const lyricsTemplate = await fetch(`${BASE}template.pptx`).then((r) => {
@@ -114,6 +138,10 @@ export default function App() {
         );
       }
 
+      // The full closing deck is mandatory and always follows announcements.
+      merged = await mergePptxDecks(merged, backSlides);
+      await assertPptxIntegrity(merged);
+
       const blob = new Blob([merged.buffer as ArrayBuffer], {
         type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       });
@@ -136,10 +164,11 @@ export default function App() {
     .map((s) => ({ title: s.title, tokens: unmatchedTokens(s) }))
     .filter((w) => w.tokens.length > 0);
 
-  // Fixed slides (intro + 2 prayer slides) always count; 말씀/설교/광고 title
-  // only appear when there's matching content.
+  // Front/back + 2 prayer slides always count; the announcement title only
+  // appears when there is matching content.
   const fixedSlideCount =
-    SERVICE_SLIDES.intro.length +
+    FRONT_SLIDE_COUNT +
+    BACK_SLIDE_COUNT +
     SERVICE_SLIDES.prayer1.length +
     SERVICE_SLIDES.prayer2.length +
     (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0);
@@ -163,10 +192,19 @@ export default function App() {
       )}
 
       <h2 className="section-title">🎵 찬양</h2>
-      <LyricsGenerator onSongsChange={handleSongsChange} onDateDetected={handleDateDetected} />
+      <LyricsGenerator
+        onSongsChange={handleSongsChange}
+        onDateDetected={handleDateDetected}
+        onContiInfoDetected={handleContiInfoDetected}
+      />
 
       <h2 className="section-title">📖 성경 말씀</h2>
-      <BibleSlideGenerator onStateChange={handleBibleStateChange} />
+      <BibleSlideGenerator
+        onStateChange={handleBibleStateChange}
+        autoFillVersion={contiBibleAutoFill.version}
+        autoVerseInput={contiBibleAutoFill.verseInput}
+        autoSermonTitle={contiBibleAutoFill.sermonTitle}
+      />
 
       <h2 className="section-title">🎤 설교</h2>
       <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
@@ -183,7 +221,7 @@ export default function App() {
           </div>
         )}
         <p className="input-hint" style={{ marginBottom: 14 }}>
-          순서: 표지·신앙고백 → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고
+          순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
         </p>
         <div className="generate-row">
           <label>

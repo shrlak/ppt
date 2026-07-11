@@ -7,9 +7,12 @@ import { buildPptx } from '../src/lib/pptxBuilder';
 import { buildBiblePptx } from '../src/bible/pptxBuilder';
 import type { Song } from '../src/lib/types';
 import type { VerseSlidePlan } from '../src/bible/versePlanner';
+import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptxPackage';
 
 const lyricsTemplate = readFileSync(join(__dirname, '..', 'public', 'template.pptx'));
 const bibleTemplate = readFileSync(join(__dirname, '..', 'public', 'bible-template.pptx'));
+const frontSlides = readFileSync(join(__dirname, '..', 'public', 'front-slides.pptx'));
+const backSlides = readFileSync(join(__dirname, '..', 'public', 'back-slides.pptx'));
 
 const songs: Song[] = [
   {
@@ -91,6 +94,7 @@ describe('mergePptxDecks', () => {
         expect(zip.file(resolved), `${slidePath} references missing part ${resolved}`).not.toBeNull();
       }
     }
+    expect(await findBrokenRelationships(zip)).toEqual([]);
   });
 
   it('does not corrupt the base deck\'s own theme/master content', async () => {
@@ -125,5 +129,14 @@ describe('mergePptxDecks', () => {
     const emptyZip = new JSZip();
     // Minimal but slide-less package should be rejected rather than silently no-op.
     await expect(mergePptxDecks(lyricsDeck, await emptyZip.generateAsync({ type: 'uint8array' }))).rejects.toThrow();
+  });
+
+  it('merges the supplied front and back decks without PowerPoint repair relationships', async () => {
+    const merged = await mergePptxDecks(frontSlides, backSlides);
+    const zip = await JSZip.loadAsync(merged);
+    expect(slideFiles(zip)).toHaveLength(25);
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+    await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+    expect(Object.keys(zip.files).some((path) => path.startsWith('ppt/notesSlides/'))).toBe(false);
   });
 });

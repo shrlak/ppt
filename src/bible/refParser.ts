@@ -2,7 +2,7 @@
 // structured BibleRef entries. Ported from kccp-bible-slide's
 // src/app/api/generate/route.ts (parseInput), adapted to be reusable
 // for both the live preview and the actual generation request.
-import { findBookByAbbr, SORTED_ABBRS } from './books';
+import { BIBLE_BOOKS, findBookByAbbr, SORTED_ABBRS } from './books';
 import type { BibleRef } from './types';
 
 /** Splits a token into its leading book abbreviation and the rest, e.g. "삼상1:1" -> ["삼상","1:1"]. */
@@ -70,6 +70,49 @@ export function parseVerseInput(input: string): { refs: BibleRef[]; invalidToken
     else invalidTokens.push(token);
   }
   return { refs, invalidTokens };
+}
+
+/**
+ * Convert the human-readable scripture style used on a worship conti cover
+ * into the compact tokens accepted by parseVerseInput.
+ *
+ * Examples:
+ *   로마서 5장 1-11절 -> 롬5:1-11
+ *   시편 13편 1-6절   -> 시13:1-6
+ *   요한복음 20장 21절 -> 요20:21
+ */
+export function normalizeContiScripture(input: string): string {
+  let value = input
+    .replace(/^\s*본문\s*[:：]\s*/, '')
+    .replace(/[–—~〜]/g, '-')
+    .replace(/[，,;；]+/g, ' ')
+    .trim();
+
+  const books = [...BIBLE_BOOKS].sort((a, b) => b.nameKo.length - a.nameKo.length);
+  for (const book of books) {
+    const abbr = book.abbrKo[0];
+    value = value.replaceAll(book.nameKo, abbr);
+  }
+
+  value = value
+    // Cross-chapter range: 롬8장 28절-9장 1절
+    .replace(/(\d+)\s*[장편]\s*(\d+)\s*절?\s*-\s*(\d+)\s*[장편]\s*(\d+)\s*절?/g, '$1:$2-$3:$4')
+    // Same-chapter verse range: 롬8장 28-30절
+    .replace(/(\d+)\s*[장편]\s*(\d+)\s*절?\s*-\s*(\d+)\s*절?/g, '$1:$2-$3')
+    // One verse: 요3장 16절
+    .replace(/(\d+)\s*[장편]\s*(\d+)\s*절/g, '$1:$2')
+    // Whole chapter range: 시23-24편
+    .replace(/(\d+)\s*-\s*(\d+)\s*[장편]/g, '$1-$2')
+    // One whole chapter: 시23편
+    .replace(/(\d+)\s*[장편]/g, '$1')
+    .replace(/절/g, '')
+    .replace(/\s*:\s*/g, ':')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/([가-힣]+)\s+(?=\d)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return value;
 }
 
 /** Human-readable display of a ref for the live preview list, e.g. "로마서 8:28". */
