@@ -4,11 +4,20 @@ import { formatOrder, parseOrder } from '../lib/orderParser';
 import { planSlides, unmatchedTokens } from '../lib/slidePlanner';
 import { nextAvailableLabel } from './songLabels';
 
+/** Live status of auto-recognizing a song's score image. */
+export interface RecogState {
+  status: 'running' | 'done' | 'error';
+  progress?: number;
+  message?: string;
+}
+
 interface Props {
   song: Song;
   index: number;
   total: number;
   pageImage?: string;
+  recog?: RecogState;
+  onRecognize?: () => void;
   onChange: (song: Song) => void;
   onMove: (id: string, delta: -1 | 1) => void;
   onRemove: (id: string) => void;
@@ -24,6 +33,8 @@ export default function SongCard({
   index,
   total,
   pageImage,
+  recog,
+  onRecognize,
   onChange,
   onMove,
   onRemove,
@@ -112,6 +123,31 @@ export default function SongCard({
           <div className="score-pane">
             <img src={pageImage} alt="악보 미리보기" onClick={onZoom} />
             <span className="score-hint">클릭하면 크게 보며 가사를 입력할 수 있어요 (p.{song.pageIndex})</span>
+            {onRecognize && (
+              <div className="recog-box" data-testid="recog-box">
+                {recog?.status === 'running' ? (
+                  <div className="recog-running">
+                    <div className="spinner" />
+                    <span>
+                      가사 인식 중…
+                      {typeof recog.progress === 'number' ? ` ${Math.round(recog.progress * 100)}%` : ''}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <button className="btn btn-chip" data-testid="recognize-btn" onClick={onRecognize}>
+                      {recog?.status === 'done' ? '↻ 다시 인식' : '✨ 가사 자동 인식'}
+                    </button>
+                    {recog?.status === 'error' && (
+                      <span className="recog-error" title={recog.message}>
+                        인식 실패 — 다시 시도하거나 직접 입력하세요.
+                      </span>
+                    )}
+                    {recog?.status === 'done' && <span className="recog-done">✓ 인식 완료 · 확인해 주세요</span>}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ) : song.pageIndex != null ? (
           <div className="score-pane score-loading">악보 미리보기 준비 중… (p.{song.pageIndex})</div>

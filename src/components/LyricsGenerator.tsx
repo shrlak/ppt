@@ -11,11 +11,18 @@ import {
   saveUserLibrary,
   upsertEntry,
 } from '../lib/library';
-import SongCard from './SongCard';
+import SongCard, { type RecogState } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
+import AiSettingsPanel from './AiSettingsPanel';
+import { isRecognitionReady, loadAiSettings, saveAiSettings, type AiSettings } from '../lib/aiSettings';
+import { applyScoreToSong, recognizeScore } from '../lib/scoreRecognition';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
+
+function songHasLyrics(song: Song): boolean {
+  return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
+}
 
 function songFromLibrary(entry: LibraryEntry, pageIndex?: number): Song {
   return {
@@ -57,9 +64,13 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
+  const [recog, setRecog] = useState<Record<string, RecogState>>({});
   const [zoomPage, setZoomPage] = useState<number | null>(null);
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
+  const aiSettingsRef = useRef(aiSettings);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -70,6 +81,50 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     })();
     return () => docRef.current?.destroy();
   }, []);
+
+  useEffect(() => {
+    aiSettingsRef.current = aiSettings;
+  }, [aiSettings]);
+
+  const updateAiSettings = useCallback((next: AiSettings) => {
+    setAiSettings(next);
+    saveAiSettings(next);
+  }, []);
+
+  /** Recognize one song's score image and merge the draft in, without clobbering edits. */
+  const recognizeSong = useCallback(async (songId: string, pageIndex: number) => {
+    const doc = docRef.current;
+    const settings = aiSettingsRef.current;
+    if (!doc || !isRecognitionReady(settings)) return;
+    setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: 0 } }));
+    try {
+      const image = await doc.renderPage(pageIndex, 1240);
+      const parsed = await recognizeScore(image, settings, (p) =>
+        setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: p } })),
+      );
+      setSongs((list) => list.map((s) => (s.id === songId ? applyScoreToSong(s, parsed) : s)));
+      setRecog((r) => ({ ...r, [songId]: { status: 'done' } }));
+    } catch (e) {
+      setRecog((r) => ({
+        ...r,
+        [songId]: { status: 'error', message: e instanceof Error ? e.message : String(e) },
+      }));
+    }
+  }, []);
+
+  /** Card button: recognize when configured, otherwise open the settings panel. */
+  const handleRecognizeClick = useCallback(
+    (song: Song) => {
+      if (song.pageIndex == null) return;
+      if (!isRecognitionReady(aiSettingsRef.current)) {
+        setNotice('먼저 “자동 인식(AI)” 설정에서 엔진을 고르거나 무료 키를 입력해 주세요.');
+        setAiOpen(true);
+        return;
+      }
+      void recognizeSong(song.id, song.pageIndex);
+    },
+    [recognizeSong],
+  );
 
   useEffect(() => {
     onSongsChange(songs);
@@ -175,6 +230,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       setSongs(next);
       setEdited(false);
       setPageImages({});
+      setRecog({});
       onDateDetected?.(parsed.info.date);
       onContiInfoDetected?.(parsed.info);
       if (!hasCover && next.length > 0) {
@@ -198,6 +254,19 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           }
         }
       })();
+
+      // Auto-recognize lyrics for new songs (a score page, no lyrics yet) once
+      // recognition is configured. Runs one at a time to stay within free API
+      // rate limits, and is skipped under browser automation (deterministic tests).
+      const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
+      if (isRecognitionReady(aiSettingsRef.current) && !isAutomated) {
+        const targets = next.filter((s) => s.pageIndex != null && !songHasLyrics(s));
+        void (async () => {
+          for (const s of targets) {
+            await recognizeSong(s.id, s.pageIndex!);
+          }
+        })();
+      }
 
       if (next.length === 0) {
         setError('콘티에서 곡을 찾지 못했습니다. 곡을 직접 추가해 주세요.');
@@ -343,6 +412,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             index={idx}
             total={songs.length}
             pageImage={song.pageIndex != null ? pageImages[song.pageIndex] : undefined}
+            recog={recog[song.id]}
+            onRecognize={song.pageIndex != null ? () => handleRecognizeClick(song) : undefined}
             onChange={updateSong}
             onMove={moveSong}
             onRemove={removeSong}
@@ -393,6 +464,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           <button className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
             📚 라이브러리 관리
           </button>
+          <button className="btn btn-ghost" data-testid="ai-settings-open" onClick={() => setAiOpen(true)}>
+            ✨ 자동 인식(AI)
+          </button>
         </div>
       </section>
 
@@ -404,6 +478,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             onImport={importLibrary}
             onAdd={addFromLibrary}
           />
+        </Modal>
+      )}
+      {aiOpen && (
+        <Modal title="✨ 가사 자동 인식 설정" onClose={() => setAiOpen(false)}>
+          <AiSettingsPanel settings={aiSettings} onChange={updateAiSettings} />
         </Modal>
       )}
       {zoomPage != null && pageImages[zoomPage] && (
