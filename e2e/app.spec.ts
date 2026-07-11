@@ -29,7 +29,9 @@ function slideFileNames(zip: JSZip): string[] {
 
 test('loads the app shell', async ({ page }) => {
   await page.goto('./');
-  await expect(page.getByText('찬양 가사 슬라이드 생성기').first()).toBeVisible();
+  await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
+  await expect(page.getByTestId('tab-lyrics')).toBeVisible();
+  await expect(page.getByTestId('tab-bible')).toBeVisible();
   await expect(page.getByTestId('generate-pptx')).toBeVisible();
 });
 
@@ -123,4 +125,28 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
 
   const zip = await loadPptx(download, testInfo.outputPath('manual.pptx'));
   expect(slideFileNames(zip).length).toBeGreaterThanOrEqual(2);
+});
+
+test('generates a bible verse slide deck', async ({ page }, testInfo) => {
+  await page.goto('./');
+  await page.getByTestId('tab-bible').click();
+
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  await expect(page.getByTestId('bible-verse-preview')).toContainText('요한복음 3:16');
+
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('bible-generate').click();
+  // Fetching + parsing a ~4MB translation JSON can take a moment in CI.
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('bible.pptx'));
+  expect(zip.file('ppt/presentation.xml')).not.toBeNull();
+  const slides = slideFileNames(zip);
+  expect(slides.length).toBeGreaterThan(0);
+
+  const allText = (
+    await Promise.all(slides.map((f) => zip.file(f)!.async('string')))
+  ).join('\n');
+  expect(allText).toContain('요한복음 3:16');
+  expect(allText).not.toContain('{{BODY}}');
 });
