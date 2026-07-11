@@ -5,3 +5,5 @@ playwright-report
 *.local
 .DS_Store
 tsconfig*.tsbuildinfo
+desktop/src-tauri/target
+desktop/src-tauri/gen/schemas

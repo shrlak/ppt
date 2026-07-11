@@ -88,14 +88,15 @@ describe('buildPptx', () => {
     }
   });
 
-  it('chunks long sections across multiple slides', async () => {
+  it('chunks long sections across multiple slides, each part once', async () => {
     const out = await buildPptx(template, [songA]);
     const zip = await JSZip.loadAsync(out);
-    // songA: title, V1(2), C(4), C(1), title, C(4), C(1) = 7 slides
+    // songA: title, V1(2 lines -> 1 slide), C(5 lines -> 4+1 slides) = 4 slides.
+    // Repeats in the 콘티 order (I, C again) add nothing further.
     const slideFiles = Object.keys(zip.files).filter((f) =>
       /^ppt\/slides\/slide\d+\.xml$/.test(f),
     );
-    expect(slideFiles).toHaveLength(7);
+    expect(slideFiles).toHaveLength(4);
     const slide4 = await zip.file('ppt/slides/slide4.xml')!.async('string');
     expect(slide4).toContain('후렴 5');
   });

@@ -7,7 +7,7 @@
 ## 기능
 
 - **콘티 표지 자동 인식** — 날짜, 설교 제목, 곡 목록과 키(Key)를 표지에서 자동으로 읽어옵니다.
-- **파트별 가사 관리** — V/PC/C/B/I 파트 구분, 파트 순서 지정, `x2` 반복 표기를 지원합니다.
+- **파트별 가사 관리** — V/PC/C/B/I 파트 구분과 파트 순서 지정을 지원합니다. 실제 예배에서는 절·후렴이 여러 번 반복되므로, 슬라이드는 콘티 순서를 그대로 펼치지 않고 **각 파트를 최소 1장씩만** 생성합니다 (반복은 진행자가 화면에서 되돌아가며 사용). 슬라이드 순서는 콘티에 처음 등장하는 파트 순서를 따릅니다.
 - **곡 라이브러리** — 입력한 곡을 저장하고 다음 콘티에서 재사용할 수 있습니다. 라이브러리에 있는 곡은 업로드 직후 가사가 자동으로 채워집니다.
 - **악보 페이지 미리보기** — 스캔된 악보 페이지를 보면서 가사를 입력할 수 있습니다.
 - **템플릿 기반 PPT 생성** — 지정된 템플릿 서식 그대로 슬라이드를 만들어 `.pptx`로 다운로드합니다.
@@ -27,7 +27,8 @@
 | `C` | 후렴 (Chorus) |
 | `B` | 브릿지 (Bridge) |
 | `I` | 간주 — 곡 제목 슬라이드 표시 |
-| `Cx2` | 해당 파트 반복 (후렴 2번) |
+
+`Cx2`처럼 순서에 반복이 있어도 해당 파트 슬라이드는 한 번만 생성됩니다. `기도`처럼 알 수 없는 토큰은 무시됩니다.
 
 ## 로컬 개발
 
@@ -65,4 +66,4 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
 ## English Summary
 
-A web app that turns a praise set-list (conti) PDF into per-section lyric slides as a PPTX file. It auto-detects the date, sermon title, song list, and keys from the cover page, pre-fills lyrics from a bundled song library, supports section tokens (V/PC/C/B/I, `x2` repeats) for slide ordering, and generates slides from a PPTX template (`public/template.pptx`). Built with Vite + React + TypeScript; deployed to GitHub Pages via GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). Local dev: `npm install && npm run dev`; e2e tests: `npm run build && CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e`.
+A web app that turns a praise set-list (conti) PDF into per-section lyric slides as a PPTX file. It auto-detects the date, sermon title, song list, and keys from the cover page, pre-fills lyrics from a bundled song library, supports section tokens (V/PC/C/B/I) for slide ordering — each part is generated only once, in its first-appearance order, regardless of repeats in the conti order — and generates slides from a PPTX template (`public/template.pptx`). Built with Vite + React + TypeScript; deployed to GitHub Pages via GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). Local dev: `npm install && npm run dev`; e2e tests: `npm run build && CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e`.

@@ -40,8 +40,8 @@ describe('findSection', () => {
   });
 });
 
-describe('planSlides', () => {
-  it('always leads with a title slide and dedupes the leading I', () => {
+describe('planSlides (minimal parts, no 콘티-order expansion)', () => {
+  it('leads with a single title slide', () => {
     const s = song({
       sections: [{ label: 'V1', lines: lines(2) }],
       order: ['I', 'V1'],
@@ -52,13 +52,39 @@ describe('planSlides', () => {
     expect(plans[1].kind).toBe('lyrics');
   });
 
-  it('renders a mid-order I as another title slide', () => {
+  it('emits each part exactly once even when the order repeats it', () => {
+    const s = song({
+      sections: [
+        { label: 'V1', lines: lines(2) },
+        { label: 'PC', lines: lines(2) },
+        { label: 'C', lines: lines(2) },
+      ],
+      order: ['I', 'V1', 'PC', 'C', 'I', 'V1', 'PC', 'C', 'C'],
+    });
+    const plans = planSlides(s);
+    // title + V1 + PC + C — repeats and mid-order 간주 add nothing
+    expect(plans.map((p) => p.kind)).toEqual(['title', 'lyrics', 'lyrics', 'lyrics']);
+  });
+
+  it('dedupes aliased tokens resolving to the same section (C1/C2 → C)', () => {
     const s = song({
       sections: [{ label: 'C', lines: lines(2) }],
-      order: ['I', 'C', 'I', 'C'],
+      order: ['C1', 'C2'],
     });
-    const kinds = planSlides(s).map((p) => p.kind);
-    expect(kinds).toEqual(['title', 'lyrics', 'title', 'lyrics']);
+    expect(planSlides(s)).toHaveLength(2);
+  });
+
+  it('orders parts by first appearance in the 콘티 order', () => {
+    const s = song({
+      sections: [
+        { label: 'V1', lines: ['verse'] },
+        { label: 'C', lines: ['chorus'] },
+      ],
+      order: ['C', 'V1', 'C'],
+    });
+    const plans = planSlides(s);
+    expect(plans[1].lines).toEqual(['chorus']);
+    expect(plans[2].lines).toEqual(['verse']);
   });
 
   it('chunks a 10-line section into 4/4/2', () => {
@@ -89,15 +115,7 @@ describe('planSlides', () => {
     expect(planSlides(s)).toHaveLength(2);
   });
 
-  it('repeats sections for repeated tokens', () => {
-    const s = song({
-      sections: [{ label: 'C', lines: lines(4) }],
-      order: ['C', 'C'],
-    });
-    expect(planSlides(s).filter((p) => p.kind === 'lyrics')).toHaveLength(2);
-  });
-
-  it('falls back to all sections when order is empty', () => {
+  it('includes all sections once when order is empty', () => {
     const s = song({
       sections: [
         { label: 'V1', lines: lines(2) },

@@ -41,24 +41,28 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-/** Plan the slides for one song: a leading title slide, then lyric slides per order token. */
+/**
+ * Plan the slides for one song: a title slide, then each part exactly ONCE.
+ *
+ * The 콘티 order (e.g. I-V1-V2-PC-C-간주-V1-V2-PC-C-C) is NOT expanded into
+ * repeated slides — repeats are handled live by the operator jumping back.
+ * The order determines which parts appear and their first-appearance order;
+ * with no order given, every section is included in its listed order.
+ */
 export function planSlides(song: Song): SlidePlan[] {
   const linesPerSlide =
     song.linesPerSlide && song.linesPerSlide >= 1 ? song.linesPerSlide : DEFAULT_LINES_PER_SLIDE;
   const plans: SlidePlan[] = [{ kind: 'title', title: song.title }];
 
-  // With no order given, show every section in listed order.
-  const order = song.order.length > 0 ? song.order : song.sections.map((s) => s.label);
+  const tokens = song.order.length > 0 ? song.order : song.sections.map((s) => s.label);
 
-  let atStart = true;
-  for (const token of order) {
-    if (token === 'I') {
-      // The intro is already the leading title slide; later interludes repeat it.
-      if (!atStart) plans.push({ kind: 'title', title: song.title });
-      continue;
-    }
-    atStart = false;
-    const lines = usableLines(findSection(song.sections, token));
+  const seen = new Set<Section>();
+  for (const token of tokens) {
+    if (token === 'I') continue; // the leading title slide covers intro/간주
+    const section = findSection(song.sections, token);
+    if (!section || seen.has(section)) continue;
+    seen.add(section);
+    const lines = usableLines(section);
     if (lines.length === 0) continue;
     for (const group of chunk(lines, linesPerSlide)) {
       plans.push({ kind: 'lyrics', title: song.title, lines: group });
