@@ -23,13 +23,51 @@ export function xmlEscape(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/** "7/11/26" → "7.11.26 찬양 가사.pptx" */
-export function suggestFileName(date?: string): string {
-  if (date) {
-    const compact = date.replace(/\s+/g, '').replace(/\//g, '.');
-    return `${compact} 찬양 가사.pptx`;
+function parseLocalDate(value?: string): Date | null {
+  if (!value) return null;
+
+  const normalized = value.trim();
+  const yearFirst = normalized.match(/^(\d{4})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{1,2})$/);
+  const yearLast = normalized.match(/^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})$/);
+  const korean = normalized.match(/^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일?$/);
+
+  const parts = yearFirst
+    ? { year: Number(yearFirst[1]), month: Number(yearFirst[2]), day: Number(yearFirst[3]) }
+    : yearLast
+      ? {
+          year: yearLast[3].length === 2 ? 2000 + Number(yearLast[3]) : Number(yearLast[3]),
+          month: Number(yearLast[1]),
+          day: Number(yearLast[2]),
+        }
+      : korean
+        ? { year: Number(korean[1]), month: Number(korean[2]), day: Number(korean[3]) }
+        : null;
+
+  if (!parts) return null;
+  const parsed = new Date(parts.year, parts.month - 1, parts.day);
+  if (
+    parsed.getFullYear() !== parts.year ||
+    parsed.getMonth() !== parts.month - 1 ||
+    parsed.getDate() !== parts.day
+  ) {
+    return null;
   }
-  return '찬양 가사.pptx';
+  return parsed;
+}
+
+function sundayOnOrAfter(date: Date): Date {
+  const sunday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  sunday.setDate(sunday.getDate() + ((7 - sunday.getDay()) % 7));
+  return sunday;
+}
+
+/** "7/11/26" (Saturday) → "0712.pptx" (that week's Sunday). */
+export function suggestFileName(date?: string, today = new Date()): string {
+  const sourceDate = parseLocalDate(date) ?? today;
+  const sunday = sundayOnOrAfter(sourceDate);
+  const month = String(sunday.getMonth() + 1).padStart(2, '0');
+  const day = String(sunday.getDate()).padStart(2, '0');
+  return `${month}${day}.pptx`;
 }
 
 /** Round a DrawingML font size (in 1/100 pt) to a clean value. */

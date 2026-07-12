@@ -29,18 +29,35 @@ function slideFileNames(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
 }
 
-test('loads the app shell with every section on one page', async ({ page }) => {
+async function moveFromLyricsToDownload(page: Page): Promise<void> {
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('wizard-next-bible').click();
+  await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-announcement').click();
+  await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
+}
+
+async function moveFromBibleToDownload(page: Page): Promise<void> {
+  await page.getByTestId('wizard-next-bible').click();
+  await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-announcement').click();
+  await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
+}
+
+test('moves through the five-step wizard with next and back buttons', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
-  await expect(page.getByText('🎵 찬양')).toBeVisible();
-  await expect(page.getByText('📖 성경 말씀')).toBeVisible();
-  await expect(page.getByText('🎤 설교')).toBeVisible();
-  await expect(page.getByText('📢 광고')).toBeVisible();
-  await expect(page.getByTestId('generate-pptx')).toBeVisible();
-  // Everything lives on one page — the lyrics upload and the bible verse
-  // input are both present without switching tabs.
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+  await expect(page.getByTestId('wizard-panel-bible')).toBeHidden();
   await expect(page.getByTestId('pdf-input')).toBeAttached();
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeHidden();
+  await expect(page.getByTestId('wizard-panel-bible')).toBeVisible();
   await expect(page.getByTestId('bible-verse-input')).toBeVisible();
+
+  await page.getByTestId('wizard-back-bible').click();
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 });
 
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
@@ -70,9 +87,7 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
     timeout: PARSE_TIMEOUT,
   });
 
-  await expect(page.getByTestId('slide-count')).toContainText(/총 \d+장/, {
-    timeout: PARSE_TIMEOUT,
-  });
+  await page.getByTestId('wizard-next-lyrics').click();
   await expect(page.getByTestId('bible-verse-input')).toHaveValue('롬5:1-11');
   await expect(page.getByTestId('bible-sermon-title-input')).toHaveValue('하나님과 화평을 누리자');
 });
@@ -86,12 +101,18 @@ test('generates a valid pptx from the parsed conti alone', async ({ page }, test
     timeout: PARSE_TIMEOUT,
   });
 
+  await moveFromLyricsToDownload(page);
+  await expect(page.getByTestId('slide-count')).toContainText(/총 \d+장/, {
+    timeout: PARSE_TIMEOUT,
+  });
+
   const dlPromise = page.waitForEvent('download');
   await page.getByTestId('generate-pptx').click();
   const download = await dlPromise;
 
-  // The app derives the file name from the conti date.
-  await expect(page.getByTestId('filename-input')).toHaveValue('7.11.26 찬양 가사.pptx');
+  // The Saturday conti date is named after that week's Sunday.
+  await expect(page.getByTestId('filename-input')).toHaveValue('0712.pptx');
+  expect(download.suggestedFilename()).toBe('0712.pptx');
 
   const zip = await loadPptx(download, testInfo.outputPath('conti.pptx'));
 
@@ -127,6 +148,7 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
   await expect(songCards).toHaveCount(1, { timeout: PARSE_TIMEOUT });
   await expect(songCards.first().getByTestId('song-title-input')).not.toHaveValue('');
 
+  await moveFromLyricsToDownload(page);
   const dlPromise = page.waitForEvent('download');
   await page.getByTestId('generate-pptx').click();
   const download = await dlPromise;
@@ -142,14 +164,11 @@ test('auto-recognition settings: pick an engine and persist the Gemini key', asy
   const keyInput = page.getByTestId('gemini-key-input');
   await expect(keyInput).toBeVisible();
 
-  // The key field belongs to the Gemini engine; switching to on-device OCR hides it.
   await page.locator('.ai-engine', { hasText: '브라우저 OCR' }).click();
   await expect(keyInput).toBeHidden();
 
-  // Back to Gemini, enter a key, close, and reopen — it is remembered locally.
   await page.locator('.ai-engine', { hasText: 'Gemini' }).click();
   await expect(keyInput).toBeVisible();
-  // Web cross-check is on by default; turn it off so persistence is exercised too.
   const searchToggle = page.getByTestId('gemini-search-toggle');
   await expect(searchToggle).toBeChecked();
   await searchToggle.uncheck();
@@ -164,9 +183,11 @@ test('auto-recognition settings: pick an engine and persist the Gemini key', asy
 test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   await page.goto('./');
 
+  await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('bible-verse-input').fill('요3:16');
   await expect(page.getByTestId('bible-verse-preview')).toContainText('요한복음 3:16');
 
+  await moveFromBibleToDownload(page);
   const dlPromise = page.waitForEvent('download');
   await page.getByTestId('generate-pptx').click();
   const download = await dlPromise;
@@ -187,13 +208,17 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
   await page.goto('./');
   await uploadExamplePdf(page);
 
+  await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('bible-verse-input').fill('요3:16');
   await expect(page.getByTestId('bible-verse-preview')).toContainText('요한복음 3:16');
 
+  await page.getByTestId('wizard-next-bible').click();
+  await page.getByTestId('wizard-next-sermon').click();
   const announcementsText = await fs.readFile(ANNOUNCEMENTS_TEXT, 'utf-8');
   await page.getByTestId('announcement-input').fill(announcementsText);
   await expect(page.getByTestId('announcement-preview')).toContainText('새가족 환영');
 
+  await page.getByTestId('wizard-next-announcement').click();
   await expect(page.getByTestId('slide-count')).toContainText('말씀 1구절');
   await expect(page.getByTestId('slide-count')).toContainText('광고 5건');
 
