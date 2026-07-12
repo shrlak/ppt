@@ -147,8 +147,9 @@ export default function SongCard({
                       {recog?.status === 'done' ? '↻ 다시 인식' : '✨ 가사 자동 인식'}
                     </button>
                     {recog?.status === 'error' && (
-                      <span className="recog-error" title={recog.message}>
+                      <span className="recog-error">
                         인식 실패 — 다시 시도하거나 직접 입력하세요.
+                        {recog.message && <span className="recog-error-detail">{recog.message}</span>}
                       </span>
                     )}
                     {recog?.status === 'done' && <span className="recog-done">✓ 인식 완료 · 확인해 주세요</span>}

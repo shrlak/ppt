@@ -17,6 +17,7 @@ import LibraryManager from './LibraryManager';
 import AiSettingsPanel from './AiSettingsPanel';
 import { isRecognitionReady, loadAiSettings, saveAiSettings, type AiSettings } from '../lib/aiSettings';
 import { applyScoreToSong, recognizeScore } from '../lib/scoreRecognition';
+import { showToast } from '../lib/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 
@@ -61,8 +62,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const [songs, setSongs] = useState<Song[]>([]);
   const [pageImages, setPageImages] = useState<Record<number, string>>({});
   const [parsing, setParsing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
@@ -72,7 +71,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const docRef = useRef<ContiDocument | null>(null);
   const aiSettingsRef = useRef(aiSettings);
   const autoAttemptedRef = useRef<Set<string>>(new Set());
-  const recogQueueRef = useRef<Promise<void>>(Promise.resolve());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -119,7 +117,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     (song: Song) => {
       if (song.pageIndex == null) return;
       if (!isRecognitionReady(aiSettingsRef.current)) {
-        setNotice('먼저 “자동 인식(AI)” 설정에서 엔진을 고르거나 무료 키를 입력해 주세요.');
+        showToast('먼저 “자동 인식(AI)” 설정에서 엔진을 고르거나 무료 키를 입력해 주세요.', 'warn');
         setAiOpen(true);
         return;
       }
@@ -129,9 +127,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   );
 
   // Auto-recognize new songs (a score page, no lyrics yet) as soon as recognition
-  // is ready — right after upload, or later when the user adds their key. Runs one
-  // at a time to stay within free API rate limits, each song attempted at most once,
-  // and is skipped under browser automation so tests stay deterministic.
+  // is ready — right after upload, or later when the user adds their key. All
+  // pending songs are recognized in parallel rather than one at a time, each
+  // attempted at most once, and this is skipped under browser automation so
+  // tests stay deterministic.
   useEffect(() => {
     const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
     if (isAutomated || !docRef.current || !isRecognitionReady(aiSettings)) return;
@@ -140,10 +139,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     );
     if (pending.length === 0) return;
     for (const s of pending) autoAttemptedRef.current.add(s.id);
-    recogQueueRef.current = pending.reduce(
-      (chain, s) => chain.then(() => recognizeSong(s.id, s.pageIndex as number)),
-      recogQueueRef.current,
-    );
+    for (const s of pending) void recognizeSong(s.id, s.pageIndex as number);
   }, [songs, aiSettings, recognizeSong]);
 
   useEffect(() => {
@@ -161,7 +157,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
     setLibrary((lib) => upsertEntry(lib, entry));
-    setNotice(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
+    showToast(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
   }, []);
 
   const removeFromUserLibrary = useCallback((title: string) => {
@@ -177,7 +173,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const addFromLibrary = useCallback((entry: LibraryEntry) => {
     setSongs((l) => [...l, songFromLibrary(entry)]);
     setEdited(true);
-    setNotice(`'${entry.title}' 을(를) 목록에 추가했습니다.`);
+    showToast(`'${entry.title}' 을(를) 목록에 추가했습니다.`);
   }, []);
 
   const importLibrary = useCallback((entries: LibraryEntry[]) => {
@@ -189,7 +185,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     }
     saveUserLibrary(user);
     setLibrary((lib) => entries.reduce((acc, e) => upsertEntry(acc, e), lib));
-    setNotice(`${entries.length}곡을 라이브러리로 가져왔습니다.`);
+    showToast(`${entries.length}곡을 라이브러리로 가져왔습니다.`);
   }, []);
 
   async function handleFile(file: File) {
@@ -197,7 +193,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       if (!window.confirm('편집 중인 내용이 있습니다. 새 콘티로 교체할까요?')) return;
     }
     setParsing(true);
-    setError(null);
     try {
       const data = await file.arrayBuffer();
       docRef.current?.destroy();
@@ -255,13 +250,14 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       onDateDetected?.(parsed.info.date);
       onContiInfoDetected?.(parsed.info);
       if (!hasCover && next.length > 0) {
-        setNotice(
+        showToast(
           `표지를 찾지 못해 악보 순서대로 ${next.length}곡을 정리했습니다.` +
             (confessionSong ? ' 마지막 악보는 공동체 고백송으로 제외했어요.' : '') +
             ' 제목과 가사를 확인해 주세요.',
+          'warn',
         );
       } else if (confessionSong) {
-        setNotice(`마지막 곡 '${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다.`);
+        showToast(`마지막 곡 '${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다.`);
       }
 
       // Render score previews in the background.
@@ -280,10 +276,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       // recognition is ready (on upload, or later when a key is added).
 
       if (next.length === 0) {
-        setError('콘티에서 곡을 찾지 못했습니다. 곡을 직접 추가해 주세요.');
+        showToast('콘티에서 곡을 찾지 못했습니다. 곡을 직접 추가해 주세요.', 'error');
       }
     } catch (e) {
-      setError(`PDF를 읽는 중 오류가 발생했습니다: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(`PDF를 읽는 중 오류가 발생했습니다: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setParsing(false);
     }
@@ -312,19 +308,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   return (
     <div className="tool">
       <p className="tool-intro">찬양 콘티 PDF를 업로드하면 가사 슬라이드를 자동으로 만들어 드립니다.</p>
-
-      {error && (
-        <div className="banner banner-error" data-testid="error-banner">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>✕</button>
-        </div>
-      )}
-      {notice && (
-        <div className="banner banner-notice">
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)}>✕</button>
-        </div>
-      )}
 
       <section className="card">
         <h2>
@@ -441,7 +424,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
                   sections: structuredClone(hit.sections),
                   order: [...hit.order],
                 });
-                setNotice(`라이브러리에서 '${hit.title}' 가사를 불러왔습니다.`);
+                showToast(`라이브러리에서 '${hit.title}' 가사를 불러왔습니다.`);
               }
             }}
           />

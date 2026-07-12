@@ -14,6 +14,8 @@ import { normalizeContiScripture, parseVerseInput } from './bible/refParser';
 import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptxPackage';
+import ToastHost from './components/ToastHost';
+import { showToast } from './lib/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 
@@ -86,7 +88,6 @@ export default function App() {
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [contiBibleAutoFill, setContiBibleAutoFill] = useState({
     version: 0,
     verseInput: '',
@@ -113,11 +114,10 @@ export default function App() {
 
   async function generate() {
     if (!hasAnyContent) {
-      setError('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.');
+      showToast('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
     setGenerating(true);
-    setError(null);
     try {
       const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
         fetch(`${BASE}service-template.pptx`).then((r) => {
@@ -191,7 +191,7 @@ export default function App() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
       setGenerating(false);
     }
@@ -238,13 +238,6 @@ export default function App() {
           </li>
         ))}
       </ol>
-
-      {error && (
-        <div className="banner banner-error" data-testid="error-banner">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>✕</button>
-        </div>
-      )}
 
       <main>
         <section
@@ -359,6 +352,7 @@ export default function App() {
       </main>
 
       <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
+      <ToastHost />
     </div>
   );
 }

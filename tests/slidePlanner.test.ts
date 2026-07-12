@@ -87,13 +87,23 @@ describe('planSlides (minimal parts, no 콘티-order expansion)', () => {
     expect(plans[2].lines).toEqual(['verse']);
   });
 
-  it('chunks a 10-line section into 4/4/2', () => {
+  it('splits a section exceeding the line limit into balanced, evenly-sized slides', () => {
     const s = song({
       sections: [{ label: 'C', lines: lines(10) }],
       order: ['C'],
     });
     const plans = planSlides(s);
-    expect(plans.map((p) => p.lines?.length ?? 0)).toEqual([0, 4, 4, 2]);
+    // 10 lines at a limit of 4 -> 3 slides, sizes as equal as possible (not a lopsided 4/4/2).
+    expect(plans.map((p) => p.lines?.length ?? 0)).toEqual([0, 4, 3, 3]);
+  });
+
+  it('splits an exactly-double section into two equal halves', () => {
+    const s = song({
+      sections: [{ label: 'C', lines: lines(6) }],
+      order: ['C'],
+    });
+    const plans = planSlides(s);
+    expect(plans.map((p) => p.lines?.length ?? 0)).toEqual([0, 3, 3]);
   });
 
   it('respects linesPerSlide and skips blank lines', () => {

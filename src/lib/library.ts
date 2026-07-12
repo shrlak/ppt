@@ -51,10 +51,22 @@ export function mergeLibraries(bundled: LibraryEntry[], user: LibraryEntry[]): L
   return [...bundled.filter((e) => !userTitles.has(normalizeTitle(e.title))), ...user];
 }
 
+/**
+ * Find a library entry by title. Tries an exact normalized match first, then
+ * falls back to a substring match (either direction) so small OCR/typing
+ * differences — a stray numbering prefix, a dropped word — still find the
+ * song, consistent with the fuzzy match already used for un-covered pages.
+ */
 export function findEntry(library: LibraryEntry[], title: string): LibraryEntry | undefined {
   const want = normalizeTitle(title);
   if (!want) return undefined;
-  return library.find((e) => normalizeTitle(e.title) === want);
+  const exact = library.find((e) => normalizeTitle(e.title) === want);
+  if (exact) return exact;
+  if (want.length < 2) return undefined;
+  return library.find((e) => {
+    const t = normalizeTitle(e.title);
+    return t.length >= 2 && (want.includes(t) || t.includes(want));
+  });
 }
 
 /** Replace the entry with the same normalized title, or append. Returns a new array. */

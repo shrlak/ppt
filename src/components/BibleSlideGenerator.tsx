@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TRANSLATIONS } from '../bible/books';
 import { parseVerseInput, displayRef } from '../bible/refParser';
+import { showToast } from '../lib/toast';
 
 const KO_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'ko');
 const EN_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'en');
@@ -33,7 +34,6 @@ export default function BibleSlideGenerator({
   const [enTranslation, setEnTranslation] = useState<string | null>('esv');
   const [versesPerSlide, setVersesPerSlide] = useState(1);
   const [customTemplate, setCustomTemplate] = useState<{ name: string; data: ArrayBuffer } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { invalidTokens } = verseInput.trim() ? parseVerseInput(verseInput) : { invalidTokens: [] as string[] };
@@ -44,7 +44,7 @@ export default function BibleSlideGenerator({
     if (autoFillVersion === 0) return;
     setVerseInput(autoVerseInput);
     setSermonTitle(autoSermonTitle);
-    setNotice('찬양 콘티의 본문과 설교 제목을 자동으로 채웠습니다.');
+    showToast('찬양 콘티의 본문과 설교 제목을 자동으로 채웠습니다.');
   }, [autoFillVersion, autoVerseInput, autoSermonTitle]);
 
   useEffect(() => {
@@ -56,19 +56,12 @@ export default function BibleSlideGenerator({
     if (!file.name.endsWith('.pptx')) return;
     const data = await file.arrayBuffer();
     setCustomTemplate({ name: file.name, data });
-    setNotice(`'${file.name}' 템플릿을 이번 세션에서 사용합니다.`);
+    showToast(`'${file.name}' 템플릿을 이번 세션에서 사용합니다.`);
   }
 
   return (
     <div className="tool">
       <p className="tool-intro">성경 구절을 입력하면 말씀 슬라이드를 자동으로 만들어 드립니다.</p>
-
-      {notice && (
-        <div className="banner banner-notice">
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)}>✕</button>
-        </div>
-      )}
 
       <section className="card">
         <h2>

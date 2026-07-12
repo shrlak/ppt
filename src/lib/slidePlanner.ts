@@ -35,9 +35,23 @@ export function unmatchedTokens(song: Song): string[] {
   return [...missing];
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
+/**
+ * Split into ceil(n / size) groups, no group exceeding `size`, and sizes as
+ * equal as possible — 6 lines at a limit of 4 becomes two slides of 3 rather
+ * than an uneven 4-then-2.
+ */
+function chunkBalanced<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const groups = Math.ceil(items.length / size);
+  const base = Math.floor(items.length / groups);
+  const remainder = items.length % groups;
   const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  let i = 0;
+  for (let g = 0; g < groups; g++) {
+    const len = base + (g < remainder ? 1 : 0);
+    out.push(items.slice(i, i + len));
+    i += len;
+  }
   return out;
 }
 
@@ -64,7 +78,7 @@ export function planSlides(song: Song): SlidePlan[] {
     seen.add(section);
     const lines = usableLines(section);
     if (lines.length === 0) continue;
-    for (const group of chunk(lines, linesPerSlide)) {
+    for (const group of chunkBalanced(lines, linesPerSlide)) {
       plans.push({ kind: 'lyrics', title: song.title, lines: group });
     }
   }

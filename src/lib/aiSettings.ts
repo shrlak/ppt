@@ -15,11 +15,11 @@ export interface AiSettings {
 
 const STORAGE_KEY = 'praise-lyrics-ai-settings';
 
-// Flash-Lite is Google's lightest/fastest multimodal Gemini model — quicker
-// per-page recognition than plain Flash while staying within the free tier.
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
-/** Previous default, auto-upgraded on load so returning users get the faster model too. */
-const LEGACY_DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+// 'gemini-2.5-flash-lite' was briefly the default but isn't a valid model for
+// this API version and made every recognition call fail — auto-revert anyone
+// who got switched onto it back to the known-working model.
+const BROKEN_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   engine: 'gemini',
@@ -48,7 +48,7 @@ export function loadAiSettings(): AiSettings {
       geminiApiKey: typeof data.geminiApiKey === 'string' ? data.geminiApiKey : '',
       geminiModel:
         typeof data.geminiModel === 'string' && data.geminiModel.trim()
-          ? data.geminiModel.trim() === LEGACY_DEFAULT_GEMINI_MODEL
+          ? data.geminiModel.trim() === BROKEN_GEMINI_MODEL
             ? DEFAULT_GEMINI_MODEL
             : data.geminiModel.trim()
           : DEFAULT_GEMINI_MODEL,
