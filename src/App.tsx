@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import LyricsGenerator from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
@@ -76,6 +76,7 @@ function WizardNavigation({ step, onMove }: WizardNavigationProps) {
 
 export default function App() {
   const [activeStep, setActiveStep] = useState(0);
+  const [scrolled, setScrolled] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   const [contiDate, setContiDate] = useState<string | undefined>();
   const [bibleState, setBibleState] = useState<BibleGeneratorState>({
@@ -103,6 +104,13 @@ export default function App() {
       verseInput: normalizeContiScripture(info.scripture ?? ''),
       sermonTitle: info.sermonTitle ?? '',
     }));
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
@@ -220,139 +228,147 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>KCCP PPT Generator</h1>
-        <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+    <>
+      <header className={`header${scrolled ? ' header-scrolled' : ''}`}>
+        <div className="header-inner">
+          <h1>KCCP PPT Generator</h1>
+          <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+        </div>
       </header>
 
-      <ol className="wizard-progress" aria-label="PPT 생성 단계">
-        {WIZARD_STEPS.map((step, index) => (
-          <li
-            key={step.id}
-            className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
-            aria-current={index === activeStep ? 'step' : undefined}
+      <div className="app">
+        <ol
+          className="wizard-progress"
+          aria-label="PPT 생성 단계"
+          style={{ '--active-index': activeStep } as React.CSSProperties}
+        >
+          {WIZARD_STEPS.map((step, index) => (
+            <li
+              key={step.id}
+              className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
+              aria-current={index === activeStep ? 'step' : undefined}
+            >
+              <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
+              <span className="wizard-step-label">{step.label}</span>
+            </li>
+          ))}
+        </ol>
+
+        <main>
+          <section
+            className={`wizard-panel${activeStep === 0 ? ' active' : ''}`}
+            aria-hidden={activeStep !== 0}
+            data-testid="wizard-panel-lyrics"
           >
-            <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
-            <span className="wizard-step-label">{step.label}</span>
-          </li>
-        ))}
-      </ol>
-
-      <main>
-        <section
-          className={`wizard-panel${activeStep === 0 ? ' active' : ''}`}
-          aria-hidden={activeStep !== 0}
-          data-testid="wizard-panel-lyrics"
-        >
-          <div className="wizard-page-header">
-            <p className="wizard-kicker">1 / 5</p>
-            <h2>찬양</h2>
-            <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
-          </div>
-          <LyricsGenerator
-            onSongsChange={handleSongsChange}
-            onDateDetected={handleDateDetected}
-            onContiInfoDetected={handleContiInfoDetected}
-          />
-          <WizardNavigation step={0} onMove={moveToStep} />
-        </section>
-
-        <section
-          className={`wizard-panel${activeStep === 1 ? ' active' : ''}`}
-          aria-hidden={activeStep !== 1}
-          data-testid="wizard-panel-bible"
-        >
-          <div className="wizard-page-header">
-            <p className="wizard-kicker">2 / 5</p>
-            <h2>성경 말씀</h2>
-            <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
-          </div>
-          <BibleSlideGenerator
-            onStateChange={handleBibleStateChange}
-            autoFillVersion={contiBibleAutoFill.version}
-            autoVerseInput={contiBibleAutoFill.verseInput}
-            autoSermonTitle={contiBibleAutoFill.sermonTitle}
-          />
-          <WizardNavigation step={1} onMove={moveToStep} />
-        </section>
-
-        <section
-          className={`wizard-panel${activeStep === 2 ? ' active' : ''}`}
-          aria-hidden={activeStep !== 2}
-          data-testid="wizard-panel-sermon"
-        >
-          <div className="wizard-page-header">
-            <p className="wizard-kicker">3 / 5</p>
-            <h2>설교</h2>
-            <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
-          </div>
-          <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
-          <WizardNavigation step={2} onMove={moveToStep} />
-        </section>
-
-        <section
-          className={`wizard-panel${activeStep === 3 ? ' active' : ''}`}
-          aria-hidden={activeStep !== 3}
-          data-testid="wizard-panel-announcement"
-        >
-          <div className="wizard-page-header">
-            <p className="wizard-kicker">4 / 5</p>
-            <h2>광고</h2>
-            <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
-          </div>
-          <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
-          <WizardNavigation step={3} onMove={moveToStep} />
-        </section>
-
-        <section
-          className={`wizard-panel${activeStep === 4 ? ' active' : ''}`}
-          aria-hidden={activeStep !== 4}
-          data-testid="wizard-panel-download"
-        >
-          <div className="wizard-page-header">
-            <p className="wizard-kicker">5 / 5</p>
-            <h2>확인 및 다운로드</h2>
-            <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
-          </div>
-          <section className="card download-card">
-            {allWarnings.length > 0 && (
-              <div className="banner banner-warn">
-                일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-                {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
-              </div>
-            )}
-            <p className="deck-order">
-              Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
-            </p>
-            <div className="generate-row">
-              <label htmlFor="filename-input">
-                자동 파일명
-                <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
-                <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
-              </label>
-              <div className="slide-count" data-testid="slide-count">
-                총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
-                {bibleRefs.length}구절
-                {sermonFile ? ' · 설교 첨부' : ''}
-                {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
-              </div>
-              <button
-                className="btn btn-primary btn-download"
-                data-testid="generate-pptx"
-                disabled={generating}
-                onClick={() => void generate()}
-              >
-                {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
-              </button>
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">1 / 5</p>
+              <h2>찬양</h2>
+              <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
             </div>
+            <LyricsGenerator
+              onSongsChange={handleSongsChange}
+              onDateDetected={handleDateDetected}
+              onContiInfoDetected={handleContiInfoDetected}
+            />
+            <WizardNavigation step={0} onMove={moveToStep} />
           </section>
-          <WizardNavigation step={4} onMove={moveToStep} />
-        </section>
-      </main>
 
-      <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
-      <ToastHost />
-    </div>
+          <section
+            className={`wizard-panel${activeStep === 1 ? ' active' : ''}`}
+            aria-hidden={activeStep !== 1}
+            data-testid="wizard-panel-bible"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">2 / 5</p>
+              <h2>성경 말씀</h2>
+              <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
+            </div>
+            <BibleSlideGenerator
+              onStateChange={handleBibleStateChange}
+              autoFillVersion={contiBibleAutoFill.version}
+              autoVerseInput={contiBibleAutoFill.verseInput}
+              autoSermonTitle={contiBibleAutoFill.sermonTitle}
+            />
+            <WizardNavigation step={1} onMove={moveToStep} />
+          </section>
+
+          <section
+            className={`wizard-panel${activeStep === 2 ? ' active' : ''}`}
+            aria-hidden={activeStep !== 2}
+            data-testid="wizard-panel-sermon"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">3 / 5</p>
+              <h2>설교</h2>
+              <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
+            </div>
+            <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
+            <WizardNavigation step={2} onMove={moveToStep} />
+          </section>
+
+          <section
+            className={`wizard-panel${activeStep === 3 ? ' active' : ''}`}
+            aria-hidden={activeStep !== 3}
+            data-testid="wizard-panel-announcement"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">4 / 5</p>
+              <h2>광고</h2>
+              <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
+            </div>
+            <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
+            <WizardNavigation step={3} onMove={moveToStep} />
+          </section>
+
+          <section
+            className={`wizard-panel${activeStep === 4 ? ' active' : ''}`}
+            aria-hidden={activeStep !== 4}
+            data-testid="wizard-panel-download"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">5 / 5</p>
+              <h2>확인 및 다운로드</h2>
+              <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
+            </div>
+            <section className="card download-card">
+              {allWarnings.length > 0 && (
+                <div className="banner banner-warn">
+                  일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
+                  {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
+                </div>
+              )}
+              <p className="deck-order">
+                Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
+              </p>
+              <div className="generate-row">
+                <label htmlFor="filename-input">
+                  자동 파일명
+                  <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
+                  <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
+                </label>
+                <div className="slide-count" data-testid="slide-count">
+                  총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
+                  {bibleRefs.length}구절
+                  {sermonFile ? ' · 설교 첨부' : ''}
+                  {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
+                </div>
+                <button
+                  className="btn btn-primary btn-download"
+                  data-testid="generate-pptx"
+                  disabled={generating}
+                  onClick={() => void generate()}
+                >
+                  {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+                </button>
+              </div>
+            </section>
+            <WizardNavigation step={4} onMove={moveToStep} />
+          </section>
+        </main>
+
+        <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
+        <ToastHost />
+      </div>
+    </>
   );
 }
