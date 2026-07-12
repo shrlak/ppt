@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
+const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
@@ -79,6 +80,25 @@ test('jumps directly between steps via the progress tabs', async ({ page }) => {
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 });
 
+test('admin panel replaces the front deck and restores the default', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('admin-open').click();
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
+
+  // Any valid .pptx works as a replacement; the bundled lyrics template has 6 slides.
+  await page.getByTestId('admin-deck-input-front').setInputFiles(LYRICS_TEMPLATE_PPTX);
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('template.pptx');
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('6장');
+
+  // The replacement persists across a reload (IndexedDB).
+  await page.reload();
+  await page.getByTestId('admin-open').click();
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('template.pptx');
+
+  await page.getByTestId('admin-deck-front').getByRole('button', { name: '기본값 복원' }).click();
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
+});
+
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);
@@ -87,16 +107,19 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await expect(contiInfo).toContainText('하나님과 화평을 누리자', { timeout: PARSE_TIMEOUT });
   await expect(contiInfo).toContainText('7/11/26', { timeout: PARSE_TIMEOUT });
 
-  // The final cover song is the 공동체 고백송 and is intentionally excluded.
+  // Every cover song is included — only Celebrate the Light (the 공동체
+  // 고백송, supplied by the back slides) would be excluded, and this conti
+  // doesn't list it. The 입례 song stays in.
   const songCards = page.getByTestId('song-card');
   await expect
     .poll(async () => songCards.count(), { timeout: PARSE_TIMEOUT })
-    .toBeGreaterThanOrEqual(2);
+    .toBeGreaterThanOrEqual(3);
 
   const titles = await songCards
     .getByTestId('song-title-input')
     .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
-  expect(titles).not.toContain('입례');
+  expect(titles).toContain('입례');
+  expect(titles).not.toContain('Celebrate the Light');
 
   const firstCard = songCards.first();
   await expect(firstCard.getByTestId('song-title-input')).toHaveValue('주님의 사랑', {

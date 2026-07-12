@@ -73,6 +73,14 @@ describe('buildPptx', () => {
     expect(slide2).toContain('주님의 사랑 &amp; 은혜');
   });
 
+  it('sets 1.25 line spacing on lyric paragraphs', async () => {
+    const out = await buildPptx(template, [songA]);
+    const zip = await JSZip.loadAsync(out);
+    const slide2 = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    expect(slide2).toContain('<a:lnSpc><a:spcPct val="125000"/></a:lnSpc>');
+    expect(slide2).not.toContain('<a:lnSpc><a:spcPct val="115000"/></a:lnSpc>');
+  });
+
   it('gives every slide a rels file pointing at an existing layout', async () => {
     const out = await buildPptx(template, [songA, songB]);
     const zip = await JSZip.loadAsync(out);

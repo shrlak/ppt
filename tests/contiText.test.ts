@@ -85,20 +85,35 @@ describe('deriveSongsFromMusicPages', () => {
     expect(songs[2].title).toBe('새 찬양 (p.3)');
   });
 
-  it('splits off the last derived song as the 공동체 고백송', () => {
-    const songs = deriveSongsFromMusicPages(['a', 'b', 'c'], [1, 2, 3], library);
+  it('splits off a derived 공동체 고백송 when its page text matches', () => {
+    const withConfession: LibraryEntry[] = [
+      ...library,
+      { title: 'Celebrate the Light', key: 'G', sections: [{ label: 'C', lines: ['가사'] }], order: ['C'] },
+    ];
+    const songs = deriveSongsFromMusicPages(['a', 'Celebrate the Light', 'c'], [1, 2, 3], withConfession);
     const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs);
-    expect(lyricsSongs.map((s) => s.pageIndex)).toEqual([1, 2]);
-    expect(confessionSong?.pageIndex).toBe(3);
+    expect(lyricsSongs.map((s) => s.pageIndex)).toEqual([1, 3]);
+    expect(confessionSong?.pageIndex).toBe(2);
   });
 });
 
 describe('splitLyricsAndConfessionSongs', () => {
-  it('excludes the final conti song from generated lyrics', () => {
+  it('excludes Celebrate the Light (공동체 고백송) wherever it appears', () => {
+    const songs = [
+      { title: '주님의 사랑', key: 'E' },
+      { title: 'Celebrate The Light!', key: 'G' },
+      { title: '입례', key: 'F' },
+    ];
+    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs);
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '입례']);
+    expect(confessionSong?.title).toBe('Celebrate The Light!');
+  });
+
+  it('keeps every song — including a final 입례 — when the 고백송 is absent', () => {
     const info = parseCoverText(coverText)!;
     const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(info.songs);
-    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '주 은혜임을']);
-    expect(confessionSong?.title).toBe('입례');
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '주 은혜임을', '입례']);
+    expect(confessionSong).toBeUndefined();
   });
 
   it('handles an empty conti', () => {

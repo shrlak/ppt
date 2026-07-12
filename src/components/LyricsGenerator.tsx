@@ -232,12 +232,12 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       if (!hasCover && next.length > 0) {
         showToast(
           `표지를 찾지 못해 악보 순서대로 ${next.length}곡을 정리했습니다.` +
-            (confessionSong ? ' 마지막 악보는 공동체 고백송으로 제외했어요.' : '') +
+            (confessionSong ? ` '${confessionSong.title}'은 공동체 고백송으로 제외했어요.` : '') +
             ' 제목과 가사를 확인해 주세요.',
           'warn',
         );
       } else if (confessionSong) {
-        showToast(`마지막 곡 '${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다.`);
+        showToast(`'${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다 (백 슬라이드에 포함).`);
       }
 
       // Render score previews in the background.

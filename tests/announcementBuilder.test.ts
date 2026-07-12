@@ -88,4 +88,30 @@ describe('buildAnnouncementDeck', () => {
   it('rejects an empty item list', async () => {
     await expect(buildAnnouncementDeck(serviceTemplate, 33, [])).rejects.toThrow();
   });
+
+  it('keeps the template size for short bodies and shrinks overflowing ones to fit', async () => {
+    const short = { title: '짧은 광고', bodyLines: ['한 줄짜리 공지입니다.'] };
+    const long = {
+      title: '긴 광고',
+      bodyLines: Array.from(
+        { length: 8 },
+        (_, i) => `${i + 1}번째 줄은 슬라이드 폭보다 훨씬 길어서 소프트 랩이 일어나는 긴 안내 문장입니다. 자세한 내용은 각 부서 담당자에게 문의해 주세요.`,
+      ),
+    };
+    const out = await buildAnnouncementDeck(serviceTemplate, 33, [short, long]);
+    const zip = await JSZip.loadAsync(out);
+
+    const shortXml = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    const longXml = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    const bodySize = (xml: string): number => {
+      // Third shape holds the body; its runs carry the fitted size.
+      const shapes = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)];
+      return Number(shapes[2][0].match(/sz="(\d+)"/)![1]);
+    };
+
+    expect(bodySize(shortXml)).toBe(2500);
+    const longSz = bodySize(longXml);
+    expect(longSz).toBeLessThan(2500);
+    expect(longSz).toBeGreaterThanOrEqual(1200);
+  });
 });

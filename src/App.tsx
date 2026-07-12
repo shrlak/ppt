@@ -15,6 +15,8 @@ import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptxPackage';
 import ToastHost from './components/ToastHost';
+import AdminPanel from './components/AdminPanel';
+import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/deckStore';
 import { showToast } from './lib/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -89,6 +91,11 @@ export default function App() {
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [customDecks, setCustomDecks] = useState<Record<DeckSlot, StoredDeck | null>>({
+    front: null,
+    back: null,
+  });
   const [contiBibleAutoFill, setContiBibleAutoFill] = useState({
     version: 0,
     verseInput: '',
@@ -113,6 +120,20 @@ export default function App() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([getCustomDeck('front'), getCustomDeck('back')]).then(([front, back]) => {
+      if (!cancelled) setCustomDecks({ front, back });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDeckChange = useCallback((slot: DeckSlot, deck: StoredDeck | null) => {
+    setCustomDecks((previous) => ({ ...previous, [slot]: deck }));
+  }, []);
+
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
   const fileName = suggestFileName(contiDate);
@@ -132,14 +153,19 @@ export default function App() {
           if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
           return r.arrayBuffer();
         }),
-        fetch(`${BASE}front-slides.pptx`).then((r) => {
-          if (!r.ok) throw new Error('Front slides 파일을 불러오지 못했습니다.');
-          return r.arrayBuffer();
-        }),
-        fetch(`${BASE}back-slides.pptx`).then((r) => {
-          if (!r.ok) throw new Error('Back slides 파일을 불러오지 못했습니다.');
-          return r.arrayBuffer();
-        }),
+        // Administrator-replaced decks (관리자 설정) take precedence over the bundled files.
+        customDecks.front
+          ? Promise.resolve(customDecks.front.data)
+          : fetch(`${BASE}front-slides.pptx`).then((r) => {
+              if (!r.ok) throw new Error('Front slides 파일을 불러오지 못했습니다.');
+              return r.arrayBuffer();
+            }),
+        customDecks.back
+          ? Promise.resolve(customDecks.back.data)
+          : fetch(`${BASE}back-slides.pptx`).then((r) => {
+              if (!r.ok) throw new Error('Back slides 파일을 불러오지 못했습니다.');
+              return r.arrayBuffer();
+            }),
       ]);
 
       let merged: Uint8Array = new Uint8Array(frontSlides);
@@ -212,8 +238,8 @@ export default function App() {
   // Front/back + 2 prayer slides always count; the announcement title only
   // appears when there is matching content.
   const fixedSlideCount =
-    FRONT_SLIDE_COUNT +
-    BACK_SLIDE_COUNT +
+    (customDecks.front?.slideCount ?? FRONT_SLIDE_COUNT) +
+    (customDecks.back?.slideCount ?? BACK_SLIDE_COUNT) +
     SERVICE_SLIDES.prayer1.length +
     SERVICE_SLIDES.prayer2.length +
     (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0);
@@ -231,10 +257,28 @@ export default function App() {
     <>
       <header className={`header${scrolled ? ' header-scrolled' : ''}`}>
         <div className="header-inner">
-          <h1>KCCP PPT Generator</h1>
-          <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+          <img
+            className="header-logo"
+            src={`${BASE}favicon.svg`}
+            alt="Korean Central Church of Pittsburgh 대학·청년부 로고"
+          />
+          <div className="header-text">
+            <h1>KCCP PPT Generator</h1>
+            <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+          </div>
+          <button
+            type="button"
+            className="btn admin-open"
+            data-testid="admin-open"
+            title="관리자 설정"
+            onClick={() => setAdminOpen(true)}
+          >
+            ⚙ 관리자
+          </button>
         </div>
       </header>
+
+      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} onDeckChange={handleDeckChange} />}
 
       <div className="app">
         <ol

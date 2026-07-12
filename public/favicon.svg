@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Korean Central Church of Pittsburgh">
+  <circle cx="50" cy="50" r="48.5" fill="#ffffff" stroke="#9aa1a8" stroke-width="1.2"/>
+  <!-- Open-door mark: green square, yellow swung-open panel, white cross on the seam -->
+  <rect x="26" y="33" width="31" height="31" fill="#41c08d"/>
+  <polygon points="59,25 74,31 74,55 59,49" fill="#ffe01a"/>
+  <g fill="#ffffff">
+    <rect x="56.4" y="29" width="3.4" height="14"/>
+    <rect x="50.5" y="33.5" width="15.5" height="3.4"/>
+  </g>
+</svg>

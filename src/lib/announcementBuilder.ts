@@ -55,6 +55,49 @@ function shrinkForLineCount(baseSz: number, fitLines: number, actualLines: numbe
   return Math.max(minSz, Math.round((baseSz * fitLines) / actualLines / 100) * 100);
 }
 
+const EMU_PER_POINT = 12700;
+
+/** Approximate rendered width of a line in em units at 1em per full-width glyph. */
+function textWidthEm(line: string): number {
+  let em = 0;
+  for (const ch of line) {
+    // Hangul/CJK glyphs are full-width (~1em); Latin letters, digits and
+    // punctuation average a bit over half an em in the deck's fonts.
+    em += /[ᄀ-ᇿ⺀-꓏가-힣豈-﫿＀-￯]/.test(ch) ? 1 : 0.55;
+  }
+  return em;
+}
+
+/**
+ * Pick the largest font size (1/100 pt steps of 100) at which the body text —
+ * including soft-wrapped long lines — fits the shape. Reads the shape's
+ * extent, insets and line spacing from its own XML so it tracks the template.
+ */
+function fitBodyFontSize(bodyShapeXml: string, lines: string[], baseSz: number, minSz: number): number {
+  const ext = bodyShapeXml.match(/<a:ext cx="(\d+)" cy="(\d+)"\/>/);
+  if (!ext) return shrinkForLineCount(baseSz, 5, lines.length, minSz);
+
+  const bodyPr = bodyShapeXml.match(/<a:bodyPr\b[^>]*/)?.[0] ?? '';
+  const inset = (name: string, fallback: number) =>
+    Number(bodyPr.match(new RegExp(`\\b${name}="(\\d+)"`))?.[1] ?? fallback);
+  const widthPt = (Number(ext[1]) - inset('lIns', 91440) - inset('rIns', 91440)) / EMU_PER_POINT;
+  const heightPt = (Number(ext[2]) - inset('tIns', 45720) - inset('bIns', 45720)) / EMU_PER_POINT;
+  const spacing = Number(bodyShapeXml.match(/<a:lnSpc><a:spcPct val="(\d+)"\/>/)?.[1] ?? 100000) / 100000;
+
+  for (let sz = baseSz; sz >= minSz; sz -= 100) {
+    const fontPt = sz / 100;
+    // ~1.2 × font size is the single-line box PowerPoint spaces by spcPct.
+    const lineHeightPt = fontPt * 1.2 * spacing;
+    const emPerLine = Math.max(1, widthPt / fontPt);
+    let wrappedLines = 0;
+    for (const line of lines) {
+      wrappedLines += Math.max(1, Math.ceil(textWidthEm(line) / emPerLine));
+    }
+    if (wrappedLines * lineHeightPt <= heightPt) return sz;
+  }
+  return minSz;
+}
+
 /** Build one announcement slide's XML from the template item-slide XML. */
 function buildAnnouncementSlideXml(templateXml: string, index: number, item: AnnouncementItem): string {
   const shapes = [...templateXml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)];
@@ -76,7 +119,7 @@ function buildAnnouncementSlideXml(templateXml: string, index: number, item: Ann
   const paraTpl = body.slice(firstP, body.indexOf('</a:p>', firstP) + '</a:p>'.length);
 
   const lines = item.bodyLines.length > 0 ? item.bodyLines : [''];
-  const sz = shrinkForLineCount(2500, 5, lines.length, 1400);
+  const sz = fitBodyFontSize(bodyShape[0], lines, 2500, 1200);
   const paragraphs = lines
     .map((line) => {
       const withSize = paraTpl.replace(/sz="\d+"/g, `sz="${sz}"`);

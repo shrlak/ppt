@@ -120,8 +120,8 @@ export function matchSongsToPages(
  * whose typed cover page is missing (or wasn't recognized). Each music page
  * becomes one song, in page order: matched to a library entry when its title
  * appears in the page's (OCR) text, otherwise a page-numbered stub the user
- * can fill in while looking at the score. The final entry is still the
- * 공동체 고백송 — callers should split it off exactly like the cover path.
+ * can fill in while looking at the score. The 공동체 고백송 may be among the
+ * matched entries — callers should split it off exactly like the cover path.
  */
 export function deriveSongsFromMusicPages(
   pageTexts: string[],
@@ -140,18 +140,29 @@ export function deriveSongsFromMusicPages(
   });
 }
 
+// The KCCP 공동체 고백송 — its lyric slides live in the fixed back-slides deck,
+// so it never needs generated lyric slides. Matched by normalized title so
+// spacing/case/punctuation differences on the cover page don't matter.
+const CONFESSION_SONG_TITLE = normalizeTitle('Celebrate the Light');
+
+/** True when a conti entry is the 공동체 고백송 supplied by the back slides. */
+export function isConfessionSong(title: string): boolean {
+  return normalizeTitle(title) === CONFESSION_SONG_TITLE;
+}
+
 /**
- * The final song on a KCCP conti is the 공동체 고백송. It is supplied by the
- * fixed back-slides deck, so only the preceding entries need generated lyric
- * slides.
+ * The 공동체 고백송 (Celebrate the Light) is supplied by the fixed back-slides
+ * deck, so it is split off from the entries that need generated lyric slides.
+ * Every other song — including the 입례 song, wherever it appears in the
+ * order — stays in the lyrics list.
  */
 export function splitLyricsAndConfessionSongs(songs: ContiSongEntry[]): {
   lyricsSongs: ContiSongEntry[];
   confessionSong?: ContiSongEntry;
 } {
-  if (songs.length === 0) return { lyricsSongs: [] };
+  const confessionSong = songs.find((song) => isConfessionSong(song.title));
   return {
-    lyricsSongs: songs.slice(0, -1),
-    confessionSong: songs[songs.length - 1],
+    lyricsSongs: songs.filter((song) => song !== confessionSong),
+    confessionSong,
   };
 }

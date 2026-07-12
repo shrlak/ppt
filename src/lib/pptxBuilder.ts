@@ -113,6 +113,8 @@ function buildLyricsSlide(lyricsTpl: string, title: string, lines: string[]): st
   const paragraphs = lines
     .map((line) => {
       let p = paraTpl.replace(/sz="\d+"/g, `sz="${sz}"`);
+      // 1.25 line spacing between lyric lines (template ships with 1.15).
+      p = p.replace(/<a:lnSpc><a:spcPct val="\d+"\/><\/a:lnSpc>/g, '<a:lnSpc><a:spcPct val="125000"/></a:lnSpc>');
       p = setTextOfFirstRun(p, 0, xmlEscape(line));
       return p;
     })
