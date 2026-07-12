@@ -10,6 +10,13 @@ import { recognizeWithTesseract, type OcrProgress } from './scoreOcr';
 
 export type { OcrProgress } from './scoreOcr';
 
+/**
+ * Base URL of the optional shared recognition proxy (see worker/), baked into
+ * the build at deploy time. Non-secret — safe to expose in client code, since
+ * the actual API keys live only on the proxy server.
+ */
+const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
+
 async function recognizeWithEngine(
   engine: RecognitionEngine,
   dataUrl: string,
@@ -18,13 +25,13 @@ async function recognizeWithEngine(
 ): Promise<ParsedScore> {
   if (engine === 'gemini') {
     const key = settings.geminiApiKey.trim();
-    if (!key) throw new Error('Gemini API 키가 설정되지 않았습니다.');
-    return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch);
+    if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
+    return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch, PROXY_URL);
   }
   if (engine === 'huggingface') {
     const key = settings.huggingfaceApiKey.trim();
-    if (!key) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
-    return recognizeWithHuggingFace(dataUrl, key);
+    if (!key && !PROXY_URL) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
+    return recognizeWithHuggingFace(dataUrl, key, undefined, PROXY_URL);
   }
   if (engine === 'tesseract') {
     return recognizeWithTesseract(dataUrl, onProgress);

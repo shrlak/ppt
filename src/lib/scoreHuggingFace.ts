@@ -9,6 +9,11 @@ const ENDPOINT = 'https://api-inference.huggingface.co/models';
 // Using Qwen's VL model which has good vision understanding for structured data extraction
 const DEFAULT_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 
+/** Strip a trailing slash so callers can pass either form of a base URL. */
+function trimTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
 const BASE_PROMPT = [
   '이 이미지는 한국어 찬양(worship) 악보 한 페이지입니다.',
   '다음을 읽어 JSON으로만 답하세요:',
@@ -61,21 +66,28 @@ export function extractImageBase64(dataUrl: string): string {
   return match[2];
 }
 
+/**
+ * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through a
+ * shared server-side proxy (see worker/) that holds its own Hugging Face key
+ * instead of calling Hugging Face directly — this lets recognition work for
+ * people who haven't set up their own free key.
+ */
 export async function recognizeWithHuggingFace(
   dataUrl: string,
   apiKey: string,
   model: string = DEFAULT_MODEL,
+  proxyUrl?: string,
 ): Promise<ParsedScore> {
   const base64 = extractImageBase64(dataUrl);
-  const url = `${ENDPOINT}/${encodeURIComponent(model)}`;
+  const useProxy = !apiKey.trim() && !!proxyUrl;
+  const url = useProxy ? `${trimTrailingSlash(proxyUrl!)}/huggingface` : `${ENDPOINT}/${encodeURIComponent(model)}`;
 
   // Hugging Face Inference API accepts images as base64 in the payload
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: useProxy
+      ? { 'Content-Type': 'application/json' }
+      : { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       inputs: [
         {

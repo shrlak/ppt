@@ -74,11 +74,16 @@ export function saveAiSettings(settings: AiSettings): void {
 }
 
 /**
- * Whether a score should be auto-recognized on upload with these settings:
- * Gemini needs a key; the keyless OCR engine is ready as soon as it's picked.
+ * Whether a score should be auto-recognized on upload with these settings.
+ * Gemini and Hugging Face need a personal key UNLESS a shared recognition
+ * proxy is configured for this build (see worker/) — then a blank key still
+ * works, since the request is routed through the proxy's own key instead.
+ * The keyless OCR engine is ready as soon as it's picked.
  */
 export function isRecognitionReady(settings: AiSettings): boolean {
   if (settings.engine === 'off') return false;
-  if (settings.engine === 'gemini') return settings.geminiApiKey.trim().length > 0;
+  const proxyConfigured = Boolean(import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim());
+  if (settings.engine === 'gemini') return settings.geminiApiKey.trim().length > 0 || proxyConfigured;
+  if (settings.engine === 'huggingface') return settings.huggingfaceApiKey.trim().length > 0 || proxyConfigured;
   return true;
 }

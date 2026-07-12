@@ -5,9 +5,19 @@ interface Props {
   onChange: (settings: AiSettings) => void;
 }
 
+const PROXY_CONFIGURED = Boolean(import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim());
+
 const ENGINES: { id: RecognitionEngine; label: string; hint: string }[] = [
-  { id: 'gemini', label: 'Gemini (무료 키)', hint: '정확도 높음 · 무료 API 키 필요' },
-  { id: 'huggingface', label: 'Hugging Face', hint: '좋은 성능 · 무료 API 키 필요' },
+  {
+    id: 'gemini',
+    label: 'Gemini (무료 키)',
+    hint: PROXY_CONFIGURED ? '정확도 높음 · 키 없이도 공유 서버로 동작' : '정확도 높음 · 무료 API 키 필요',
+  },
+  {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    hint: PROXY_CONFIGURED ? '좋은 성능 · 키 없이도 공유 서버로 동작' : '좋은 성능 · 무료 API 키 필요',
+  },
   { id: 'tesseract', label: '브라우저 OCR', hint: '키 없이 오프라인 · 정확도 낮음' },
   { id: 'off', label: '끄기', hint: '자동 인식 안 함' },
 ];
@@ -42,11 +52,11 @@ export default function AiSettingsPanel({ settings, onChange }: Props) {
       {settings.engine === 'gemini' && (
         <div className="ai-gemini">
           <label className="ai-field">
-            <span>Google AI Studio API 키</span>
+            <span>Google AI Studio API 키{PROXY_CONFIGURED ? ' (선택)' : ''}</span>
             <input
               type="password"
               data-testid="gemini-key-input"
-              placeholder="AIza..."
+              placeholder={PROXY_CONFIGURED ? '비워두면 공유 서버 사용' : 'AIza...'}
               autoComplete="off"
               value={settings.geminiApiKey}
               onChange={(e) => onChange({ ...settings, geminiApiKey: e.target.value })}
@@ -76,11 +86,17 @@ export default function AiSettingsPanel({ settings, onChange }: Props) {
             </span>
           </label>
           <p className="input-hint">
+            {PROXY_CONFIGURED && (
+              <>
+                키를 입력하지 않으면 공유 서버(관리자가 등록한 키)로 자동 인식됩니다 — 별도 설정 없이 바로
+                사용할 수 있어요.{' '}
+              </>
+            )}
             무료 키는{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
               aistudio.google.com/apikey
             </a>{' '}
-            에서 발급받을 수 있습니다. 주 1회 콘티 정도는 무료 한도 안에서 처리됩니다. 키는 이
+            에서 발급받을 수 있습니다. 주 1회 콘티 정도는 무료 한도 안에서 처리됩니다. 키를 직접 입력하면 이
             브라우저에만 저장되고 인식할 때 구글로 직접 전송됩니다.
           </p>
         </div>
@@ -89,22 +105,29 @@ export default function AiSettingsPanel({ settings, onChange }: Props) {
       {settings.engine === 'huggingface' && (
         <div className="ai-huggingface">
           <label className="ai-field">
-            <span>Hugging Face API 키</span>
+            <span>Hugging Face API 키{PROXY_CONFIGURED ? ' (선택)' : ''}</span>
             <input
               type="password"
               data-testid="huggingface-key-input"
-              placeholder="hf_..."
+              placeholder={PROXY_CONFIGURED ? '비워두면 공유 서버 사용' : 'hf_...'}
               autoComplete="off"
               value={settings.huggingfaceApiKey}
               onChange={(e) => onChange({ ...settings, huggingfaceApiKey: e.target.value })}
             />
           </label>
           <p className="input-hint">
+            {PROXY_CONFIGURED && (
+              <>
+                키를 입력하지 않으면 공유 서버(관리자가 등록한 키)로 자동 인식됩니다 — 별도 설정 없이 바로
+                사용할 수 있어요.{' '}
+              </>
+            )}
             무료 키는{' '}
             <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">
               huggingface.co/settings/tokens
             </a>{' '}
-            에서 발급받을 수 있습니다. 키는 이 브라우저에만 저장되고 인식할 때 Hugging Face로 직접 전송됩니다.
+            에서 발급받을 수 있습니다. 키를 직접 입력하면 이 브라우저에만 저장되고 인식할 때 Hugging Face로
+            직접 전송됩니다.
           </p>
         </div>
       )}

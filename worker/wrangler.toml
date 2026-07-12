@@ -1,0 +1,14 @@
+name = "lyrics-ai-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Comma-separated list of origins allowed to call this proxy. Must match the
+# deployed site exactly (scheme + host, no trailing slash) — typically your
+# GitHub Pages URL, e.g. "https://<your-username>.github.io".
+# Add a second origin (comma-separated) for local dev, e.g. "http://localhost:4173".
+[vars]
+ALLOWED_ORIGINS = "https://<your-username>.github.io"
+
+# API keys are NOT set here (this file is committed to git). Set them with:
+#   npx wrangler secret put GEMINI_API_KEY
+#   npx wrangler secret put HUGGINGFACE_API_KEY

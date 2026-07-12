@@ -8,6 +8,11 @@ import { cleanLyricLine, type ParsedScore } from './scoreParser';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+/** Strip a trailing slash so callers can pass either form of a base URL. */
+function trimTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
 const BASE_PROMPT = [
   '이 이미지는 한국어 찬양(worship) 악보 한 페이지입니다.',
   '다음을 읽어 JSON으로만 답하세요:',
@@ -144,14 +149,25 @@ export function extractGeminiText(response: unknown): string {
   return parts.map((p) => p?.text ?? '').join('');
 }
 
-/** Recognize a single score image with Gemini. Throws with a readable message on failure. */
+/**
+ * Recognize a single score image with Gemini. Throws with a readable message on failure.
+ *
+ * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through a
+ * shared server-side proxy (see worker/) that holds its own Gemini key instead
+ * of calling Google directly — this lets recognition work for people who
+ * haven't set up their own free key.
+ */
 export async function recognizeWithGemini(
   dataUrl: string,
   apiKey: string,
   model: string,
   useSearch = false,
+  proxyUrl?: string,
 ): Promise<ParsedScore> {
-  const url = `${ENDPOINT}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const useProxy = !apiKey.trim() && !!proxyUrl;
+  const url = useProxy
+    ? `${trimTrailingSlash(proxyUrl!)}/gemini/${encodeURIComponent(model)}`
+    : `${ENDPOINT}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
