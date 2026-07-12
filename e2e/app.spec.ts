@@ -164,29 +164,6 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
   expect(slideFileNames(zip).length).toBeGreaterThanOrEqual(2);
 });
 
-test('auto-recognition settings: pick an engine and persist the Gemini key', async ({ page }) => {
-  await page.goto('./');
-
-  await page.getByTestId('ai-settings-open').click();
-  const keyInput = page.getByTestId('gemini-key-input');
-  await expect(keyInput).toBeVisible();
-
-  await page.locator('.ai-engine', { hasText: '브라우저 OCR' }).click();
-  await expect(keyInput).toBeHidden();
-
-  await page.locator('.ai-engine', { hasText: 'Gemini' }).click();
-  await expect(keyInput).toBeVisible();
-  const searchToggle = page.getByTestId('gemini-search-toggle');
-  await expect(searchToggle).toBeChecked();
-  await searchToggle.uncheck();
-  await keyInput.fill('AIza-test-key');
-  await page.getByRole('button', { name: '닫기' }).click();
-
-  await page.getByTestId('ai-settings-open').click();
-  await expect(page.getByTestId('gemini-key-input')).toHaveValue('AIza-test-key');
-  await expect(page.getByTestId('gemini-search-toggle')).not.toBeChecked();
-});
-
 test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   await page.goto('./');
 
