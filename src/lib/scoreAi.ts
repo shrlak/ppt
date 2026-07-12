@@ -22,10 +22,19 @@ const BASE_PROMPT = [
   '가사에 없는 내용을 지어내지 마세요.',
 ];
 
-/** Extra instructions when Google Search grounding is enabled. */
+/**
+ * Extra instructions when Google Search grounding is enabled. The web is used
+ * ONLY to fix spacing/spelling and to join the note-split syllables correctly —
+ * NOT to change the actual words. The lyric content must stay faithful to the
+ * score even if a web version words it differently.
+ */
 const SEARCH_PROMPT = [
-  '곡 제목으로 웹을 검색해 실제 공식 가사와 대조하고, 악보에서 잘못 읽었거나 빠진 부분을',
-  '정확한 가사로 보정하세요. 확실하지 않으면 악보에 보이는 대로 두세요.',
+  '가사의 단어와 내용은 반드시 악보(이미지)에 적힌 그대로 옮기세요.',
+  '웹 검색 결과로 단어·표현·가사 내용을 바꾸지 마세요. 웹 버전이 달라도 악보를 따릅니다.',
+  '웹 검색은 오직 다음 두 가지에만 사용하세요:',
+  '(1) 음표에 맞춰 하이픈(-)으로 쪼개진 음절을 올바른 단어 경계로 이어 붙이기,',
+  '(2) 띄어쓰기와 맞춤법(문법)을 바로잡기.',
+  '즉, 내용은 악보를 그대로 따르고 표기(띄어쓰기·맞춤법·하이픈 정리)만 웹 기준으로 다듬습니다.',
   '반드시 유효한 JSON 객체 하나만 출력하고, 다른 설명이나 마크다운(```)은 넣지 마세요.',
 ];
 
