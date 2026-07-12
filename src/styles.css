@@ -726,12 +726,54 @@ body {
   color: var(--ink);
   font-size: 0.9rem;
 }
-.library-add select {
+.library-add-label {
+  white-space: nowrap;
+}
+.library-add-combobox {
+  position: relative;
+  min-width: 220px;
+}
+.library-add-input {
+  width: 100%;
   border: 1px solid var(--hairline);
   border-radius: 9px;
   padding: 7px 10px;
-  min-width: 200px;
   font-family: inherit;
+  font-size: inherit;
+}
+.library-add-input:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+}
+.library-add-dropdown {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.library-add-dropdown li {
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.library-add-dropdown li.active {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+.library-add-empty {
+  color: var(--ink-faint);
+  cursor: default !important;
 }
 
 .generate-row {

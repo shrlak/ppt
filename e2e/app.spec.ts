@@ -135,14 +135,21 @@ test('generates a valid pptx from the parsed conti alone', async ({ page }, test
 test('manual flow without a PDF', async ({ page }, testInfo) => {
   await page.goto('./');
 
-  const librarySelect = page.getByTestId('library-add-select');
-  await expect(librarySelect).toBeVisible();
+  const librarySearch = page.getByTestId('library-add-search');
+  await expect(librarySearch).toBeVisible();
+  await librarySearch.click();
   // The library loads asynchronously; wait until real options exist beyond a placeholder.
-  await expect(librarySelect.locator('option').nth(1)).toBeAttached({ timeout: PARSE_TIMEOUT });
+  const options = page.getByTestId('library-add-option');
+  await expect(options.first()).toBeAttached({ timeout: PARSE_TIMEOUT });
 
-  const labels = await librarySelect.locator('option').allTextContents();
-  const songIndex = labels.findIndex((label) => label.includes('주님의 사랑'));
-  await librarySelect.selectOption({ index: songIndex >= 0 ? songIndex : 1 });
+  await librarySearch.fill('주님의 사랑');
+  const match = options.filter({ hasText: '주님의 사랑' });
+  if (await match.count()) {
+    await match.first().click();
+  } else {
+    await librarySearch.fill('');
+    await options.first().click();
+  }
 
   const songCards = page.getByTestId('song-card');
   await expect(songCards).toHaveCount(1, { timeout: PARSE_TIMEOUT });

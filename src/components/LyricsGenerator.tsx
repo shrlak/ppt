@@ -14,6 +14,7 @@ import {
 import SongCard, { type RecogState } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
+import LibraryAddSearch from './LibraryAddSearch';
 import AiSettingsPanel from './AiSettingsPanel';
 import { isRecognitionReady, loadAiSettings, saveAiSettings, type AiSettings } from '../lib/aiSettings';
 import { applyScoreToSong, recognizeScore } from '../lib/scoreRecognition';
@@ -433,28 +434,13 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           <button className="btn" data-testid="add-song" onClick={() => setSongs((l) => [...l, blankSong()])}>
             ＋ 빈 찬양 추가
           </button>
-          <label className="library-add">
-            라이브러리에서 추가:
-            <select
-              data-testid="library-add-select"
-              value=""
-              onChange={(e) => {
-                const entry = library.find((x) => x.title === e.target.value);
-                if (entry) {
-                  setSongs((l) => [...l, songFromLibrary(entry)]);
-                  setEdited(true);
-                }
-              }}
-            >
-              <option value="">곡 선택…</option>
-              {library.map((e) => (
-                <option key={e.title} value={e.title}>
-                  {e.title}
-                  {e.key ? ` (${e.key})` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <LibraryAddSearch
+            library={library}
+            onAdd={(entry) => {
+              setSongs((l) => [...l, songFromLibrary(entry)]);
+              setEdited(true);
+            }}
+          />
           <button className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
             📚 라이브러리 관리
           </button>
