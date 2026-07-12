@@ -72,6 +72,12 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Non-secret: just the shared recognition proxy's URL, if configured
+          # (Settings → Secrets and variables → Actions → Variables). See
+          # worker/README.md. Baking a real API key in here directly would be
+          # unsafe — this static bundle is public.
+          VITE_RECOGNITION_PROXY_URL: ${{ vars.RECOGNITION_PROXY_URL }}
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6

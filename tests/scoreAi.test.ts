@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildGeminiBody,
   extractGeminiText,
   parseGeminiPayload,
+  recognizeWithGemini,
   splitDataUrl,
 } from '../src/lib/scoreAi';
 
@@ -89,5 +90,48 @@ describe('parseGeminiPayload', () => {
     expect(parsed.sections[0].label).toBe('O');
     expect(parsed.sections[1].label).toBe('C');
     expect(parsed.sections[1].lines).toEqual(['Celebrate the light 온 세상 비추네', '찬양해']);
+  });
+});
+
+describe('recognizeWithGemini', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const okResponse = () =>
+    new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"title":"t","sections":[]}' }] } }] }),
+      { status: 200 },
+    );
+
+  it('calls Google directly with the key in the query string when a key is given', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await recognizeWithGemini('data:image/png;base64,ZZZ', 'my-key', 'gemini-2.5-flash', false, 'https://proxy.example');
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('generativelanguage.googleapis.com');
+    expect(url).toContain('key=my-key');
+  });
+
+  it('routes through the proxy instead when the key is blank', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-2.5-flash', false, 'https://proxy.example/');
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://proxy.example/gemini/gemini-2.5-flash');
+  });
+
+  it('calls Google directly (with an empty key) when the key is blank and no proxy is configured', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-2.5-flash', false);
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('generativelanguage.googleapis.com');
   });
 });
