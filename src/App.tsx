@@ -233,7 +233,7 @@ export default function App() {
             className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
             aria-current={index === activeStep ? 'step' : undefined}
           >
-            <span className="wizard-step-dot">{index + 1}</span>
+            <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
             <span className="wizard-step-label">{step.label}</span>
           </li>
         ))}
