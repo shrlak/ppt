@@ -3,27 +3,57 @@
 // anything the user has already typed.
 import type { Song } from './types';
 import type { ParsedScore } from './scoreParser';
-import type { AiSettings } from './aiSettings';
+import type { AiSettings, RecognitionEngine } from './aiSettings';
 import { recognizeWithGemini } from './scoreAi';
+import { recognizeWithHuggingFace } from './scoreHuggingFace';
 import { recognizeWithTesseract, type OcrProgress } from './scoreOcr';
 
 export type { OcrProgress } from './scoreOcr';
 
-/** Run the configured recognition engine on one score image. */
+async function recognizeWithEngine(
+  engine: RecognitionEngine,
+  dataUrl: string,
+  settings: AiSettings,
+  onProgress?: OcrProgress,
+): Promise<ParsedScore> {
+  if (engine === 'gemini') {
+    const key = settings.geminiApiKey.trim();
+    if (!key) throw new Error('Gemini API 키가 설정되지 않았습니다.');
+    return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch);
+  }
+  if (engine === 'huggingface') {
+    const key = settings.huggingfaceApiKey.trim();
+    if (!key) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
+    return recognizeWithHuggingFace(dataUrl, key);
+  }
+  if (engine === 'tesseract') {
+    return recognizeWithTesseract(dataUrl, onProgress);
+  }
+  throw new Error('자동 인식이 꺼져 있습니다.');
+}
+
+/** Run the configured recognition engine on one score image, with automatic fallback. */
 export async function recognizeScore(
   dataUrl: string,
   settings: AiSettings,
   onProgress?: OcrProgress,
 ): Promise<ParsedScore> {
-  if (settings.engine === 'gemini') {
-    const key = settings.geminiApiKey.trim();
-    if (!key) throw new Error('Gemini API 키가 설정되지 않았습니다.');
-    return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch);
+  const engines = [settings.engine, ...settings.fallbackEngines].filter((e) => e !== 'off');
+  if (engines.length === 0) {
+    throw new Error('자동 인식이 꺼져 있습니다.');
   }
-  if (settings.engine === 'tesseract') {
-    return recognizeWithTesseract(dataUrl, onProgress);
+
+  let lastError: Error | null = null;
+  for (const engine of engines) {
+    try {
+      return await recognizeWithEngine(engine, dataUrl, settings, onProgress);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`${engine} 인식 실패, 다음 엔진 시도:`, lastError.message);
+    }
   }
-  throw new Error('자동 인식이 꺼져 있습니다.');
+
+  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
 }
 
 function hasLyrics(song: Song): boolean {

@@ -3,7 +3,7 @@
 // kept in this browser's localStorage only — the key is never sent anywhere
 // except directly to Google when a score is recognized.
 
-export type RecognitionEngine = 'gemini' | 'tesseract' | 'off';
+export type RecognitionEngine = 'gemini' | 'huggingface' | 'tesseract' | 'off';
 
 export interface AiSettings {
   engine: RecognitionEngine;
@@ -11,6 +11,9 @@ export interface AiSettings {
   geminiModel: string;
   /** Cross-check recognized lyrics against the web via Gemini's Google Search grounding. */
   geminiUseSearch: boolean;
+  huggingfaceApiKey: string;
+  /** Fallback engines to try if primary fails (e.g., ['huggingface', 'tesseract']) */
+  fallbackEngines: RecognitionEngine[];
 }
 
 const STORAGE_KEY = 'praise-lyrics-ai-settings';
@@ -26,6 +29,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
   geminiUseSearch: true,
+  huggingfaceApiKey: '',
+  fallbackEngines: ['huggingface', 'tesseract'],
 };
 
 function storage(): Storage | null {
@@ -43,8 +48,11 @@ export function loadAiSettings(): AiSettings {
     const raw = store.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_AI_SETTINGS };
     const data = JSON.parse(raw) as Partial<AiSettings>;
+    const fallbackEngines = Array.isArray(data.fallbackEngines)
+      ? data.fallbackEngines.filter((e): e is RecognitionEngine => ['gemini', 'huggingface', 'tesseract', 'off'].includes(e))
+      : DEFAULT_AI_SETTINGS.fallbackEngines;
     return {
-      engine: data.engine === 'tesseract' || data.engine === 'off' ? data.engine : 'gemini',
+      engine: ['huggingface', 'tesseract', 'off'].includes(data.engine ?? '') ? (data.engine as RecognitionEngine) : 'gemini',
       geminiApiKey: typeof data.geminiApiKey === 'string' ? data.geminiApiKey : '',
       geminiModel:
         typeof data.geminiModel === 'string' && data.geminiModel.trim()
@@ -53,6 +61,8 @@ export function loadAiSettings(): AiSettings {
             : data.geminiModel.trim()
           : DEFAULT_GEMINI_MODEL,
       geminiUseSearch: typeof data.geminiUseSearch === 'boolean' ? data.geminiUseSearch : true,
+      huggingfaceApiKey: typeof data.huggingfaceApiKey === 'string' ? data.huggingfaceApiKey : '',
+      fallbackEngines,
     };
   } catch {
     return { ...DEFAULT_AI_SETTINGS };
