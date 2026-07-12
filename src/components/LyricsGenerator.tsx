@@ -71,6 +71,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
   const aiSettingsRef = useRef(aiSettings);
+  const autoAttemptedRef = useRef<Set<string>>(new Set());
+  const recogQueueRef = useRef<Promise<void>>(Promise.resolve());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -125,6 +127,24 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     },
     [recognizeSong],
   );
+
+  // Auto-recognize new songs (a score page, no lyrics yet) as soon as recognition
+  // is ready — right after upload, or later when the user adds their key. Runs one
+  // at a time to stay within free API rate limits, each song attempted at most once,
+  // and is skipped under browser automation so tests stay deterministic.
+  useEffect(() => {
+    const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
+    if (isAutomated || !docRef.current || !isRecognitionReady(aiSettings)) return;
+    const pending = songs.filter(
+      (s) => s.pageIndex != null && !songHasLyrics(s) && !autoAttemptedRef.current.has(s.id),
+    );
+    if (pending.length === 0) return;
+    for (const s of pending) autoAttemptedRef.current.add(s.id);
+    recogQueueRef.current = pending.reduce(
+      (chain, s) => chain.then(() => recognizeSong(s.id, s.pageIndex as number)),
+      recogQueueRef.current,
+    );
+  }, [songs, aiSettings, recognizeSong]);
 
   useEffect(() => {
     onSongsChange(songs);
@@ -231,6 +251,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       setEdited(false);
       setPageImages({});
       setRecog({});
+      autoAttemptedRef.current.clear();
       onDateDetected?.(parsed.info.date);
       onContiInfoDetected?.(parsed.info);
       if (!hasCover && next.length > 0) {
@@ -255,18 +276,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         }
       })();
 
-      // Auto-recognize lyrics for new songs (a score page, no lyrics yet) once
-      // recognition is configured. Runs one at a time to stay within free API
-      // rate limits, and is skipped under browser automation (deterministic tests).
-      const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
-      if (isRecognitionReady(aiSettingsRef.current) && !isAutomated) {
-        const targets = next.filter((s) => s.pageIndex != null && !songHasLyrics(s));
-        void (async () => {
-          for (const s of targets) {
-            await recognizeSong(s.id, s.pageIndex!);
-          }
-        })();
-      }
+      // New songs are auto-recognized by the reactive effect above once
+      // recognition is ready (on upload, or later when a key is added).
 
       if (next.length === 0) {
         setError('콘티에서 곡을 찾지 못했습니다. 곡을 직접 추가해 주세요.');

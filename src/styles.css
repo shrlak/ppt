@@ -1244,6 +1244,33 @@ select option {
 .ai-field input {
   font-family: var(--mono);
 }
+.ai-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.ai-toggle input {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.ai-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-toggle-hint {
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
 .ai-settings a {
   color: var(--accent-2);
 }

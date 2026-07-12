@@ -9,6 +9,8 @@ export interface AiSettings {
   engine: RecognitionEngine;
   geminiApiKey: string;
   geminiModel: string;
+  /** Cross-check recognized lyrics against the web via Gemini's Google Search grounding. */
+  geminiUseSearch: boolean;
 }
 
 const STORAGE_KEY = 'praise-lyrics-ai-settings';
@@ -19,6 +21,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   engine: 'gemini',
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
+  geminiUseSearch: true,
 };
 
 function storage(): Storage | null {
@@ -43,6 +46,7 @@ export function loadAiSettings(): AiSettings {
         typeof data.geminiModel === 'string' && data.geminiModel.trim()
           ? data.geminiModel.trim()
           : DEFAULT_GEMINI_MODEL,
+      geminiUseSearch: typeof data.geminiUseSearch === 'boolean' ? data.geminiUseSearch : true,
     };
   } catch {
     return { ...DEFAULT_AI_SETTINGS };

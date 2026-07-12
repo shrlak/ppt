@@ -13,15 +13,28 @@ describe('splitDataUrl', () => {
 });
 
 describe('buildGeminiBody', () => {
-  it('embeds the image as inline_data with the right mime type', () => {
+  it('embeds the image and uses a strict JSON schema without search', () => {
     const body = buildGeminiBody('data:image/png;base64,ZZZ') as {
       contents: { parts: { text?: string; inline_data?: { mime_type: string; data: string } }[] }[];
-      generationConfig: { responseMimeType: string };
+      generationConfig: { responseMimeType?: string };
+      tools?: unknown;
     };
     const parts = body.contents[0].parts;
     expect(parts.some((p) => p.text?.includes('악보'))).toBe(true);
     expect(parts.find((p) => p.inline_data)?.inline_data).toEqual({ mime_type: 'image/png', data: 'ZZZ' });
     expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.tools).toBeUndefined();
+  });
+
+  it('attaches the google_search tool and drops the schema when cross-checking', () => {
+    const body = buildGeminiBody('data:image/jpeg;base64,ZZZ', true) as {
+      contents: { parts: { text?: string }[] }[];
+      generationConfig: { responseMimeType?: string };
+      tools?: { google_search?: unknown }[];
+    };
+    expect(body.tools?.[0]?.google_search).toBeDefined();
+    expect(body.generationConfig.responseMimeType).toBeUndefined();
+    expect(body.contents[0].parts.some((p) => p.text?.includes('웹'))).toBe(true);
   });
 });
 
@@ -62,5 +75,19 @@ describe('parseGeminiPayload', () => {
     expect(parsed.order).toEqual([]);
     // Empty-label section dropped; the valid one kept with empty lines.
     expect(parsed.sections).toEqual([{ label: 'C', lines: [] }]);
+  });
+
+  it('normalizes section labels and strips syllable hyphens from lyrics', () => {
+    const parsed = parseGeminiPayload({
+      title: 'Celebrate the Light',
+      sections: [
+        { label: 'Outro', lines: ['라랄랄라'] },
+        { label: '후렴', lines: ['Ce-le-brate the light 온 세상 비추네', '찬-양-해'] },
+      ],
+    });
+    // Outro → O, 후렴 → C (canonical tokens the slide planner matches).
+    expect(parsed.sections[0].label).toBe('O');
+    expect(parsed.sections[1].label).toBe('C');
+    expect(parsed.sections[1].lines).toEqual(['Celebrate the light 온 세상 비추네', '찬양해']);
   });
 });

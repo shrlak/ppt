@@ -59,6 +59,20 @@ export default function AiSettingsPanel({ settings, onChange }: Props) {
               onChange={(e) => onChange({ ...settings, geminiModel: e.target.value })}
             />
           </label>
+          <label className="ai-toggle">
+            <input
+              type="checkbox"
+              data-testid="gemini-search-toggle"
+              checked={settings.geminiUseSearch}
+              onChange={(e) => onChange({ ...settings, geminiUseSearch: e.target.checked })}
+            />
+            <span>
+              <strong>웹에서 가사 교차검증</strong>
+              <span className="ai-toggle-hint">
+                곡 제목을 구글에서 검색해 실제 공식 가사와 대조·보정합니다 (조금 느려질 수 있어요).
+              </span>
+            </span>
+          </label>
           <p className="input-hint">
             무료 키는{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
