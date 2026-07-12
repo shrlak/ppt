@@ -7,7 +7,7 @@ interface Props {
 
 const ENGINES: { id: RecognitionEngine; label: string; hint: string }[] = [
   { id: 'gemini', label: 'Gemini (무료 키)', hint: '정확도 높음 · 무료 API 키 필요' },
-  { id: 'huggingface', label: 'Hugging Face', hint: '좋은 성능 · Gemini 대체용' },
+  { id: 'huggingface', label: 'Hugging Face', hint: '좋은 성능 · 무료 API 키 필요' },
   { id: 'tesseract', label: '브라우저 OCR', hint: '키 없이 오프라인 · 정확도 낮음' },
   { id: 'off', label: '끄기', hint: '자동 인식 안 함' },
 ];
