@@ -3,7 +3,7 @@
 찬양, 성경 말씀, 설교, 광고를 **5단계 화면**에서 `다음`/이전 버튼으로 입력하면
 **하나의 예배 슬라이드 PPTX**로 합쳐서 만들어 주는 웹 앱입니다.
 
-배포 주소: <https://shrlak.github.io/lyrics/>
+배포 주소: <https://shrlak.github.io/ppt/>
 
 ## 생성되는 슬라이드 순서
 
@@ -128,7 +128,7 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   합니다. 이 설정 전에는 CI의 `Deploy to GitHub Pages` 잡이 시작 단계에서 거부되어
   실패합니다 (빌드·테스트 잡은 정상 동작).
 - 설정 후 Actions 탭에서 실패한 워크플로를 **Re-run** 하거나 아무 커밋이나 push하면
-  배포됩니다. 배포 주소: `https://<계정>.github.io/lyrics/`
+  배포됩니다. 배포 주소: `https://<계정>.github.io/ppt/`
 - 기본 브랜치(default branch)에 push될 때마다 테스트 통과 후 자동으로 배포됩니다.
 - 배포가 계속 거부되면 **Settings → Environments → github-pages → Deployment branches**에서
   기본 브랜치가 허용되어 있는지 확인하세요.

@@ -246,10 +246,17 @@ export default function App() {
             <li
               key={step.id}
               className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
-              aria-current={index === activeStep ? 'step' : undefined}
             >
-              <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
-              <span className="wizard-step-label">{step.label}</span>
+              <button
+                type="button"
+                className="wizard-step-button"
+                data-testid={`wizard-tab-${step.id}`}
+                aria-current={index === activeStep ? 'step' : undefined}
+                onClick={() => moveToStep(index)}
+              >
+                <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
+                <span className="wizard-step-label">{step.label}</span>
+              </button>
             </li>
           ))}
         </ol>

@@ -2,9 +2,10 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-// Deployed under https://<user>.github.io/lyrics/ via GitHub Pages.
-// BASE_PATH can override for local preview or a different repo name.
-const base = process.env.BASE_PATH ?? '/lyrics/';
+// Deployed under https://<user>.github.io/ppt/ via GitHub Pages (project
+// sites are served at /<repo-name>/). BASE_PATH can override for local
+// preview or a different repo name; CI passes it from the actual repo name.
+const base = process.env.BASE_PATH ?? '/ppt/';
 
 export default defineConfig({
   base,

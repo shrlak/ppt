@@ -4,7 +4,7 @@ compatibility_date = "2025-01-01"
 
 # Comma-separated list of origins allowed to call this proxy. Must match the
 # deployed site exactly (scheme + host, no trailing slash) — the GitHub Pages
-# URL derived from vite.config.ts's base path ("/lyrics/").
+# URL derived from vite.config.ts's base path ("/ppt/").
 # Add a second origin (comma-separated) for local dev, e.g. "http://localhost:4173".
 [vars]
 ALLOWED_ORIGINS = "https://shrlak.github.io"

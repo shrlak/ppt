@@ -60,6 +60,25 @@ test('moves through the five-step wizard with next and back buttons', async ({ p
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 });
 
+test('jumps directly between steps via the progress tabs', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+
+  // Jump forward several steps at once.
+  await page.getByTestId('wizard-tab-download').click();
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeHidden();
+  await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
+
+  // Jump backwards to a middle step.
+  await page.getByTestId('wizard-tab-bible').click();
+  await expect(page.getByTestId('wizard-panel-download')).toBeHidden();
+  await expect(page.getByTestId('wizard-panel-bible')).toBeVisible();
+
+  // And back to the first step.
+  await page.getByTestId('wizard-tab-lyrics').click();
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+});
+
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);

@@ -10,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:4173/lyrics/',
+    baseURL: 'http://localhost:4173/ppt/',
     trace: 'retain-on-failure',
   },
   projects: [
@@ -25,7 +25,7 @@ export default defineConfig({
   webServer: {
     // Serves the production build; run `npm run build` first (CI does this before playwright).
     command: 'npm run preview -- --port 4173 --strictPort',
-    url: 'http://localhost:4173/lyrics/',
+    url: 'http://localhost:4173/ppt/',
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

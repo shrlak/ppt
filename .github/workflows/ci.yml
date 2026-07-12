@@ -73,6 +73,10 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # GitHub Pages serves project sites at /<repo-name>/, so derive the
+          # base path from the actual repo name instead of hardcoding it —
+          # this keeps deploys working if the repo is ever renamed again.
+          BASE_PATH: /${{ github.event.repository.name }}/
           # Non-secret: just the shared recognition proxy's URL, if configured
           # (Settings → Secrets and variables → Actions → Variables). See
           # worker/README.md. Baking a real API key in here directly would be
