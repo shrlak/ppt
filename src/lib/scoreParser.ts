@@ -43,6 +43,21 @@ function hangulCount(s: string): number {
   return (s.match(/[가-힣]/g) ?? []).length;
 }
 
+/**
+ * Clean a lyric line so it reads naturally: scores split words across notes with
+ * hyphens ("Ce-le-brate", "찬-양-해"), which should be joined back into whole
+ * words. Collapses any hyphen (with or without surrounding spaces) that sits
+ * between two non-space characters, then squeezes leftover double spaces.
+ */
+export function cleanLyricLine(line: string): string {
+  return line
+    // A lookahead keeps the right-hand character unconsumed, so chains of
+    // single-syllable splits ("찬-양-해") all collapse in one pass.
+    .replace(/(\S)[ \t]*[-–—][ \t]*(?=\S)/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 /** OCR routinely reads a leading "I" as l, |, 1 or i — repair standalone tokens. */
 function normalizeOrderOcr(line: string): string {
   return line
@@ -194,6 +209,12 @@ export function parseScoreText(text: string): ParsedScore {
       lines: i === 0 ? lyricLines : [],
     }));
   }
+
+  // Join syllable hyphens so the lyrics read naturally.
+  sections = sections.map((s) => ({
+    label: s.label,
+    lines: s.lines.map(cleanLyricLine).filter((l) => l.length > 0),
+  }));
 
   return { title, key, order, sections };
 }

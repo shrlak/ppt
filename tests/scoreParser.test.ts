@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { parseScoreText } from '../src/lib/scoreParser';
+import { cleanLyricLine, parseScoreText } from '../src/lib/scoreParser';
+
+describe('cleanLyricLine', () => {
+  it('joins syllable hyphens (with or without spaces) into natural words', () => {
+    expect(cleanLyricLine('Ce-le-brate the light')).toBe('Celebrate the light');
+    expect(cleanLyricLine('Ce - le - brate')).toBe('Celebrate');
+    expect(cleanLyricLine('찬-양-해')).toBe('찬양해');
+  });
+
+  it('leaves ordinary spacing and dangling dashes alone', () => {
+    expect(cleanLyricLine('온 세상 비추네')).toBe('온 세상 비추네');
+    expect(cleanLyricLine('사랑 -')).toBe('사랑 -');
+  });
+});
 
 describe('parseScoreText', () => {
   it('reads the order line at the top (starting with I) and the title', () => {

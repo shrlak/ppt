@@ -18,7 +18,7 @@ export async function recognizeScore(
   if (settings.engine === 'gemini') {
     const key = settings.geminiApiKey.trim();
     if (!key) throw new Error('Gemini API 키가 설정되지 않았습니다.');
-    return recognizeWithGemini(dataUrl, key, settings.geminiModel);
+    return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch);
   }
   if (settings.engine === 'tesseract') {
     return recognizeWithTesseract(dataUrl, onProgress);

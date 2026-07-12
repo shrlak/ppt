@@ -59,6 +59,21 @@ export default function AiSettingsPanel({ settings, onChange }: Props) {
               onChange={(e) => onChange({ ...settings, geminiModel: e.target.value })}
             />
           </label>
+          <label className="ai-toggle">
+            <input
+              type="checkbox"
+              data-testid="gemini-search-toggle"
+              checked={settings.geminiUseSearch}
+              onChange={(e) => onChange({ ...settings, geminiUseSearch: e.target.checked })}
+            />
+            <span>
+              <strong>웹에서 띄어쓰기·맞춤법 교정</strong>
+              <span className="ai-toggle-hint">
+                곡 제목을 구글에서 검색해 <strong>띄어쓰기·맞춤법</strong>을 바로잡고 음절 하이픈(-)을
+                자연스럽게 정리합니다. 가사 내용은 <strong>악보 그대로</strong> 유지해요 (조금 느려질 수 있어요).
+              </span>
+            </span>
+          </label>
           <p className="input-hint">
             무료 키는{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
