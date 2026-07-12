@@ -113,7 +113,75 @@ function DeckSlotRow({
   );
 }
 
+// Soft gate to keep casual visitors out of deck administration. This is a
+// static client-side site, so the check can't be real security — the decks
+// it protects live in the visitor's own browser anyway.
+const ADMIN_PASSWORD = 'kccpmedia1980';
+const UNLOCK_KEY = 'kccp-admin-unlocked';
+
 export default function AdminPanel({ onClose, onDeckChange }: Props) {
+  const [unlocked, setUnlocked] = useState(() => {
+    try {
+      return sessionStorage.getItem(UNLOCK_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [password, setPassword] = useState('');
+  const [wrong, setWrong] = useState(false);
+
+  function handleUnlock() {
+    if (password === ADMIN_PASSWORD) {
+      try {
+        sessionStorage.setItem(UNLOCK_KEY, '1');
+      } catch {
+        // Session-only unlock still works without storage.
+      }
+      setUnlocked(true);
+    } else {
+      setWrong(true);
+    }
+  }
+
+  if (!unlocked) {
+    return (
+      <Modal title="관리자 설정" onClose={onClose}>
+        <form
+          className="admin-lock"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleUnlock();
+          }}
+        >
+          <p className="admin-intro">관리자 설정에 접근하려면 비밀번호를 입력하세요.</p>
+          <label htmlFor="admin-password">
+            비밀번호
+            <input
+              id="admin-password"
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              data-testid="admin-password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setWrong(false);
+              }}
+            />
+          </label>
+          {wrong && (
+            <p className="admin-lock-error" data-testid="admin-password-error">
+              비밀번호가 올바르지 않습니다.
+            </p>
+          )}
+          <button type="submit" className="btn btn-primary" data-testid="admin-unlock">
+            확인
+          </button>
+        </form>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title="관리자 설정" onClose={onClose}>
       <p className="admin-intro">

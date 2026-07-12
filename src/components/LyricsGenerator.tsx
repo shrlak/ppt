@@ -68,13 +68,18 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
   const autoAttemptedRef = useRef<Set<string>>(new Set());
+  // Songs whose scan result should be discarded (library lyrics arrived first).
+  const scanCancelledRef = useRef<Set<string>>(new Set());
+  const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
-    void (async () => {
+    libraryPromiseRef.current = (async () => {
       const bundled = await fetchBundledLibrary(BASE);
-      setLibrary(mergeLibraries(bundled, loadUserLibrary()));
+      const merged = mergeLibraries(bundled, loadUserLibrary());
+      setLibrary(merged);
+      return merged;
     })();
     return () => docRef.current?.destroy();
   }, []);
@@ -83,15 +88,18 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const recognizeSong = useCallback(async (songId: string, pageIndex: number) => {
     const doc = docRef.current;
     if (!doc) return;
+    const cancelled = () => scanCancelledRef.current.has(songId);
     setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: 0 } }));
     try {
       const image = await doc.renderPage(pageIndex, 1240);
-      const parsed = await recognizeScore(image, DEFAULT_AI_SETTINGS, (p) =>
-        setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: p } })),
-      );
+      const parsed = await recognizeScore(image, DEFAULT_AI_SETTINGS, (p) => {
+        if (!cancelled()) setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: p } }));
+      });
+      if (cancelled()) return;
       setSongs((list) => list.map((s) => (s.id === songId ? applyScoreToSong(s, parsed) : s)));
       setRecog((r) => ({ ...r, [songId]: { status: 'done' } }));
     } catch (e) {
+      if (cancelled()) return;
       setRecog((r) => ({
         ...r,
         [songId]: { status: 'error', message: e instanceof Error ? e.message : String(e) },
@@ -102,25 +110,60 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const handleRecognizeClick = useCallback(
     (song: Song) => {
       if (song.pageIndex == null) return;
+      scanCancelledRef.current.delete(song.id);
       void recognizeSong(song.id, song.pageIndex);
     },
     [recognizeSong],
   );
 
+  /**
+   * Fill a lyric-less song from the library when its title is already known
+   * there, and stop any scan that is still running for it — the saved lyrics
+   * are authoritative, so scanning the score would be wasted work.
+   */
+  const fillFromLibrary = useCallback((song: Song, entry: LibraryEntry) => {
+    scanCancelledRef.current.add(song.id);
+    autoAttemptedRef.current.add(song.id);
+    setSongs((list) =>
+      list.map((s) =>
+        s.id === song.id
+          ? {
+              ...s,
+              title: entry.title,
+              key: s.key ?? entry.key,
+              sections: structuredClone(entry.sections),
+              order: [...entry.order],
+            }
+          : s,
+      ),
+    );
+    setRecog((r) => (r[song.id] ? { ...r, [song.id]: { status: 'done' } } : r));
+    showToast(`라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
+  }, []);
+
   // Auto-recognize new songs (a score page, no lyrics yet) right after upload.
-  // All pending songs are recognized in parallel rather than one at a time,
-  // each attempted at most once, and this is skipped under browser automation
-  // so tests stay deterministic.
+  // Songs whose title is already in the library skip the scan entirely and get
+  // their saved lyrics instead. The rest are recognized in parallel rather
+  // than one at a time, each attempted at most once, and scanning is skipped
+  // under browser automation so tests stay deterministic.
   useEffect(() => {
-    const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
-    if (isAutomated || !docRef.current) return;
     const pending = songs.filter(
       (s) => s.pageIndex != null && !songHasLyrics(s) && !autoAttemptedRef.current.has(s.id),
     );
     if (pending.length === 0) return;
-    for (const s of pending) autoAttemptedRef.current.add(s.id);
-    for (const s of pending) void recognizeSong(s.id, s.pageIndex as number);
-  }, [songs, recognizeSong]);
+
+    const toScan: Song[] = [];
+    for (const s of pending) {
+      const known = s.title.trim() && !/^새 찬양/.test(s.title) ? findEntry(library, s.title) : undefined;
+      if (known) fillFromLibrary(s, known);
+      else toScan.push(s);
+    }
+
+    const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
+    if (isAutomated || !docRef.current) return;
+    for (const s of toScan) autoAttemptedRef.current.add(s.id);
+    for (const s of toScan) void recognizeSong(s.id, s.pageIndex as number);
+  }, [songs, library, recognizeSong, fillFromLibrary]);
 
   useEffect(() => {
     onSongsChange(songs);
@@ -180,6 +223,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       docRef.current = doc;
       const parsed = doc.parsed;
 
+      // Wait for the song library before matching titles, so a conti uploaded
+      // right after page load still pulls saved lyrics instead of scanning.
+      const lib = library.length > 0 ? library : ((await libraryPromiseRef.current) ?? []);
+
       const next: Song[] = [];
       const assigned = new Set<number>();
       // A conti without a recognized cover page still has usable sheet music:
@@ -187,13 +234,13 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       const hasCover = parsed.info.songs.length > 0;
       const baseSongs = hasCover
         ? parsed.info.songs
-        : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, library);
+        : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, lib);
       const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(baseSongs);
       const excludedPages = new Set<number>();
       if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
       for (const entry of lyricsSongs) {
-        const hit = findEntry(library, entry.title);
+        const hit = findEntry(lib, entry.title);
         const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
         song.title = entry.title;
         song.key = entry.key ?? song.key;
@@ -207,7 +254,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       for (const page of parsed.musicPages) {
         if (assigned.has(page) || excludedPages.has(page)) continue;
         const pageText = normalizeTitle(parsed.pageTexts[page - 1] ?? '');
-        const hit = library.find((e) => {
+        const hit = lib.find((e) => {
           const t = normalizeTitle(e.title);
           return t.length >= 2 && pageText.includes(t);
         });
@@ -395,16 +442,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             onZoom={() => setZoomPage(song.pageIndex ?? null)}
             onTitleBlur={(title) => {
               const hit = findEntry(library, title);
-              const hasLyrics = song.sections.some((sec) => sec.lines.some((l) => l.trim()));
-              if (hit && !hasLyrics) {
-                updateSong({
-                  ...song,
-                  title: hit.title,
-                  key: song.key ?? hit.key,
-                  sections: structuredClone(hit.sections),
-                  order: [...hit.order],
-                });
-                showToast(`라이브러리에서 '${hit.title}' 가사를 불러왔습니다.`);
+              if (hit && !songHasLyrics(song)) {
+                setEdited(true);
+                fillFromLibrary(song, hit);
               }
             }}
           />

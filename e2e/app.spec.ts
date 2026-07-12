@@ -83,6 +83,14 @@ test('jumps directly between steps via the progress tabs', async ({ page }) => {
 test('admin panel replaces the front deck and restores the default', async ({ page }) => {
   await page.goto('./');
   await page.getByTestId('admin-open').click();
+
+  // Password-gated: a wrong password is rejected, the right one unlocks.
+  await page.getByTestId('admin-password').fill('wrong-password');
+  await page.getByTestId('admin-unlock').click();
+  await expect(page.getByTestId('admin-password-error')).toBeVisible();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
 
   // Any valid .pptx works as a replacement; the bundled lyrics template has 6 slides.
@@ -97,6 +105,25 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
 
   await page.getByTestId('admin-deck-front').getByRole('button', { name: '기본값 복원' }).click();
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
+});
+
+test('typing a library title into a blank song pulls up its saved lyrics', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('add-song').click();
+
+  const card = page.getByTestId('song-card').first();
+  // Wait for the bundled library to load before relying on title matching.
+  await expect(page.getByTestId('library-add-search')).toBeVisible();
+  await expect
+    .poll(async () => {
+      await card.getByTestId('song-title-input').fill('입례');
+      await card.getByTestId('song-title-input').blur();
+      return card.getByTestId('section-textarea').count();
+    }, { timeout: PARSE_TIMEOUT })
+    .toBeGreaterThan(0);
+
+  await expect(card.getByTestId('section-textarea').first()).not.toHaveValue('');
+  await expect(card.getByTestId('order-input')).not.toHaveValue('');
 });
 
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
