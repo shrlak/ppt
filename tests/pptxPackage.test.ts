@@ -55,4 +55,14 @@ describe('pptx package integrity', () => {
     const data = await zip.generateAsync({ type: 'uint8array' });
     await expect(assertPptxIntegrity(data)).rejects.toThrow('PPTX 무결성 검사 실패');
   });
+
+  it('rejects a package whose XML carries characters XML cannot represent', async () => {
+    const zip = await JSZip.loadAsync(frontSlides);
+    await stripNonVisualParts(zip);
+    const slide = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    // A raw form feed — what OCR text can smuggle in — is illegal even escaped.
+    zip.file('ppt/slides/slide1.xml', slide.replace('</p:sld>', '\u000C</p:sld>'));
+    const data = await zip.generateAsync({ type: 'uint8array' });
+    await expect(assertPptxIntegrity(data)).rejects.toThrow('characters not allowed in XML');
+  });
 });

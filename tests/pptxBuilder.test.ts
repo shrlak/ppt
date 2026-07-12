@@ -135,4 +135,13 @@ describe('xmlEscape', () => {
   it('escapes the five XML special characters', () => {
     expect(xmlEscape(`<a & "b" 'c'>`)).toBe('&lt;a &amp; &quot;b&quot; &apos;c&apos;&gt;');
   });
+
+  it('replaces or strips characters XML 1.0 cannot carry', () => {
+    // Vertical tab (Word soft line break) and form feed (OCR page separator)
+    // become spaces; other control characters and lone surrogates vanish.
+    expect(xmlEscape('주\u000B님\u000C의')).toBe('주 님 의');
+    expect(xmlEscape('사\u0000랑\u0007과\u001F')).toBe('사랑과');
+    expect(xmlEscape('은\uD800혜')).toBe('은혜');
+    expect(xmlEscape('平\t안\n과\r기쁨')).toBe('平\t안\n과\r기쁨');
+  });
 });

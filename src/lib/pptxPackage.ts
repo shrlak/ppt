@@ -179,6 +179,41 @@ export async function findBrokenRelationships(zip: JSZip): Promise<string[]> {
   return errors;
 }
 
+// Characters XML 1.0 cannot carry at all (not even as entity references).
+// PowerPoint reports a deck containing one as corrupt and offers to repair it.
+const ILLEGAL_XML_CHAR =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * Check every XML part for characters XML cannot represent and — when a
+ * DOMParser is available (always, in the browser) — for well-formedness.
+ * Catches text-level corruption that relationship checks can't see.
+ */
+export async function findMalformedXmlParts(zip: JSZip): Promise<string[]> {
+  const errors: string[] = [];
+  // Structural type so this file also type-checks under the node tsconfig
+  // (tests), where the DOM lib — and thus the DOMParser type — is absent.
+  interface XmlParser {
+    parseFromString(text: string, type: string): { getElementsByTagName(name: string): { length: number } };
+  }
+  const DomParser = (globalThis as { DOMParser?: new () => XmlParser }).DOMParser;
+  const parser = DomParser ? new DomParser() : null;
+  const xmlPaths = Object.keys(zip.files).filter(
+    (path) => (path.endsWith('.xml') || path.endsWith('.rels')) && !zip.files[path].dir,
+  );
+  for (const path of xmlPaths) {
+    const text = await zip.file(path)!.async('string');
+    if (ILLEGAL_XML_CHAR.test(text)) {
+      errors.push(`${path}: contains characters not allowed in XML`);
+      continue;
+    }
+    if (parser && parser.parseFromString(text, 'application/xml').getElementsByTagName('parsererror').length > 0) {
+      errors.push(`${path}: malformed XML`);
+    }
+  }
+  return errors;
+}
+
 /** Validate the final deck before the browser offers it for download. */
 export async function assertPptxIntegrity(data: ArrayBuffer | Uint8Array): Promise<void> {
   const zip = await JSZip.loadAsync(data);
@@ -187,7 +222,7 @@ export async function assertPptxIntegrity(data: ArrayBuffer | Uint8Array): Promi
     if (!zip.file(path)) throw new Error(`PPTX 필수 파일이 없습니다: ${path}`);
   }
 
-  const errors = await findBrokenRelationships(zip);
+  const errors = [...(await findMalformedXmlParts(zip)), ...(await findBrokenRelationships(zip))];
   const slideFiles = Object.keys(zip.files).filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path));
   const presentation = await zip.file('ppt/presentation.xml')!.async('string');
   const listedSlides = presentation.match(/<p:sldId\b/g)?.length ?? 0;

@@ -14,8 +14,17 @@ const LAYOUT_REL_TYPE =
 const IMAGE_REL_TYPE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
 
+// XML 1.0 cannot represent most control characters at all — not even as
+// entity references. Real-world input carries them anyway: OCR emits form
+// feeds, and text pasted from Word uses vertical tabs for soft line breaks.
+// PowerPoint refuses to open a deck containing one ("needs repair").
+const XML_ILLEGAL =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 export function xmlEscape(s: string): string {
   return s
+    .replace(/[\u000B\u000C\u0085]/g, ' ') // VT/FF/NEL usually meant a line break — keep a gap
+    .replace(XML_ILLEGAL, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

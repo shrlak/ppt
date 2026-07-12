@@ -5,6 +5,10 @@ import JSZip from 'jszip';
 import type { VerseSlideData } from './types';
 import type { VerseSlidePlan } from './versePlanner';
 import { stripNonVisualParts } from '../lib/pptxPackage';
+// Reused as this module's escapeXml: besides the special characters it strips
+// XML-illegal control characters, which cleanText below can even resurrect
+// from numeric entities (&#11; → raw 0x0B) hiding in translation data.
+import { xmlEscape as escapeXml } from '../lib/pptxBuilder';
 
 const PLACEHOLDERS: Record<string, string> = {
   title: '{{TITLE}}',
@@ -19,10 +23,6 @@ const PLACEHOLDERS: Record<string, string> = {
   body2: '{{BODY2}}',
   body3: '{{BODY3}}',
 };
-
-function escapeXml(t: string): string {
-  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 function cleanText(t: string): string {
   return t
