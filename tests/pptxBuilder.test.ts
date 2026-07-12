@@ -107,11 +107,19 @@ describe('buildPptx', () => {
 });
 
 describe('suggestFileName', () => {
-  it('formats the conti date', () => {
-    expect(suggestFileName('7/11/26')).toBe('7.11.26 찬양 가사.pptx');
+  it('uses the upcoming Sunday for a Saturday conti date', () => {
+    expect(suggestFileName('7/11/26')).toBe('0712.pptx');
   });
-  it('falls back without a date', () => {
-    expect(suggestFileName()).toBe('찬양 가사.pptx');
+  it('keeps a Sunday conti date unchanged', () => {
+    expect(suggestFileName('7/12/26')).toBe('0712.pptx');
+  });
+  it('handles a Sunday in the next year', () => {
+    expect(suggestFileName('12/31/26')).toBe('0103.pptx');
+  });
+  it('uses the current week when the conti date is missing or invalid', () => {
+    const friday = new Date(2026, 6, 10);
+    expect(suggestFileName(undefined, friday)).toBe('0712.pptx');
+    expect(suggestFileName('not-a-date', friday)).toBe('0712.pptx');
   });
 });
 

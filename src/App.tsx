@@ -29,7 +29,51 @@ const SERVICE_SLIDES = {
 const FRONT_SLIDE_COUNT = 4;
 const BACK_SLIDE_COUNT = 21;
 
+const WIZARD_STEPS = [
+  { id: 'lyrics', label: '찬양' },
+  { id: 'bible', label: '성경 말씀' },
+  { id: 'sermon', label: '설교' },
+  { id: 'announcement', label: '광고' },
+  { id: 'download', label: '다운로드' },
+] as const;
+
+interface WizardNavigationProps {
+  step: number;
+  onMove: (step: number) => void;
+}
+
+function WizardNavigation({ step, onMove }: WizardNavigationProps) {
+  const currentId = WIZARD_STEPS[step].id;
+  const nextStep = WIZARD_STEPS[step + 1];
+
+  return (
+    <nav className="wizard-nav" aria-label="단계 이동">
+      {step > 0 ? (
+        <button
+          className="btn"
+          data-testid={`wizard-back-${currentId}`}
+          onClick={() => onMove(step - 1)}
+        >
+          이전
+        </button>
+      ) : (
+        <span />
+      )}
+      {nextStep && (
+        <button
+          className="btn btn-primary"
+          data-testid={`wizard-next-${currentId}`}
+          onClick={() => onMove(step + 1)}
+        >
+          다음: {nextStep.label}
+        </button>
+      )}
+    </nav>
+  );
+}
+
 export default function App() {
+  const [activeStep, setActiveStep] = useState(0);
   const [songs, setSongs] = useState<Song[]>([]);
   const [contiDate, setContiDate] = useState<string | undefined>();
   const [bibleState, setBibleState] = useState<BibleGeneratorState>({
@@ -41,8 +85,6 @@ export default function App() {
   });
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
-  const [fileName, setFileName] = useState(suggestFileName());
-  const [fileNameEdited, setFileNameEdited] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contiBibleAutoFill, setContiBibleAutoFill] = useState({
@@ -52,13 +94,7 @@ export default function App() {
   });
 
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
-  const handleDateDetected = useCallback(
-    (date: string | undefined) => {
-      setContiDate(date);
-      if (!fileNameEdited) setFileName(suggestFileName(date));
-    },
-    [fileNameEdited],
-  );
+  const handleDateDetected = useCallback((date: string | undefined) => setContiDate(date), []);
   const handleBibleStateChange = useCallback((state: BibleGeneratorState) => setBibleState(state), []);
   const handleContiInfoDetected = useCallback((info: ContiInfo) => {
     setContiBibleAutoFill((previous) => ({
@@ -70,6 +106,7 @@ export default function App() {
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
+  const fileName = suggestFileName(contiDate);
 
   const lyricsSlideCount = planAllSlides(songs).length;
   const hasAnyContent = songs.length > 0 || bibleRefs.length > 0 || sermonFile !== null || announcementItems.length > 0;
@@ -177,13 +214,30 @@ export default function App() {
   // data loaded) — shown as a "+" lower bound instead of a false-precise number.
   const totalSlideCount = fixedSlideCount + lyricsSlideCount + announcementItems.length;
 
+  function moveToStep(step: number) {
+    setActiveStep(step);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   return (
     <div className="app">
       <header className="header">
-        <span className="kicker">KCCP · Worship Slides</span>
         <h1>KCCP PPT Generator</h1>
-        <p>찬양·말씀·설교·광고를 한 번에 정리해 예배 슬라이드 한 개로 만들어 드립니다.</p>
+        <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
       </header>
+
+      <ol className="wizard-progress" aria-label="PPT 생성 단계">
+        {WIZARD_STEPS.map((step, index) => (
+          <li
+            key={step.id}
+            className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
+            aria-current={index === activeStep ? 'step' : undefined}
+          >
+            <span className="wizard-step-dot">{index + 1}</span>
+            <span className="wizard-step-label">{step.label}</span>
+          </li>
+        ))}
+      </ol>
 
       {error && (
         <div className="banner banner-error" data-testid="error-banner">
@@ -192,66 +246,117 @@ export default function App() {
         </div>
       )}
 
-      <h2 className="section-title">🎵 찬양</h2>
-      <LyricsGenerator
-        onSongsChange={handleSongsChange}
-        onDateDetected={handleDateDetected}
-        onContiInfoDetected={handleContiInfoDetected}
-      />
-
-      <h2 className="section-title">📖 성경 말씀</h2>
-      <BibleSlideGenerator
-        onStateChange={handleBibleStateChange}
-        autoFillVersion={contiBibleAutoFill.version}
-        autoVerseInput={contiBibleAutoFill.verseInput}
-        autoSermonTitle={contiBibleAutoFill.sermonTitle}
-      />
-
-      <h2 className="section-title">🎤 설교</h2>
-      <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
-
-      <h2 className="section-title">📢 광고</h2>
-      <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
-
-      <h2 className="section-title">⬇ PPT 생성</h2>
-      <section className="card">
-        {allWarnings.length > 0 && (
-          <div className="banner banner-warn">
-            일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-            {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
+      <main>
+        <section
+          className={`wizard-panel${activeStep === 0 ? ' active' : ''}`}
+          aria-hidden={activeStep !== 0}
+          data-testid="wizard-panel-lyrics"
+        >
+          <div className="wizard-page-header">
+            <p className="wizard-kicker">1 / 5</p>
+            <h2>찬양</h2>
+            <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
           </div>
-        )}
-        <p className="input-hint" style={{ marginBottom: 14 }}>
-          순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
-        </p>
-        <div className="generate-row">
-          <label>
-            파일명
-            <input
-              data-testid="filename-input"
-              value={fileName}
-              onChange={(e) => {
-                setFileName(e.target.value);
-                setFileNameEdited(true);
-              }}
-            />
-          </label>
-          <div className="slide-count" data-testid="slide-count">
-            총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''}의 슬라이드 (찬양 {songs.length}곡 · 말씀{' '}
-            {bibleRefs.length}구절
-            {sermonFile ? ' · 설교 첨부' : ''}
-            {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''})
+          <LyricsGenerator
+            onSongsChange={handleSongsChange}
+            onDateDetected={handleDateDetected}
+            onContiInfoDetected={handleContiInfoDetected}
+          />
+          <WizardNavigation step={0} onMove={moveToStep} />
+        </section>
+
+        <section
+          className={`wizard-panel${activeStep === 1 ? ' active' : ''}`}
+          aria-hidden={activeStep !== 1}
+          data-testid="wizard-panel-bible"
+        >
+          <div className="wizard-page-header">
+            <p className="wizard-kicker">2 / 5</p>
+            <h2>성경 말씀</h2>
+            <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
           </div>
-          <button
-            className="btn btn-primary"
-            data-testid="generate-pptx"
-            disabled={generating}
-            onClick={() => void generate()}
-          >
-            {generating ? '생성 중…' : '⬇ PPTX 생성 및 다운로드'}
-          </button>
-        </div>
-      </section>
+          <BibleSlideGenerator
+            onStateChange={handleBibleStateChange}
+            autoFillVersion={contiBibleAutoFill.version}
+            autoVerseInput={contiBibleAutoFill.verseInput}
+            autoSermonTitle={contiBibleAutoFill.sermonTitle}
+          />
+          <WizardNavigation step={1} onMove={moveToStep} />
+        </section>
+
+        <section
+          className={`wizard-panel${activeStep === 2 ? ' active' : ''}`}
+          aria-hidden={activeStep !== 2}
+          data-testid="wizard-panel-sermon"
+        >
+          <div className="wizard-page-header">
+            <p className="wizard-kicker">3 / 5</p>
+            <h2>설교</h2>
+            <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
+          </div>
+          <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
+          <WizardNavigation step={2} onMove={moveToStep} />
+        </section>
+
+        <section
+          className={`wizard-panel${activeStep === 3 ? ' active' : ''}`}
+          aria-hidden={activeStep !== 3}
+          data-testid="wizard-panel-announcement"
+        >
+          <div className="wizard-page-header">
+            <p className="wizard-kicker">4 / 5</p>
+            <h2>광고</h2>
+            <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
+          </div>
+          <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
+          <WizardNavigation step={3} onMove={moveToStep} />
+        </section>
+
+        <section
+          className={`wizard-panel${activeStep === 4 ? ' active' : ''}`}
+          aria-hidden={activeStep !== 4}
+          data-testid="wizard-panel-download"
+        >
+          <div className="wizard-page-header">
+            <p className="wizard-kicker">5 / 5</p>
+            <h2>확인 및 다운로드</h2>
+            <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
+          </div>
+          <section className="card download-card">
+            {allWarnings.length > 0 && (
+              <div className="banner banner-warn">
+                일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
+                {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
+              </div>
+            )}
+            <p className="deck-order">
+              Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
+            </p>
+            <div className="generate-row">
+              <label htmlFor="filename-input">
+                자동 파일명
+                <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
+                <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
+              </label>
+              <div className="slide-count" data-testid="slide-count">
+                총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
+                {bibleRefs.length}구절
+                {sermonFile ? ' · 설교 첨부' : ''}
+                {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
+              </div>
+              <button
+                className="btn btn-primary btn-download"
+                data-testid="generate-pptx"
+                disabled={generating}
+                onClick={() => void generate()}
+              >
+                {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+              </button>
+            </div>
+          </section>
+          <WizardNavigation step={4} onMove={moveToStep} />
+        </section>
+      </main>
 
       <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
     </div>
