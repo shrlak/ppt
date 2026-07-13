@@ -1,8 +1,8 @@
 // Builds the output .pptx by cloning slides from the bundled template
 // (a Google-Slides-exported deck: title slides + 4-line lyrics slides).
 import JSZip from 'jszip';
-import type { Song, SlidePlan } from './types';
-import { planAllSlides } from './slidePlanner';
+import type { Song, SlidePlan } from '../utils/types';
+import { planAllSlides } from '../utils/slidePlanner';
 
 const SLIDE_REL_TYPE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import type { LibraryEntry } from '../lib/types';
-import { normalizeTitle } from '../lib/library';
+import type { LibraryEntry } from '../lib/utils/types';
+import { normalizeTitle } from '../lib/storage/library';
 
 interface Props {
   library: LibraryEntry[];

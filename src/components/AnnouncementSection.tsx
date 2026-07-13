@@ -1,4 +1,4 @@
-import { parseAnnouncements } from '../lib/announcementBuilder';
+import { parseAnnouncements } from '../lib/utils/announcementBuilder';
 
 interface Props {
   value: string;

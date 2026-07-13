@@ -7,11 +7,11 @@ import {
   matchSongsToPages,
   parseCoverText,
   splitLyricsAndConfessionSongs,
-} from '../src/lib/contiText';
-import type { LibraryEntry } from '../src/lib/types';
+} from '../../src/lib/utils/contiText';
+import type { LibraryEntry } from '../../src/lib/utils/types';
 
-const coverText = readFileSync(join(__dirname, 'fixtures', 'cover.txt'), 'utf-8');
-const notesText = readFileSync(join(__dirname, 'fixtures', 'notes.txt'), 'utf-8');
+const coverText = readFileSync(join(__dirname, '..', 'fixtures', 'cover.txt'), 'utf-8');
+const notesText = readFileSync(join(__dirname, '..', 'fixtures', 'notes.txt'), 'utf-8');
 
 describe('parseCoverText', () => {
   const info = parseCoverText(coverText);

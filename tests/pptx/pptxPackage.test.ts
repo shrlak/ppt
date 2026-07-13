@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { assertPptxIntegrity, findBrokenRelationships, stripNonVisualParts } from '../src/lib/pptxPackage';
+import { assertPptxIntegrity, findBrokenRelationships, stripNonVisualParts } from '../../src/lib/pptx/pptxPackage';
 
 const frontSlides = readFileSync(join(__dirname, '..', 'public', 'front-slides.pptx'));
 

@@ -2,12 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { mergePptxDecks } from '../src/lib/pptxMerge';
-import { buildPptx } from '../src/lib/pptxBuilder';
-import { buildBiblePptx } from '../src/bible/pptxBuilder';
-import type { Song } from '../src/lib/types';
-import type { VerseSlidePlan } from '../src/bible/versePlanner';
-import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptxPackage';
+import { mergePptxDecks } from '../../src/lib/pptx/pptxMerge';
+import { buildPptx } from '../../src/lib/pptx/pptxBuilder';
+import { buildBiblePptx } from '../../src/bible/pptxBuilder';
+import type { Song } from '../../src/lib/utils/types';
+import type { VerseSlidePlan } from '../../src/bible/versePlanner';
+import { assertPptxIntegrity, findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 
 const lyricsTemplate = readFileSync(join(__dirname, '..', 'public', 'template.pptx'));
 const bibleTemplate = readFileSync(join(__dirname, '..', 'public', 'bible-template.pptx'));

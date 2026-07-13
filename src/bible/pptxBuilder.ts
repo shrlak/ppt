@@ -4,11 +4,11 @@
 import JSZip from 'jszip';
 import type { VerseSlideData } from './types';
 import type { VerseSlidePlan } from './versePlanner';
-import { stripNonVisualParts } from '../lib/pptxPackage';
+import { stripNonVisualParts } from '../lib/pptx/pptxPackage';
 // Reused as this module's escapeXml: besides the special characters it strips
 // XML-illegal control characters, which cleanText below can even resurrect
 // from numeric entities (&#11; → raw 0x0B) hiding in translation data.
-import { xmlEscape as escapeXml } from '../lib/pptxBuilder';
+import { xmlEscape as escapeXml } from '../lib/pptx/pptxBuilder';
 
 const PLACEHOLDERS: Record<string, string> = {
   title: '{{TITLE}}',

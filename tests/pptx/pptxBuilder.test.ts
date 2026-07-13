@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { buildPptx, suggestFileName, xmlEscape } from '../src/lib/pptxBuilder';
-import { planAllSlides } from '../src/lib/slidePlanner';
-import type { Song } from '../src/lib/types';
+import { buildPptx, suggestFileName, xmlEscape } from '../../src/lib/pptx/pptxBuilder';
+import { planAllSlides } from '../../src/lib/utils/slidePlanner';
+import type { Song } from '../../src/lib/utils/types';
 
 const template = readFileSync(join(__dirname, '..', 'public', 'template.pptx'));
 

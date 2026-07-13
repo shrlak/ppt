@@ -1,7 +1,7 @@
 // Orchestrates score recognition: given the chosen engine, turn a rendered score
 // image into a draft song and merge it onto an existing Song without clobbering
 // anything the user has already typed.
-import type { Song } from './types';
+import type { Song } from '../utils/types';
 import type { ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionEngine } from './aiSettings';
 import { recognizeWithGemini } from './scoreAi';

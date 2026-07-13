@@ -3,7 +3,7 @@ import {
   extractImageBase64,
   parseHuggingFacePayload,
   recognizeWithHuggingFace,
-} from '../src/lib/scoreHuggingFace';
+} from '../../src/lib/ai/scoreHuggingFace';
 
 describe('extractImageBase64', () => {
   it('splits the base64 payload out of a data URL', () => {

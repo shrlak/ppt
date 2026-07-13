@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TRANSLATIONS } from '../bible/books';
 import { parseVerseInput, displayRef } from '../bible/refParser';
-import { showToast } from '../lib/toast';
+import { showToast } from '../lib/utils/toast';
 
 const KO_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'ko');
 const EN_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'en');

@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyScoreToSong, recognizeScore } from '../src/lib/scoreRecognition';
-import { DEFAULT_AI_SETTINGS } from '../src/lib/aiSettings';
-import type { Song } from '../src/lib/types';
-import type { ParsedScore } from '../src/lib/scoreParser';
+import { applyScoreToSong, recognizeScore } from '../../src/lib/ai/scoreRecognition';
+import { DEFAULT_AI_SETTINGS } from '../../src/lib/ai/aiSettings';
+import type { Song } from '../../src/lib/utils/types';
+import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
-vi.mock('../src/lib/scoreAi', () => ({ recognizeWithGemini: vi.fn() }));
-vi.mock('../src/lib/scoreHuggingFace', () => ({ recognizeWithHuggingFace: vi.fn() }));
-vi.mock('../src/lib/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
+vi.mock('../src/lib/ai/scoreAi', () => ({ recognizeWithGemini: vi.fn() }));
+vi.mock('../src/lib/ai/scoreHuggingFace', () => ({ recognizeWithHuggingFace: vi.fn() }));
+vi.mock('../src/lib/ai/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
 
-import { recognizeWithGemini } from '../src/lib/scoreAi';
-import { recognizeWithHuggingFace } from '../src/lib/scoreHuggingFace';
-import { recognizeWithTesseract } from '../src/lib/scoreOcr';
+import { recognizeWithGemini } from '../../src/lib/ai/scoreAi';
+import { recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
+import { recognizeWithTesseract } from '../../src/lib/ai/scoreOcr';
 
 const stub: Song = {
   id: '1',

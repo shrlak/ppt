@@ -4,12 +4,12 @@ import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { buildBiblePptx } from '../src/bible/pptxBuilder';
 import type { VerseSlidePlan } from '../src/bible/versePlanner';
-import { buildAnnouncementDeck } from '../src/lib/announcementBuilder';
-import { buildPptx } from '../src/lib/pptxBuilder';
-import { mergePptxDecks } from '../src/lib/pptxMerge';
-import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptxPackage';
-import { extractSlideSubset } from '../src/lib/pptxSlices';
-import type { Song } from '../src/lib/types';
+import { buildAnnouncementDeck } from '../src/lib/utils/announcementBuilder';
+import { buildPptx } from '../src/lib/pptx/pptxBuilder';
+import { mergePptxDecks } from '../src/lib/pptx/pptxMerge';
+import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptx/pptxPackage';
+import { extractSlideSubset } from '../src/lib/pptx/pptxSlices';
+import type { Song } from '../src/lib/utils/types';
 
 const publicDir = join(__dirname, '..', 'public');
 const frontSlides = readFileSync(join(publicDir, 'front-slides.pptx'));

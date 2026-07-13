@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanLyricLine, parseScoreText } from '../src/lib/scoreParser';
+import { cleanLyricLine, parseScoreText } from '../../src/lib/ai/scoreParser';
 
 describe('cleanLyricLine', () => {
   it('joins syllable hyphens (with or without spaces) into natural words', () => {

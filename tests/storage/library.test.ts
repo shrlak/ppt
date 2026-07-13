@@ -4,8 +4,8 @@ import {
   mergeLibraries,
   normalizeTitle,
   upsertEntry,
-} from '../src/lib/library';
-import type { LibraryEntry } from '../src/lib/types';
+} from '../../src/lib/storage/library';
+import type { LibraryEntry } from '../../src/lib/utils/types';
 
 const entry = (title: string, key = 'C'): LibraryEntry => ({
   title,

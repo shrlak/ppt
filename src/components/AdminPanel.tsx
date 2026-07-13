@@ -3,14 +3,14 @@
 // (IndexedDB) and override the bundled files at generation time.
 import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
-import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from '../lib/deckStore';
+import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from '../lib/storage/deckStore';
 import {
   DEFAULT_RECOGNITION_ORDER,
   loadRecognitionOrder,
   saveRecognitionOrder,
   type RecognitionEngine,
-} from '../lib/aiSettings';
-import { showToast } from '../lib/toast';
+} from '../lib/ai/aiSettings';
+import { showToast } from '../lib/utils/toast';
 
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',

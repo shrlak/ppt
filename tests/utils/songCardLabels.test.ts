@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextAvailableLabel } from '../src/components/songLabels';
+import { nextAvailableLabel } from '../../src/components/songLabels';
 
 describe('nextAvailableLabel', () => {
   it('uses the requested label when unused', () => {

@@ -1,4 +1,4 @@
-import type { LibraryEntry } from './types';
+import type { LibraryEntry } from '../utils/types';
 
 const STORAGE_KEY = 'praise-lyrics-library';
 

@@ -1,7 +1,7 @@
 // Hugging Face Inference API for score recognition fallback.
 // Uses open-source vision models to extract title, key, order, and lyrics from sheet music.
-import type { Section } from './types';
-import { normalizeToken, parseOrder } from './orderParser';
+import type { Section } from '../utils/types';
+import { normalizeToken, parseOrder } from '../utils/orderParser';
 import { cleanLyricLine, type ParsedScore } from './scoreParser';
 
 const ENDPOINT = 'https://api-inference.huggingface.co/models';

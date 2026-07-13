@@ -5,8 +5,8 @@
 // in lib/pptxBuilder.ts, adapted to this slide's 3-shape layout (fixed
 // corner label, single-run title, multi-paragraph body).
 import JSZip from 'jszip';
-import { xmlEscape } from './pptxBuilder';
-import { extractSlideSubset } from './pptxSlices';
+import { xmlEscape } from '../pptx/pptxBuilder';
+import { extractSlideSubset } from '../pptx/pptxSlices';
 
 export interface AnnouncementItem {
   /** Title text as written between < > in the source text, e.g. "새가족 환영". */

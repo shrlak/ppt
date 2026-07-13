@@ -5,7 +5,7 @@ import {
   parseGeminiPayload,
   recognizeWithGemini,
   splitDataUrl,
-} from '../src/lib/scoreAi';
+} from '../../src/lib/ai/scoreAi';
 
 describe('splitDataUrl', () => {
   it('splits mime type and base64 payload', () => {

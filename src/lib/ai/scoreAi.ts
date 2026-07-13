@@ -2,8 +2,8 @@
 // draft song. Called directly from the browser with the user's own free Google
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
-import type { Section } from './types';
-import { normalizeToken, parseOrder } from './orderParser';
+import type { Section } from '../utils/types';
+import { normalizeToken, parseOrder } from '../utils/orderParser';
 import { cleanLyricLine, type ParsedScore } from './scoreParser';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { Song } from '../lib/types';
-import { formatOrder, parseOrder } from '../lib/orderParser';
-import { planSlides, unmatchedTokens } from '../lib/slidePlanner';
+import type { Song } from '../lib/utils/types';
+import { formatOrder, parseOrder } from '../lib/utils/orderParser';
+import { planSlides, unmatchedTokens } from '../lib/utils/slidePlanner';
 import { nextAvailableLabel } from './songLabels';
 
 /** Live status of auto-recognizing a song's score image. */

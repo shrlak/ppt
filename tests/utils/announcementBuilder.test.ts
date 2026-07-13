@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { parseAnnouncements, buildAnnouncementDeck } from '../src/lib/announcementBuilder';
+import { parseAnnouncements, buildAnnouncementDeck } from '../../src/lib/utils/announcementBuilder';
 
-const serviceTemplate = readFileSync(join(__dirname, '..', 'public', 'service-template.pptx'));
-const sampleText = readFileSync(join(__dirname, 'fixtures', 'announcements-sample.txt'), 'utf-8');
+const serviceTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'service-template.pptx'));
+const sampleText = readFileSync(join(__dirname, '..', 'fixtures', 'announcements-sample.txt'), 'utf-8');
 
 describe('parseAnnouncements', () => {
   it('parses the real sample text into 5 items with titles', () => {

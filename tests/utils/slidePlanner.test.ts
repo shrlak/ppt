@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { findSection, planSlides, planAllSlides, unmatchedTokens } from '../src/lib/slidePlanner';
-import type { Song } from '../src/lib/types';
+import { findSection, planSlides, planAllSlides, unmatchedTokens } from '../../src/lib/utils/slidePlanner';
+import type { Song } from '../../src/lib/utils/types';
 
 const lines = (n: number, prefix = 'line') =>
   Array.from({ length: n }, (_, i) => `${prefix} ${i + 1}`);

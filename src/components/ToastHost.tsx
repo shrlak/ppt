@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { dismissToast, subscribeToasts, type Toast } from '../lib/toast';
+import { dismissToast, subscribeToasts, type Toast } from '../lib/utils/toast';
 
 /** Renders whatever's pushed via showToast() as a stack in the bottom-left corner. */
 export default function ToastHost() {

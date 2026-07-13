@@ -4,8 +4,8 @@
 // browser or the OCR engine. Scanned scores are noisy, so this is best-effort:
 // the order line at the top and any printed part labels are the strongest
 // signals; the result is always meant to be reviewed against the score image.
-import type { Section } from './types';
-import { normalizeToken, parseOrder } from './orderParser';
+import type { Section } from '../utils/types';
+import { normalizeToken, parseOrder } from '../utils/orderParser';
 
 export interface ParsedScore {
   title?: string;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContiInfo, LibraryEntry, Song } from '../lib/types';
-import { loadConti, type ContiDocument } from '../lib/contiPdf';
-import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/contiText';
+import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
+import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
+import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import {
   fetchBundledLibrary,
   findEntry,
@@ -10,14 +10,14 @@ import {
   normalizeTitle,
   saveUserLibrary,
   upsertEntry,
-} from '../lib/library';
+} from '../lib/storage/library';
 import SongCard, { type RecogState } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
-import { getAiSettings } from '../lib/aiSettings';
-import { applyScoreToSong, recognizeScore } from '../lib/scoreRecognition';
-import { showToast } from '../lib/toast';
+import { getAiSettings } from '../lib/ai/aiSettings';
+import { applyScoreToSong, recognizeScore } from '../lib/ai/scoreRecognition';
+import { showToast } from '../lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 

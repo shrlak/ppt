@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { buildBiblePptx } from '../src/bible/pptxBuilder';
 import type { VerseSlidePlan } from '../src/bible/versePlanner';
-import { findBrokenRelationships } from '../src/lib/pptxPackage';
+import { findBrokenRelationships } from '../src/lib/pptx/pptxPackage';
 
 const template = readFileSync(join(__dirname, '..', 'public', 'bible-template.pptx'));
 

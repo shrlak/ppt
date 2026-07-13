@@ -4,7 +4,7 @@ import {
   getAiSettings,
   loadRecognitionOrder,
   sanitizeRecognitionOrder,
-} from '../src/lib/aiSettings';
+} from '../../src/lib/ai/aiSettings';
 
 describe('sanitizeRecognitionOrder', () => {
   it('keeps a valid custom order', () => {
