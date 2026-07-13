@@ -4,9 +4,9 @@ import { DEFAULT_AI_SETTINGS } from '../../src/lib/ai/aiSettings';
 import type { Song } from '../../src/lib/utils/types';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
-vi.mock('../src/lib/ai/scoreAi', () => ({ recognizeWithGemini: vi.fn() }));
-vi.mock('../src/lib/ai/scoreHuggingFace', () => ({ recognizeWithHuggingFace: vi.fn() }));
-vi.mock('../src/lib/ai/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
+vi.mock('../../src/lib/ai/scoreAi', () => ({ recognizeWithGemini: vi.fn() }));
+vi.mock('../../src/lib/ai/scoreHuggingFace', () => ({ recognizeWithHuggingFace: vi.fn() }));
+vi.mock('../../src/lib/ai/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
 
 import { recognizeWithGemini } from '../../src/lib/ai/scoreAi';
 import { recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
@@ -36,9 +36,7 @@ describe('recognizeScore engine priority', () => {
   const result: ParsedScore = { title: 't', key: 'C', order: [], sections: [] };
 
   beforeEach(() => {
-    vi.mocked(recognizeWithGemini).mockReset();
-    vi.mocked(recognizeWithHuggingFace).mockReset();
-    vi.mocked(recognizeWithTesseract).mockReset();
+    vi.clearAllMocks();
   });
 
   it('uses Gemini first and reports it as the engine', async () => {
