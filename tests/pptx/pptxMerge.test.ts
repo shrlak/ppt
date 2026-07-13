@@ -9,10 +9,10 @@ import type { Song } from '../../src/lib/utils/types';
 import type { VerseSlidePlan } from '../../src/bible/versePlanner';
 import { assertPptxIntegrity, findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 
-const lyricsTemplate = readFileSync(join(__dirname, '..', 'public', 'template.pptx'));
-const bibleTemplate = readFileSync(join(__dirname, '..', 'public', 'bible-template.pptx'));
-const frontSlides = readFileSync(join(__dirname, '..', 'public', 'front-slides.pptx'));
-const backSlides = readFileSync(join(__dirname, '..', 'public', 'back-slides.pptx'));
+const lyricsTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'template.pptx'));
+const bibleTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'bible-template.pptx'));
+const frontSlides = readFileSync(join(__dirname, '..', '..', 'public', 'front-slides.pptx'));
+const backSlides = readFileSync(join(__dirname, '..', '..', 'public', 'back-slides.pptx'));
 
 const songs: Song[] = [
   {

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { extractSlideSubset } from '../../src/lib/pptx/pptxSlices';
 import { findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 
-const serviceTemplate = readFileSync(join(__dirname, '..', 'public', 'service-template.pptx'));
+const serviceTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'service-template.pptx'));
 
 function slideFiles(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f));

@@ -6,7 +6,7 @@ import { buildPptx, suggestFileName, xmlEscape } from '../../src/lib/pptx/pptxBu
 import { planAllSlides } from '../../src/lib/utils/slidePlanner';
 import type { Song } from '../../src/lib/utils/types';
 
-const template = readFileSync(join(__dirname, '..', 'public', 'template.pptx'));
+const template = readFileSync(join(__dirname, '..', '..', 'public', 'template.pptx'));
 
 const songA: Song = {
   id: 'a',
