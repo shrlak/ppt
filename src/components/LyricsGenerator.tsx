@@ -73,6 +73,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  // Latest library, for use inside callbacks that must stay referentially stable.
+  const libraryRef = useRef<LibraryEntry[]>([]);
+  useEffect(() => {
+    libraryRef.current = library;
+  }, [library]);
 
   useEffect(() => {
     libraryPromiseRef.current = (async () => {
@@ -82,6 +87,20 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       return merged;
     })();
     return () => docRef.current?.destroy();
+  }, []);
+
+  const saveToLibrary = useCallback((song: Song) => {
+    if (!song.title.trim()) return;
+    const entry: LibraryEntry = {
+      title: song.title.trim(),
+      key: song.key,
+      sections: structuredClone(song.sections),
+      order: [...song.order],
+    };
+    const user = upsertEntry(loadUserLibrary(), entry);
+    saveUserLibrary(user);
+    setLibrary((lib) => upsertEntry(lib, entry));
+    return entry;
   }, []);
 
   /** Recognize one song's score image and merge the draft in, without clobbering edits. */
@@ -96,8 +115,27 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         if (!cancelled()) setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: p } }));
       });
       if (cancelled()) return;
-      setSongs((list) => list.map((s) => (s.id === songId ? applyScoreToSong(s, score) : s)));
+      let updated: Song | undefined;
+      setSongs((list) =>
+        list.map((s) => {
+          if (s.id !== songId) return s;
+          updated = applyScoreToSong(s, score);
+          return updated;
+        }),
+      );
       setRecog((r) => ({ ...r, [songId]: { status: 'done', engine } }));
+      // A brand-new song (not already in the library) just got its lyrics
+      // filled in from the conti's score — save it so future contis reuse it.
+      if (
+        updated &&
+        updated.title.trim() &&
+        !/^새 찬양/.test(updated.title) &&
+        songHasLyrics(updated) &&
+        !findEntry(libraryRef.current, updated.title)
+      ) {
+        saveToLibrary(updated);
+        showToast(`'${updated.title}' 을(를) 라이브러리에 자동으로 저장했습니다.`);
+      }
     } catch (e) {
       if (cancelled()) return;
       setRecog((r) => ({
@@ -105,7 +143,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         [songId]: { status: 'error', message: e instanceof Error ? e.message : String(e) },
       }));
     }
-  }, []);
+  }, [saveToLibrary]);
 
   const handleRecognizeClick = useCallback(
     (song: Song) => {
@@ -179,19 +217,14 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     onSongsChange(songs);
   }, [songs, onSongsChange]);
 
-  const saveToLibrary = useCallback((song: Song) => {
-    if (!song.title.trim()) return;
-    const entry: LibraryEntry = {
-      title: song.title.trim(),
-      key: song.key,
-      sections: structuredClone(song.sections),
-      order: [...song.order],
-    };
-    const user = upsertEntry(loadUserLibrary(), entry);
-    saveUserLibrary(user);
-    setLibrary((lib) => upsertEntry(lib, entry));
-    showToast(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
-  }, []);
+  /** Manual "save to library" button press — same as auto-save, but confirms with a toast. */
+  const handleSaveToLibrary = useCallback(
+    (song: Song) => {
+      const entry = saveToLibrary(song);
+      if (entry) showToast(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
+    },
+    [saveToLibrary],
+  );
 
   const removeFromUserLibrary = useCallback((title: string) => {
     const want = normalizeTitle(title);
@@ -449,7 +482,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             onChange={updateSong}
             onMove={moveSong}
             onRemove={removeSong}
-            onSaveToLibrary={saveToLibrary}
+            onSaveToLibrary={handleSaveToLibrary}
             onZoom={() => setZoomPage(song.pageIndex ?? null)}
             onTitleBlur={(title) => {
               const hit = findEntry(library, title);
