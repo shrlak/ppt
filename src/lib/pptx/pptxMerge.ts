@@ -67,10 +67,16 @@ const SUPPORT_DIRS = [
  * `base`'s. Everything `addition`'s slides depend on (layouts, master,
  * theme, media) is copied in under a unique "merged-" prefix so it can't
  * collide with `base`'s own parts.
+ *
+ * `compression` controls how the *result* is packed. A full deck download
+ * chains many of these calls, each re-zipping the whole (growing) package —
+ * defaulting intermediate calls to 'STORE' skips the DEFLATE work until the
+ * final call, which is the only one whose output is actually written to disk.
  */
 export async function mergePptxDecks(
   base: ArrayBuffer | Uint8Array,
   addition: ArrayBuffer | Uint8Array,
+  compression: 'STORE' | 'DEFLATE' = 'DEFLATE',
 ): Promise<Uint8Array> {
   const baseP = await loadPkg(base);
   const addP = await loadPkg(addition);
@@ -230,5 +236,5 @@ export async function mergePptxDecks(
   baseP.zip.file('ppt/presentation.xml', presentation);
   baseP.zip.file('ppt/_rels/presentation.xml.rels', presRels);
 
-  return baseP.zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  return baseP.zip.generateAsync({ type: 'uint8array', compression });
 }

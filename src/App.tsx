@@ -175,10 +175,10 @@ export default function App() {
           if (!r.ok) throw new Error('찬양 템플릿 파일을 불러오지 못했습니다.');
           return r.arrayBuffer();
         });
-        merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs));
+        merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs), 'STORE');
       }
 
-      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1));
+      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1), 'STORE');
 
       if (bibleRefs.length > 0) {
         const bibles = new Map();
@@ -192,20 +192,21 @@ export default function App() {
               if (!r.ok) throw new Error('성경 템플릿 파일을 불러오지 못했습니다.');
               return r.arrayBuffer();
             });
-        merged = await mergePptxDecks(merged, await buildBiblePptx(bibleTemplate, plan));
+        merged = await mergePptxDecks(merged, await buildBiblePptx(bibleTemplate, plan), 'STORE');
       }
 
       if (sermonFile) {
-        merged = await mergePptxDecks(merged, sermonFile.data);
+        merged = await mergePptxDecks(merged, sermonFile.data, 'STORE');
       }
 
-      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2));
+      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
 
       if (announcementItems.length > 0) {
-        merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle));
+        merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle), 'STORE');
         merged = await mergePptxDecks(
           merged,
           await buildAnnouncementDeck(serviceTemplate, SERVICE_SLIDES.announcementItemTemplate, announcementItems),
+          'STORE',
         );
       }
 
