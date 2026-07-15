@@ -173,9 +173,16 @@ body {
 .header-text {
   min-width: 0;
 }
-.admin-open {
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: none;
   margin-left: auto;
+}
+.usage-open,
+.admin-open {
+  flex: none;
   white-space: nowrap;
 }
 .admin-intro {

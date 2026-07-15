@@ -104,7 +104,6 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
 
-  await expect(page.getByTestId('admin-ai-usage')).toBeVisible();
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
 
   // Any valid .pptx works as a replacement; the bundled lyrics template has 6 slides.
@@ -128,18 +127,24 @@ test('admin panel reorders the recognition engines and persists the order', asyn
   await page.getByTestId('admin-unlock').click();
 
   const engines = page.getByTestId('admin-recognition-order').locator('.admin-engine');
-  await expect(engines).toHaveText([/Gemini/, /Hugging Face/, /브라우저 OCR/]);
+  await expect(engines).toHaveText([/Gemini/, /Hugging Face/]);
 
   // Push Gemini below Hugging Face; the order persists across a reload.
   await page.getByTestId('admin-engine-down-gemini').click();
-  await expect(engines).toHaveText([/Hugging Face/, /Gemini/, /브라우저 OCR/]);
+  await expect(engines).toHaveText([/Hugging Face/, /Gemini/]);
 
   await page.reload();
   await page.getByTestId('admin-open').click();
-  await expect(engines).toHaveText([/Hugging Face/, /Gemini/, /브라우저 OCR/]);
+  await expect(engines).toHaveText([/Hugging Face/, /Gemini/]);
 
   await page.getByTestId('admin-engine-reset').click();
-  await expect(engines).toHaveText([/Gemini/, /Hugging Face/, /브라우저 OCR/]);
+  await expect(engines).toHaveText([/Gemini/, /Hugging Face/]);
+});
+
+test('usage page shows AI usage next to the admin button', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('usage-open').click();
+  await expect(page.getByTestId('admin-ai-usage')).toBeVisible();
 });
 
 test('typing a library title into a blank song pulls up its saved lyrics', async ({ page }) => {

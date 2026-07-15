@@ -16,6 +16,7 @@ import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
+import UsagePanel from './components/UsagePanel';
 import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
 import { showToast } from './lib/utils/toast';
 
@@ -92,6 +93,7 @@ export default function App() {
   const [announcementText, setAnnouncementText] = useState('');
   const [generating, setGenerating] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [customDecks, setCustomDecks] = useState<Record<DeckSlot, StoredDeck | null>>({
     front: null,
     back: null,
@@ -267,19 +269,31 @@ export default function App() {
             <h1>KCCP PPT Generator</h1>
             <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
           </div>
-          <button
-            type="button"
-            className="btn admin-open"
-            data-testid="admin-open"
-            title="관리자 설정"
-            onClick={() => setAdminOpen(true)}
-          >
-            ⚙ 관리자
-          </button>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="btn usage-open"
+              data-testid="usage-open"
+              title="AI 사용량"
+              onClick={() => setUsageOpen(true)}
+            >
+              📊 사용량
+            </button>
+            <button
+              type="button"
+              className="btn admin-open"
+              data-testid="admin-open"
+              title="관리자 설정"
+              onClick={() => setAdminOpen(true)}
+            >
+              ⚙ 관리자
+            </button>
+          </div>
         </div>
       </header>
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} onDeckChange={handleDeckChange} />}
+      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
 
       <div className="app">
         <ol

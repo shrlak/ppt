@@ -8,19 +8,11 @@ import {
 
 describe('sanitizeRecognitionOrder', () => {
   it('keeps a valid custom order', () => {
-    expect(sanitizeRecognitionOrder(['tesseract', 'gemini', 'huggingface'])).toEqual([
-      'tesseract',
-      'gemini',
-      'huggingface',
-    ]);
+    expect(sanitizeRecognitionOrder(['huggingface', 'gemini'])).toEqual(['huggingface', 'gemini']);
   });
 
   it('drops unknown entries and duplicates, then appends missing engines', () => {
-    expect(sanitizeRecognitionOrder(['huggingface', 'bogus', 'huggingface'])).toEqual([
-      'huggingface',
-      'gemini',
-      'tesseract',
-    ]);
+    expect(sanitizeRecognitionOrder(['huggingface', 'bogus', 'huggingface'])).toEqual(['huggingface', 'gemini']);
   });
 
   it('falls back to the default order for non-array input', () => {
@@ -30,10 +22,10 @@ describe('sanitizeRecognitionOrder', () => {
 });
 
 describe('recognition order without storage (node)', () => {
-  it('defaults to Gemini → Hugging Face → browser OCR', () => {
-    expect(loadRecognitionOrder()).toEqual(['gemini', 'huggingface', 'tesseract']);
+  it('defaults to Gemini → Hugging Face', () => {
+    expect(loadRecognitionOrder()).toEqual(['gemini', 'huggingface']);
     const settings = getAiSettings();
     expect(settings.engine).toBe('gemini');
-    expect(settings.fallbackEngines).toEqual(['huggingface', 'tesseract']);
+    expect(settings.fallbackEngines).toEqual(['huggingface']);
   });
 });

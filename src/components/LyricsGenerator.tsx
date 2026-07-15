@@ -191,9 +191,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           active.map((song) => doc.renderPage(song.pageIndex as number, 1240)),
         );
         const settings = getAiSettings();
-        const titleResult = await recognizeScoreBatch(images, settings, 'titles', (progress) => {
-          setRunning(activeIds, 'titles', progress);
-        });
+        const titleResult = await recognizeScoreBatch(images, settings, 'titles');
 
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
@@ -236,7 +234,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           remaining.map(({ image }) => image),
           settings,
           'full',
-          (progress) => setRunning(remainingIds, 'lyrics', progress),
         );
 
         const scoreById = new Map<string, ParsedScore>();

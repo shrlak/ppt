@@ -18,7 +18,6 @@ export interface RecogState {
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
   huggingface: 'Hugging Face',
-  tesseract: '브라우저 OCR',
   library: '라이브러리',
 };
 

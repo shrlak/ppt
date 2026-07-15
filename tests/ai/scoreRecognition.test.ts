@@ -12,11 +12,9 @@ vi.mock('../../src/lib/ai/scoreHuggingFace', () => ({
   recognizeWithHuggingFace: vi.fn(),
   recognizeBatchWithHuggingFace: vi.fn(),
 }));
-vi.mock('../../src/lib/ai/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
 
 import { recognizeBatchWithGemini, recognizeWithGemini } from '../../src/lib/ai/scoreAi';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
-import { recognizeWithTesseract } from '../../src/lib/ai/scoreOcr';
 
 const stub: Song = {
   id: '1',
@@ -51,23 +49,21 @@ describe('recognizeScore engine priority', () => {
     expect(out.engine).toBe('gemini');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
     expect(recognizeWithHuggingFace).not.toHaveBeenCalled();
-    expect(recognizeWithTesseract).not.toHaveBeenCalled();
   });
 
-  it('falls back to Hugging Face when Gemini fails', async () => {
+  it('falls back to Hugging Face once Gemini fails (quota/tokens exhausted)', async () => {
     vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('quota'));
     vi.mocked(recognizeWithHuggingFace).mockResolvedValue(result);
     const out = await recognizeScore('data:image/png;base64,x', settings);
     expect(out.engine).toBe('huggingface');
-    expect(recognizeWithTesseract).not.toHaveBeenCalled();
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
+    expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to browser OCR only when both AI engines fail', async () => {
+  it('throws once both Gemini and Hugging Face fail', async () => {
     vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeWithHuggingFace).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeWithTesseract).mockResolvedValue(result);
-    const out = await recognizeScore('data:image/png;base64,x', settings);
-    expect(out.engine).toBe('tesseract');
+    await expect(recognizeScore('data:image/png;base64,x', settings)).rejects.toThrow('down');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
     expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(1);
   });
@@ -110,7 +106,6 @@ describe('recognizeScoreBatch', () => {
     expect(out.engine).toBe('huggingface');
     expect(recognizeBatchWithHuggingFace).toHaveBeenCalledTimes(1);
     expect(recognizeWithHuggingFace).not.toHaveBeenCalled();
-    expect(recognizeWithTesseract).not.toHaveBeenCalled();
   });
 });
 
