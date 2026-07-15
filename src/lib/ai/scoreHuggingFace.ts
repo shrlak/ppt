@@ -3,6 +3,7 @@
 import type { Section } from '../utils/types';
 import { normalizeToken, parseOrder } from '../utils/orderParser';
 import { cleanLyricLine, type ParsedScore } from './scoreParser';
+import type { BatchRecognitionMode } from './scoreAi';
 
 const ENDPOINT = 'https://api-inference.huggingface.co/models';
 
@@ -66,6 +67,79 @@ export function extractImageBase64(dataUrl: string): string {
   return match[2];
 }
 
+function batchPrompt(imageCount: number, mode: BatchRecognitionMode): string {
+  const task =
+    mode === 'titles'
+      ? [
+          '각 이미지에서 찬양 제목과 조성만 읽으세요.',
+          '가사, 파트, 진행 순서는 읽지 마세요.',
+          '각 결과는 imageIndex, title, key만 포함하세요.',
+        ]
+      : [
+          '모든 이미지의 제목, 조성, 진행 순서와 가사를 한 번에 읽으세요.',
+          BASE_PROMPT,
+        ];
+  return [
+    `서로 다른 한국어 찬양 악보 이미지 ${imageCount}개가 입력됩니다.`,
+    '각 이미지 앞의 imageIndex를 결과에 그대로 사용하세요.',
+    ...task,
+    '반드시 {"results":[...]} 형태의 JSON 객체 하나만 출력하세요.',
+  ].join('\n');
+}
+
+export function buildHuggingFaceBatchPayload(dataUrls: string[], mode: BatchRecognitionMode): unknown {
+  const content: Record<string, unknown>[] = [{ type: 'text', text: batchPrompt(dataUrls.length, mode) }];
+  dataUrls.forEach((dataUrl, imageIndex) => {
+    content.push({ type: 'text', text: `imageIndex: ${imageIndex}` });
+    content.push({ type: 'image', image: extractImageBase64(dataUrl) });
+  });
+  return { inputs: [{ role: 'user', content }] };
+}
+
+export function parseHuggingFaceBatchPayload(
+  payload: unknown,
+  imageCount: number,
+  mode: BatchRecognitionMode,
+): ParsedScore[] {
+  const obj = (payload ?? {}) as { results?: unknown };
+  const raw = Array.isArray(obj.results) ? obj.results : Array.isArray(payload) ? payload : [];
+  const results: ParsedScore[] = Array.from({ length: imageCount }, () => ({ order: [], sections: [] }));
+  raw.forEach((item, position) => {
+    if (!item || typeof item !== 'object') return;
+    const record = item as Record<string, unknown>;
+    const imageIndex = Number.isInteger(record.imageIndex) ? Number(record.imageIndex) : position;
+    if (imageIndex < 0 || imageIndex >= imageCount) return;
+    const score = parseHuggingFacePayload(record);
+    results[imageIndex] =
+      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
+  });
+  return results;
+}
+
+function generatedText(response: unknown): string {
+  if (Array.isArray(response)) {
+    const first = response[0] as Record<string, unknown> | undefined;
+    return typeof first?.generated_text === 'string' ? first.generated_text : '';
+  }
+  if (typeof response === 'object' && response !== null) {
+    const obj = response as Record<string, unknown>;
+    return typeof obj.generated_text === 'string' ? obj.generated_text : '';
+  }
+  return '';
+}
+
+function parseGeneratedJson(text: string, emptyMessage: string): unknown {
+  if (!text) throw new Error(emptyMessage);
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) throw new Error('Hugging Face 응답을 JSON으로 해석하지 못했습니다.');
+    return JSON.parse(text.slice(start, end + 1));
+  }
+}
+
 /**
  * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through a
  * shared server-side proxy (see worker/) that holds its own Hugging Face key
@@ -114,29 +188,40 @@ export async function recognizeWithHuggingFace(
 
   const json = (await res.json()) as unknown;
 
-  // Extract the generated text from the response
-  let text = '';
-  if (Array.isArray(json)) {
-    // Response is an array of results
-    const first = json[0] as Record<string, unknown>;
-    text = typeof first.generated_text === 'string' ? first.generated_text : '';
-  } else if (typeof json === 'object' && json !== null) {
-    const obj = json as Record<string, unknown>;
-    text = typeof obj.generated_text === 'string' ? obj.generated_text : '';
+  return parseHuggingFacePayload(parseGeneratedJson(generatedText(json), 'Hugging Face 응답이 비어 있습니다.'));
+}
+
+/** Recognize every supplied score image in one Hugging Face request. */
+export async function recognizeBatchWithHuggingFace(
+  dataUrls: string[],
+  apiKey: string,
+  mode: BatchRecognitionMode,
+  model: string = DEFAULT_MODEL,
+  proxyUrl?: string,
+): Promise<ParsedScore[]> {
+  if (dataUrls.length === 0) return [];
+  const useProxy = !apiKey.trim() && !!proxyUrl;
+  const url = useProxy ? `${trimTrailingSlash(proxyUrl!)}/huggingface` : `${ENDPOINT}/${encodeURIComponent(model)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: useProxy
+      ? { 'Content-Type': 'application/json' }
+      : { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildHuggingFaceBatchPayload(dataUrls, mode)),
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err?.error) detail = err.error;
+    } catch {
+      // Keep the status code when the error body is not JSON.
+    }
+    throw new Error(`Hugging Face 일괄 호출 실패: ${detail}`);
   }
 
-  if (!text) throw new Error('Hugging Face 응답이 비어 있습니다.');
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    // Try to salvage JSON from the response if it's wrapped in prose
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('Hugging Face 응답을 JSON으로 해석하지 못했습니다.');
-    payload = JSON.parse(text.slice(start, end + 1));
-  }
-
-  return parseHuggingFacePayload(payload);
+  const json = (await res.json()) as unknown;
+  const payload = parseGeneratedJson(generatedText(json), 'Hugging Face 일괄 응답이 비어 있습니다.');
+  return parseHuggingFaceBatchPayload(payload, dataUrls.length, mode);
 }

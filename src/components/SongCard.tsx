@@ -9,7 +9,9 @@ export interface RecogState {
   status: 'running' | 'done' | 'error';
   progress?: number;
   message?: string;
-  /** Engine that produced the result: 'gemini' | 'huggingface' | 'tesseract'. */
+  /** Current stage of the two-pass batch recognition flow. */
+  phase?: 'titles' | 'lyrics';
+  /** Engine that produced the result, or 'library' when recognition was skipped. */
   engine?: string;
 }
 
@@ -17,6 +19,7 @@ const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
   huggingface: 'Hugging Face',
   tesseract: '브라우저 OCR',
+  library: '라이브러리',
 };
 
 interface Props {
@@ -147,7 +150,11 @@ export default function SongCard({
                   <div className="recog-running">
                     <div className="spinner" />
                     <span>
-                      가사 인식 중…
+                      {recog.phase === 'titles'
+                        ? '전체 곡 제목 확인 중…'
+                        : recog.phase === 'lyrics'
+                          ? '전체 가사 일괄 인식 중…'
+                          : '가사 인식 중…'}
                       {typeof recog.progress === 'number' ? ` ${Math.round(recog.progress * 100)}%` : ''}
                     </span>
                     {onCancelRecognize && (
@@ -174,8 +181,9 @@ export default function SongCard({
                     )}
                     {recog?.status === 'done' && (
                       <span className="recog-done">
-                        ✓ {recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해
-                        주세요
+                        {recog.engine === 'library'
+                          ? '✓ 라이브러리의 저장된 가사를 불러왔습니다'
+                          : `✓ ${recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해 주세요`}
                       </span>
                     )}
                   </>

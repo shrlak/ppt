@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildGeminiBatchBody,
   buildGeminiBody,
   extractGeminiText,
+  parseGeminiBatchPayload,
   parseGeminiPayload,
+  recognizeBatchWithGemini,
   recognizeWithGemini,
   splitDataUrl,
 } from '../../src/lib/ai/scoreAi';
@@ -36,6 +39,74 @@ describe('buildGeminiBody', () => {
     expect(body.tools?.[0]?.google_search).toBeDefined();
     expect(body.generationConfig.responseMimeType).toBeUndefined();
     expect(body.contents[0].parts.some((p) => p.text?.includes('웹'))).toBe(true);
+  });
+});
+
+describe('Gemini batch recognition', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('embeds every score image in one request body', () => {
+    const body = buildGeminiBatchBody(
+      ['data:image/png;base64,FIRST', 'data:image/jpeg;base64,SECOND'],
+      'full',
+    ) as {
+      contents: { parts: { text?: string; inline_data?: { mime_type: string; data: string } }[] }[];
+    };
+    const images = body.contents[0].parts.filter((part) => part.inline_data).map((part) => part.inline_data);
+    expect(images).toEqual([
+      { mime_type: 'image/png', data: 'FIRST' },
+      { mime_type: 'image/jpeg', data: 'SECOND' },
+    ]);
+  });
+
+  it('restores an out-of-order response to the input image order', () => {
+    const scores = parseGeminiBatchPayload(
+      {
+        results: [
+          { imageIndex: 1, title: '둘째 곡', sections: [] },
+          { imageIndex: 0, title: '첫째 곡', sections: [] },
+        ],
+      },
+      2,
+      'titles',
+    );
+    expect(scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
+    expect(scores.every((score) => score.sections.length === 0)).toBe(true);
+  });
+
+  it('sends multiple score images with one fetch call', async () => {
+    const response = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  results: [
+                    { imageIndex: 0, title: '첫째 곡' },
+                    { imageIndex: 1, title: '둘째 곡' },
+                  ],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const scores = await recognizeBatchWithGemini(
+      ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND'],
+      'key',
+      'gemini-2.5-flash',
+      'titles',
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
   });
 });
 

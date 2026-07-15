@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyScoreToSong, recognizeScore } from '../../src/lib/ai/scoreRecognition';
+import { applyScoreToSong, recognizeScore, recognizeScoreBatch } from '../../src/lib/ai/scoreRecognition';
 import { DEFAULT_AI_SETTINGS } from '../../src/lib/ai/aiSettings';
 import type { Song } from '../../src/lib/utils/types';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
-vi.mock('../../src/lib/ai/scoreAi', () => ({ recognizeWithGemini: vi.fn() }));
-vi.mock('../../src/lib/ai/scoreHuggingFace', () => ({ recognizeWithHuggingFace: vi.fn() }));
+vi.mock('../../src/lib/ai/scoreAi', () => ({
+  recognizeWithGemini: vi.fn(),
+  recognizeBatchWithGemini: vi.fn(),
+}));
+vi.mock('../../src/lib/ai/scoreHuggingFace', () => ({
+  recognizeWithHuggingFace: vi.fn(),
+  recognizeBatchWithHuggingFace: vi.fn(),
+}));
 vi.mock('../../src/lib/ai/scoreOcr', () => ({ recognizeWithTesseract: vi.fn() }));
 
-import { recognizeWithGemini } from '../../src/lib/ai/scoreAi';
-import { recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
+import { recognizeBatchWithGemini, recognizeWithGemini } from '../../src/lib/ai/scoreAi';
+import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
 import { recognizeWithTesseract } from '../../src/lib/ai/scoreOcr';
 
 const stub: Song = {
@@ -64,6 +70,47 @@ describe('recognizeScore engine priority', () => {
     expect(out.engine).toBe('tesseract');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
     expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('recognizeScoreBatch', () => {
+  const settings = { ...DEFAULT_AI_SETTINGS, geminiApiKey: 'test-key', huggingfaceApiKey: 'test-key' };
+  const first: ParsedScore = { title: '첫째 곡', order: [], sections: [] };
+  const second: ParsedScore = { title: '둘째 곡', order: [], sections: [] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes every image to Gemini in one batch call', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
+
+    const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'titles');
+
+    expect(out.scores).toEqual([first, second]);
+    expect(out.engine).toBe('gemini');
+    expect(recognizeBatchWithGemini).toHaveBeenCalledTimes(1);
+    expect(recognizeBatchWithGemini).toHaveBeenCalledWith(
+      ['image-1', 'image-2'],
+      'test-key',
+      settings.geminiModel,
+      'titles',
+      false,
+      undefined,
+    );
+    expect(recognizeWithGemini).not.toHaveBeenCalled();
+  });
+
+  it('falls back as a whole batch instead of retrying each image separately', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('quota'));
+    vi.mocked(recognizeBatchWithHuggingFace).mockResolvedValue([first, second]);
+
+    const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+
+    expect(out.engine).toBe('huggingface');
+    expect(recognizeBatchWithHuggingFace).toHaveBeenCalledTimes(1);
+    expect(recognizeWithHuggingFace).not.toHaveBeenCalled();
+    expect(recognizeWithTesseract).not.toHaveBeenCalled();
   });
 });
 

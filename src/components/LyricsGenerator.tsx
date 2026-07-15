@@ -16,7 +16,9 @@ import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
 import { getAiSettings } from '../lib/ai/aiSettings';
-import { applyScoreToSong, recognizeScore } from '../lib/ai/scoreRecognition';
+import { applyScoreToSong, recognizeScoreBatch } from '../lib/ai/scoreRecognition';
+import type { ParsedScore } from '../lib/ai/scoreParser';
+import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { showToast } from '../lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -68,6 +70,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
   const autoAttemptedRef = useRef<Set<string>>(new Set());
+  const pendingAutoSaveRef = useRef<Set<string>>(new Set());
   // Songs whose scan result should be discarded (library lyrics arrived first).
   const scanCancelledRef = useRef<Set<string>>(new Set());
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
@@ -99,70 +102,36 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     };
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
-    setLibrary((lib) => upsertEntry(lib, entry));
+    setLibrary((lib) => {
+      const next = upsertEntry(lib, entry);
+      libraryRef.current = next;
+      return next;
+    });
     return entry;
   }, []);
 
-  /** Recognize one song's score image and merge the draft in, without clobbering edits. */
-  const recognizeSong = useCallback(async (songId: string, pageIndex: number) => {
-    const doc = docRef.current;
-    if (!doc) return;
-    const cancelled = () => scanCancelledRef.current.has(songId);
-    setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: 0 } }));
-    try {
-      const image = await doc.renderPage(pageIndex, 1240);
-      const { score, engine } = await recognizeScore(image, getAiSettings(), (p) => {
-        if (!cancelled()) setRecog((r) => ({ ...r, [songId]: { status: 'running', progress: p } }));
-      });
-      if (cancelled()) return;
-      let updated: Song | undefined;
-      setSongs((list) =>
-        list.map((s) => {
-          if (s.id !== songId) return s;
-          updated = applyScoreToSong(s, score);
-          return updated;
-        }),
-      );
-      setRecog((r) => ({ ...r, [songId]: { status: 'done', engine } }));
-      // A brand-new song (not already in the library) just got its lyrics
-      // filled in from the conti's score — save it so future contis reuse it.
-      if (
-        updated &&
-        updated.title.trim() &&
-        !/^새 찬양/.test(updated.title) &&
-        songHasLyrics(updated) &&
-        !findEntry(libraryRef.current, updated.title)
-      ) {
-        saveToLibrary(updated);
-        showToast(`'${updated.title}' 을(를) 라이브러리에 자동으로 저장했습니다.`);
+  // Auto-save only after React has committed the recognized lyrics. Keeping
+  // this side effect outside a state updater also makes it safe in Strict Mode.
+  useEffect(() => {
+    if (pendingAutoSaveRef.current.size === 0) return;
+    for (const id of [...pendingAutoSaveRef.current]) {
+      const song = songs.find((candidate) => candidate.id === id);
+      if (!song) {
+        pendingAutoSaveRef.current.delete(id);
+        continue;
       }
-    } catch (e) {
-      if (cancelled()) return;
-      setRecog((r) => ({
-        ...r,
-        [songId]: { status: 'error', message: e instanceof Error ? e.message : String(e) },
-      }));
+      if (
+        song.title.trim() &&
+        !/^새 찬양/.test(song.title) &&
+        songHasLyrics(song) &&
+        !findEntry(libraryRef.current, song.title)
+      ) {
+        saveToLibrary(song);
+        showToast(`'${song.title}' 을(를) 라이브러리에 자동으로 저장했습니다.`);
+      }
+      pendingAutoSaveRef.current.delete(id);
     }
-  }, [saveToLibrary]);
-
-  const handleRecognizeClick = useCallback(
-    (song: Song) => {
-      if (song.pageIndex == null) return;
-      scanCancelledRef.current.delete(song.id);
-      void recognizeSong(song.id, song.pageIndex);
-    },
-    [recognizeSong],
-  );
-
-  /** Stop an accidentally started scan: discard its result and reset the card. */
-  const cancelRecognition = useCallback((song: Song) => {
-    scanCancelledRef.current.add(song.id);
-    autoAttemptedRef.current.add(song.id);
-    setRecog((r) => {
-      const { [song.id]: _dropped, ...rest } = r;
-      return rest;
-    });
-  }, []);
+  }, [songs, saveToLibrary]);
 
   /**
    * Fill a lyric-less song from the library when its title is already known
@@ -185,14 +154,178 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           : s,
       ),
     );
-    setRecog((r) => (r[song.id] ? { ...r, [song.id]: { status: 'done' } } : r));
+    setRecog((r) =>
+      r[song.id] ? { ...r, [song.id]: { status: 'done', engine: 'library' } } : r,
+    );
     showToast(`라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
+  }, []);
+
+  /**
+   * Recognize every supplied score as one two-stage job:
+   * 1) one title-only request for all pages, then resolve library hits;
+   * 2) one full-lyrics request containing only the unmatched pages.
+   */
+  const recognizeSongsBatch = useCallback(
+    async (targets: Song[]) => {
+      const doc = docRef.current;
+      const active = targets.filter((song) => song.pageIndex != null);
+      if (!doc || active.length === 0) return;
+
+      const isCancelled = (id: string) => scanCancelledRef.current.has(id);
+      const setRunning = (ids: string[], phase: 'titles' | 'lyrics', progress: number) => {
+        setRecog((current) => {
+          const next = { ...current };
+          for (const id of ids) {
+            if (!isCancelled(id)) next[id] = { status: 'running', phase, progress };
+          }
+          return next;
+        });
+      };
+      const activeIds = active.map((song) => song.id);
+      const resolvedIds = new Set<string>();
+      setRunning(activeIds, 'titles', 0);
+
+      try {
+        // Rendering and recognition are both batched: no per-song request loop.
+        const images = await Promise.all(
+          active.map((song) => doc.renderPage(song.pageIndex as number, 1240)),
+        );
+        const settings = getAiSettings();
+        const titleResult = await recognizeScoreBatch(images, settings, 'titles', (progress) => {
+          setRunning(activeIds, 'titles', progress);
+        });
+
+        const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
+        const identityById = new Map<string, ParsedScore>();
+        const titlePlan = planScoreBatch(
+          titleResult.scores,
+          active.map((song) => song.title),
+          libraryRef.current,
+        );
+
+        active.forEach((song, index) => {
+          if (isCancelled(song.id)) return;
+          const identity = titleResult.scores[index] ?? { order: [], sections: [] };
+          const hit = titlePlan.libraryMatches[index];
+          if (hit) {
+            resolvedIds.add(song.id);
+            fillFromLibrary(song, hit);
+            return;
+          }
+          identityById.set(song.id, identity);
+          unmatched.push({ song, image: images[index], identity });
+        });
+
+        // Show the recognized title/key while the remaining pages move into the
+        // full lyric pass. applyScoreToSong preserves anything the user edited.
+        if (identityById.size > 0) {
+          setSongs((current) =>
+            current.map((song) => {
+              const identity = identityById.get(song.id);
+              return identity && !isCancelled(song.id) ? applyScoreToSong(song, identity) : song;
+            }),
+          );
+        }
+
+        const remaining = unmatched.filter(({ song }) => !isCancelled(song.id));
+        if (remaining.length === 0) return;
+
+        const remainingIds = remaining.map(({ song }) => song.id);
+        setRunning(remainingIds, 'lyrics', 0);
+        const lyricResult = await recognizeScoreBatch(
+          remaining.map(({ image }) => image),
+          settings,
+          'full',
+          (progress) => setRunning(remainingIds, 'lyrics', progress),
+        );
+
+        const scoreById = new Map<string, ParsedScore>();
+        remaining.forEach(({ song, identity }, index) => {
+          if (isCancelled(song.id)) return;
+          const full = lyricResult.scores[index] ?? { order: [], sections: [] };
+          scoreById.set(song.id, {
+            ...full,
+            title: full.title ?? identity.title,
+            key: full.key ?? identity.key,
+          });
+        });
+
+        // A full response can occasionally identify a title that the quick
+        // title pass missed. Prefer the saved library copy in that case too.
+        for (const { song } of remaining) {
+          const score = scoreById.get(song.id);
+          if (!score || isCancelled(song.id)) continue;
+          const recognizedTitle = score.title?.trim() || song.title;
+          const hit = recognizedTitle ? findEntry(libraryRef.current, recognizedTitle) : undefined;
+          if (hit) {
+            scoreById.delete(song.id);
+            resolvedIds.add(song.id);
+            fillFromLibrary(song, hit);
+          }
+        }
+
+        if (scoreById.size > 0) {
+          for (const id of scoreById.keys()) pendingAutoSaveRef.current.add(id);
+          setSongs((current) =>
+            current.map((song) => {
+              const score = scoreById.get(song.id);
+              if (!score || isCancelled(song.id)) return song;
+              return applyScoreToSong(song, score);
+            }),
+          );
+        }
+        setRecog((current) => {
+          const next = { ...current };
+          for (const id of scoreById.keys()) {
+            if (!isCancelled(id)) next[id] = { status: 'done', engine: lyricResult.engine };
+          }
+          return next;
+        });
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setRecog((current) => {
+          const next = { ...current };
+          for (const song of active) {
+            if (!isCancelled(song.id) && !resolvedIds.has(song.id)) {
+              next[song.id] = { status: 'error', message };
+            }
+          }
+          return next;
+        });
+      }
+    },
+    [fillFromLibrary, saveToLibrary],
+  );
+
+  const handleRecognizeClick = useCallback(
+    (song: Song) => {
+      if (song.pageIndex == null) return;
+      const hit = song.title.trim() ? findEntry(libraryRef.current, song.title) : undefined;
+      if (hit) {
+        fillFromLibrary(song, hit);
+        return;
+      }
+      scanCancelledRef.current.delete(song.id);
+      void recognizeSongsBatch([song]);
+    },
+    [fillFromLibrary, recognizeSongsBatch],
+  );
+
+  /** Stop an accidentally started scan: discard its result and reset the card. */
+  const cancelRecognition = useCallback((song: Song) => {
+    scanCancelledRef.current.add(song.id);
+    autoAttemptedRef.current.add(song.id);
+    setRecog((r) => {
+      const { [song.id]: _dropped, ...rest } = r;
+      return rest;
+    });
   }, []);
 
   // Auto-recognize new songs (a score page, no lyrics yet) right after upload.
   // Songs whose title is already in the library skip the scan entirely and get
-  // their saved lyrics instead. The rest are recognized in parallel rather
-  // than one at a time, each attempted at most once, and scanning is skipped
+  // their saved lyrics instead. The rest are sent through one batch job rather
+  // than one request per song, each attempted at most once, and scanning is skipped
   // under browser automation so tests stay deterministic.
   useEffect(() => {
     const pending = songs.filter(
@@ -210,8 +343,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
     if (isAutomated || !docRef.current) return;
     for (const s of toScan) autoAttemptedRef.current.add(s.id);
-    for (const s of toScan) void recognizeSong(s.id, s.pageIndex as number);
-  }, [songs, library, recognizeSong, fillFromLibrary]);
+    void recognizeSongsBatch(toScan);
+  }, [songs, library, recognizeSongsBatch, fillFromLibrary]);
 
   useEffect(() => {
     onSongsChange(songs);

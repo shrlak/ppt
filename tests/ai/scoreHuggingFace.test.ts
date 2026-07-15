@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildHuggingFaceBatchPayload,
   extractImageBase64,
+  parseHuggingFaceBatchPayload,
   parseHuggingFacePayload,
+  recognizeBatchWithHuggingFace,
   recognizeWithHuggingFace,
 } from '../../src/lib/ai/scoreHuggingFace';
 
@@ -34,6 +37,60 @@ describe('parseHuggingFacePayload', () => {
     expect(parsed.title).toBeUndefined();
     expect(parsed.order).toEqual([]);
     expect(parsed.sections).toEqual([{ label: 'C', lines: [] }]);
+  });
+});
+
+describe('Hugging Face batch recognition', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('puts every score image into one multimodal payload', () => {
+    const payload = buildHuggingFaceBatchPayload(
+      ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND'],
+      'full',
+    ) as { inputs: { content: { type: string; image?: string }[] }[] };
+    expect(payload.inputs[0].content.filter((part) => part.type === 'image').map((part) => part.image)).toEqual([
+      'FIRST',
+      'SECOND',
+    ]);
+  });
+
+  it('restores results to image order and keeps title mode lyric-free', () => {
+    const scores = parseHuggingFaceBatchPayload(
+      {
+        results: [
+          { imageIndex: 1, title: '둘째 곡', sections: [{ label: 'C', lines: ['무시할 가사'] }] },
+          { imageIndex: 0, title: '첫째 곡' },
+        ],
+      },
+      2,
+      'titles',
+    );
+    expect(scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
+    expect(scores.every((score) => score.sections.length === 0)).toBe(true);
+  });
+
+  it('sends multiple score images with one fetch call', async () => {
+    const generated = JSON.stringify({
+      results: [
+        { imageIndex: 0, title: '첫째 곡' },
+        { imageIndex: 1, title: '둘째 곡' },
+      ],
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify([{ generated_text: generated }]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const scores = await recognizeBatchWithHuggingFace(
+      ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND'],
+      'key',
+      'titles',
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
   });
 });
 

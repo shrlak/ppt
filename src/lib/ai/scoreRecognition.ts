@@ -4,8 +4,8 @@
 import type { Song } from '../utils/types';
 import type { ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionEngine } from './aiSettings';
-import { recognizeWithGemini } from './scoreAi';
-import { recognizeWithHuggingFace } from './scoreHuggingFace';
+import { recognizeBatchWithGemini, recognizeWithGemini, type BatchRecognitionMode } from './scoreAi';
+import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
 import { recognizeWithTesseract, type OcrProgress } from './scoreOcr';
 
 export type { OcrProgress } from './scoreOcr';
@@ -43,6 +43,81 @@ export interface RecognitionResult {
   score: ParsedScore;
   /** Which engine actually produced the result, so the UI can say so. */
   engine: RecognitionEngine;
+}
+
+export interface BatchRecognitionResult {
+  /** Results remain aligned with the input image order. */
+  scores: ParsedScore[];
+  engine: RecognitionEngine;
+}
+
+async function recognizeBatchWithEngine(
+  engine: RecognitionEngine,
+  dataUrls: string[],
+  settings: AiSettings,
+  mode: BatchRecognitionMode,
+  onProgress?: OcrProgress,
+): Promise<ParsedScore[]> {
+  if (engine === 'gemini') {
+    const key = settings.geminiApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
+    return recognizeBatchWithGemini(
+      dataUrls,
+      key,
+      settings.geminiModel,
+      mode,
+      mode === 'full' && settings.geminiUseSearch,
+      PROXY_URL,
+    );
+  }
+  if (engine === 'huggingface') {
+    const key = settings.huggingfaceApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
+    return recognizeBatchWithHuggingFace(dataUrls, key, mode, undefined, PROXY_URL);
+  }
+  if (engine === 'tesseract') {
+    const progress = dataUrls.map(() => 0);
+    const scores = await Promise.all(
+      dataUrls.map((dataUrl, index) =>
+        recognizeWithTesseract(dataUrl, (value) => {
+          progress[index] = value;
+          onProgress?.(progress.reduce((sum, item) => sum + item, 0) / progress.length);
+        }),
+      ),
+    );
+    return mode === 'titles'
+      ? scores.map((score) => ({ title: score.title, key: score.key, order: [], sections: [] }))
+      : scores;
+  }
+  throw new Error('자동 인식이 꺼져 있습니다.');
+}
+
+/**
+ * Recognize a set of score pages as one operation. Gemini and Hugging Face use
+ * one multimodal request for the entire set; the browser OCR fallback starts
+ * every page concurrently and reports aggregate progress.
+ */
+export async function recognizeScoreBatch(
+  dataUrls: string[],
+  settings: AiSettings,
+  mode: BatchRecognitionMode,
+  onProgress?: OcrProgress,
+): Promise<BatchRecognitionResult> {
+  if (dataUrls.length === 0) return { scores: [], engine: settings.engine };
+  const engines = [settings.engine, ...settings.fallbackEngines].filter((e) => e !== 'off');
+  if (engines.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
+
+  let lastError: Error | null = null;
+  for (const engine of engines) {
+    try {
+      const scores = await recognizeBatchWithEngine(engine, dataUrls, settings, mode, onProgress);
+      return { scores, engine };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`${engine} 일괄 인식 실패, 다음 엔진 시도:`, lastError.message);
+    }
+  }
+  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
 }
 
 /**

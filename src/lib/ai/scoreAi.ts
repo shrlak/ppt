@@ -65,6 +65,40 @@ const RESPONSE_SCHEMA = {
   required: ['title', 'sections'],
 };
 
+export type BatchRecognitionMode = 'titles' | 'full';
+
+const BATCH_TITLE_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    imageIndex: { type: 'integer' },
+    title: { type: 'string' },
+    key: { type: 'string' },
+  },
+  required: ['imageIndex', 'title'],
+};
+
+const BATCH_FULL_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    imageIndex: { type: 'integer' },
+    title: { type: 'string' },
+    key: { type: 'string' },
+    order: { type: 'array', items: { type: 'string' } },
+    sections: RESPONSE_SCHEMA.properties.sections,
+  },
+  required: ['imageIndex', 'title', 'order', 'sections'],
+};
+
+function batchResponseSchema(mode: BatchRecognitionMode): unknown {
+  return {
+    type: 'object',
+    properties: {
+      results: { type: 'array', items: mode === 'titles' ? BATCH_TITLE_ITEM_SCHEMA : BATCH_FULL_ITEM_SCHEMA },
+    },
+    required: ['results'],
+  };
+}
+
 /** Split a `data:image/...;base64,XXXX` URL into its mime type and payload. */
 export function splitDataUrl(dataUrl: string): { mimeType: string; data: string } {
   const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
@@ -102,6 +136,59 @@ export function buildGeminiBody(dataUrl: string, useSearch = false): unknown {
   return body;
 }
 
+/**
+ * Build one Gemini request for every pending score page. The title pass is
+ * intentionally title-only: it lets the caller resolve saved library songs
+ * before spending a second model pass on lyrics. The full pass returns every
+ * remaining song in the same response instead of issuing one request per page.
+ */
+export function buildGeminiBatchBody(
+  dataUrls: string[],
+  mode: BatchRecognitionMode,
+  useSearch = false,
+): unknown {
+  const task =
+    mode === 'titles'
+      ? [
+          '각 이미지에서 찬양 제목과 조성만 빠르게 읽으세요.',
+          '가사, 파트, 진행 순서는 인식하지 마세요.',
+          'results 배열의 각 항목은 imageIndex, title, key만 포함하세요.',
+        ]
+      : [
+          '각 이미지의 제목, 조성, 진행 순서와 모든 가사를 한 번에 읽으세요.',
+          'results 배열의 각 항목은 imageIndex, title, key, order, sections를 포함하세요.',
+          ...BASE_PROMPT.slice(4),
+        ];
+  const prompt = [
+    `아래에는 서로 다른 한국어 찬양 악보 이미지 ${dataUrls.length}개가 있습니다.`,
+    '각 이미지 바로 앞의 imageIndex 번호를 결과에 그대로 사용하세요.',
+    ...task,
+    ...(mode === 'full' && useSearch ? SEARCH_PROMPT : ['반드시 유효한 JSON 객체 하나만 출력하세요.']),
+  ].join('\n');
+
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
+  dataUrls.forEach((dataUrl, imageIndex) => {
+    const { mimeType, data } = splitDataUrl(dataUrl);
+    parts.push({ text: `imageIndex: ${imageIndex}` });
+    parts.push({ inline_data: { mime_type: mimeType, data } });
+  });
+
+  const body: Record<string, unknown> = {
+    contents: [{ role: 'user', parts }],
+  };
+  if (mode === 'full' && useSearch) {
+    body.tools = [{ google_search: {} }];
+    body.generationConfig = { temperature: 0 };
+  } else {
+    body.generationConfig = {
+      temperature: 0,
+      responseMimeType: 'application/json',
+      responseSchema: batchResponseSchema(mode),
+    };
+  }
+  return body;
+}
+
 interface GeminiSectionLike {
   label?: unknown;
   lines?: unknown;
@@ -134,6 +221,27 @@ export function parseGeminiPayload(payload: unknown): ParsedScore {
   }
 
   return { title, key, order, sections };
+}
+
+/** Normalize a possibly sparse/out-of-order batch response back to image order. */
+export function parseGeminiBatchPayload(
+  payload: unknown,
+  imageCount: number,
+  mode: BatchRecognitionMode,
+): ParsedScore[] {
+  const obj = (payload ?? {}) as { results?: unknown };
+  const raw = Array.isArray(obj.results) ? obj.results : Array.isArray(payload) ? payload : [];
+  const results: ParsedScore[] = Array.from({ length: imageCount }, () => ({ order: [], sections: [] }));
+  raw.forEach((item, position) => {
+    if (!item || typeof item !== 'object') return;
+    const record = item as Record<string, unknown>;
+    const imageIndex = Number.isInteger(record.imageIndex) ? Number(record.imageIndex) : position;
+    if (imageIndex < 0 || imageIndex >= imageCount) return;
+    const score = parseGeminiPayload(record);
+    results[imageIndex] =
+      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
+  });
+  return results;
 }
 
 /** Pull the model's text part out of a generateContent response. */
@@ -201,4 +309,50 @@ export async function recognizeWithGemini(
   }
 
   return parseGeminiPayload(payload);
+}
+
+/** Recognize all supplied score images in one Gemini request. */
+export async function recognizeBatchWithGemini(
+  dataUrls: string[],
+  apiKey: string,
+  model: string,
+  mode: BatchRecognitionMode,
+  useSearch = false,
+  proxyUrl?: string,
+): Promise<ParsedScore[]> {
+  if (dataUrls.length === 0) return [];
+  const useProxy = !apiKey.trim() && !!proxyUrl;
+  const url = useProxy
+    ? `${trimTrailingSlash(proxyUrl!)}/gemini/${encodeURIComponent(model)}`
+    : `${ENDPOINT}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch)),
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const err = (await res.json()) as { error?: { message?: string } };
+      if (err?.error?.message) detail = err.error.message;
+    } catch {
+      // Keep the status code when the error body is not JSON.
+    }
+    throw new Error(`Gemini 일괄 호출 실패: ${detail}`);
+  }
+
+  const text = extractGeminiText((await res.json()) as unknown).trim();
+  if (!text) throw new Error('Gemini 일괄 응답이 비어 있습니다.');
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) throw new Error('Gemini 일괄 응답을 JSON으로 해석하지 못했습니다.');
+    payload = JSON.parse(text.slice(start, end + 1));
+  }
+  return parseGeminiBatchPayload(payload, dataUrls.length, mode);
 }
