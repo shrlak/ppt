@@ -24,6 +24,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
+          # Pin explicitly: without this the action falls back to installing
+          # its own (older) default wrangler version instead of the one in
+          # worker/package.json, and that stale version's `secret bulk`
+          # command fails to upload secrets.
+          wranglerVersion: '4.110.0'
           command: deploy
           # Pushes each listed env var (below) into the Worker as a secret
           # via `wrangler secret put` before deploying. Only keys with a
