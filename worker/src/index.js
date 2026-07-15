@@ -17,11 +17,19 @@ const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
 const HUGGINGFACE_ENDPOINT = 'https://api-inference.huggingface.co/models';
 const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 
+// Always allow the production GitHub Pages origin, even if ALLOWED_ORIGINS
+// is unset or misconfigured on the Worker — the recognition proxy is useless
+// to the deployed site otherwise.
+const REQUIRED_ORIGINS = ['https://shrlak.github.io'];
+
 function allowedOrigins(env) {
-  return (env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return [
+    ...REQUIRED_ORIGINS,
+    ...String(env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ];
 }
 
 function corsHeaders(request, env) {
