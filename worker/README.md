@@ -15,12 +15,26 @@ to anyone who opens dev tools, since the app has no backend of its own.
 ```
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
 Browser  ──POST /huggingface───▶  Worker (adds real key)  ──▶  Hugging Face API
+Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 ```
 
 The Worker is a thin relay: it forwards the exact request body the browser
 would have sent directly to the provider, just with the real key attached
 server-side. It only accepts requests from the origins you allow
 (`ALLOWED_ORIGINS`), so it can't be used as an open proxy by other sites.
+
+Successful and failed upstream requests are grouped by exact model in a
+SQLite-backed Durable Object. This is included in Cloudflare's Workers Free
+plan and is provisioned automatically by the migration in `wrangler.toml`.
+The admin panel reads `GET /usage` to show the shared-key totals across every
+browser using the site.
+
+Gemini does not publish a portable API for the active project's remaining
+quota. Set `GEMINI_DAILY_REQUEST_LIMIT` in `wrangler.toml` to the current RPD
+shown in AI Studio. Hugging Face's bar uses its monthly free credit and an
+estimate based on `x-compute-time`; adjust `HUGGINGFACE_MONTHLY_CREDIT_USD` and
+`HUGGINGFACE_USD_PER_SECOND` if the account allowance or hardware rate changes.
+Provider billing dashboards remain authoritative.
 
 ## Deploy — automated via GitHub Actions (recommended)
 

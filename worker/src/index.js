@@ -10,12 +10,21 @@
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /huggingface     -> https://api-inference.huggingface.co/models/:HUGGINGFACE_MODEL
+//   GET  /usage           -> current per-model usage from the shared proxy
 //
 // See worker/README.md for deployment instructions.
 
+import { DurableObject } from 'cloudflare:workers';
+import {
+  DEFAULT_HUGGINGFACE_MODEL,
+  buildUsageSnapshot,
+  mergeUsageRecord,
+  sanitizeUsageEvent,
+  usageStorageKey,
+} from './usage.js';
+
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const HUGGINGFACE_ENDPOINT = 'https://api-inference.huggingface.co/models';
-const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 
 // Always allow the production GitHub Pages origin, even if ALLOWED_ORIGINS
 // is unset or misconfigured on the Worker — the recognition proxy is useless
@@ -38,7 +47,7 @@ function corsHeaders(request, env) {
   const matched = allowed.includes(origin) ? origin : '';
   return {
     'Access-Control-Allow-Origin': matched,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     Vary: 'Origin',
   };
@@ -49,6 +58,71 @@ function jsonResponse(obj, status, headers) {
     status,
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
+}
+
+/** Strongly consistent shared counter, persisted by a SQLite Durable Object. */
+export class UsageTracker extends DurableObject {
+  async record(rawEvent) {
+    const event = sanitizeUsageEvent(rawEvent);
+    const key = usageStorageKey(event);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get(key);
+      const next = mergeUsageRecord(current, event);
+      await transaction.put(key, next);
+      return next;
+    });
+  }
+
+  async records() {
+    const stored = await this.ctx.storage.list({ prefix: 'usage:' });
+    return [...stored.values()];
+  }
+}
+
+function usageTracker(env) {
+  if (!env.USAGE_TRACKER) return null;
+  const id = env.USAGE_TRACKER.idFromName('shared-recognition-api-usage');
+  return env.USAGE_TRACKER.get(id);
+}
+
+async function recordUsage(env, event) {
+  const tracker = usageTracker(env);
+  if (!tracker) return;
+  try {
+    await tracker.record(event);
+  } catch (error) {
+    // Metering must never break the recognition response itself.
+    console.warn('AI usage record failed:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function readUsage(env) {
+  const tracker = usageTracker(env);
+  if (!tracker) throw new Error('usage tracker is not configured');
+  return buildUsageSnapshot(await tracker.records(), env);
+}
+
+function geminiUsageMetadata(responseBody) {
+  try {
+    const parsed = JSON.parse(responseBody);
+    const usage = parsed?.usageMetadata || {};
+    return {
+      promptTokens: usage.promptTokenCount || 0,
+      outputTokens: usage.candidatesTokenCount || 0,
+      totalTokens: usage.totalTokenCount || 0,
+    };
+  } catch {
+    return { promptTokens: 0, outputTokens: 0, totalTokens: 0 };
+  }
+}
+
+function providerComputeSeconds(response, wallSeconds) {
+  const raw = response.headers.get('x-compute-time');
+  const value = raw == null ? Number.NaN : Number(raw);
+  return {
+    computeSeconds: Number.isFinite(value) && value >= 0 ? value : wallSeconds,
+    computeSource: Number.isFinite(value) && value >= 0 ? 'provider' : 'wall',
+  };
 }
 
 export default {
@@ -63,11 +137,23 @@ export default {
       return jsonResponse({ error: 'origin not allowed' }, 403, headers);
     }
 
+    const url = new URL(request.url);
+
+    if (request.method === 'GET' && url.pathname === '/usage') {
+      try {
+        return jsonResponse(await readUsage(env), 200, { ...headers, 'Cache-Control': 'no-store' });
+      } catch (error) {
+        return jsonResponse(
+          { error: error instanceof Error ? error.message : String(error) },
+          503,
+          { ...headers, 'Cache-Control': 'no-store' },
+        );
+      }
+    }
+
     if (request.method !== 'POST') {
       return jsonResponse({ error: 'not found' }, 404, headers);
     }
-
-    const url = new URL(request.url);
 
     if (url.pathname.startsWith('/gemini/')) {
       if (!env.GEMINI_API_KEY) {
@@ -78,12 +164,21 @@ export default {
 
       const upstream = `${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
       const body = await request.text();
+      const startedAt = Date.now();
       const res = await fetch(upstream, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
       });
       const resBody = await res.text();
+      const wallSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
+      await recordUsage(env, {
+        provider: 'gemini',
+        model,
+        success: res.ok,
+        wallSeconds,
+        ...geminiUsageMetadata(resBody),
+      });
       return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
 
@@ -94,6 +189,7 @@ export default {
       const model = env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL;
       const upstream = `${HUGGINGFACE_ENDPOINT}/${model}`;
       const body = await request.text();
+      const startedAt = Date.now();
       const res = await fetch(upstream, {
         method: 'POST',
         headers: {
@@ -103,6 +199,14 @@ export default {
         body,
       });
       const resBody = await res.text();
+      const wallSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
+      await recordUsage(env, {
+        provider: 'huggingface',
+        model,
+        success: res.ok,
+        wallSeconds,
+        ...providerComputeSeconds(res, wallSeconds),
+      });
       return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
 

@@ -8,6 +8,21 @@ compatibility_date = "2025-01-01"
 # Add a second origin (comma-separated) for local dev, e.g. "http://localhost:4173".
 [vars]
 ALLOWED_ORIGINS = "https://shrlak.github.io"
+# Dashboard reference limits. Gemini quotas vary per project; update this to
+# the RPD value shown in AI Studio. Hugging Face currently grants free users
+# $0.10/month, while hf-inference cost is estimated from compute time.
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_DAILY_REQUEST_LIMIT = "250"
+HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
+HUGGINGFACE_USD_PER_SECOND = "0.00012"
+
+[[durable_objects.bindings]]
+name = "USAGE_TRACKER"
+class_name = "UsageTracker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UsageTracker"]
 
 # API keys are NOT set here (this file is committed to git). Set them with:
 #   npx wrangler secret put GEMINI_API_KEY
