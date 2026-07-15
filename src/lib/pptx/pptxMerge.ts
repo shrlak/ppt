@@ -42,6 +42,33 @@ function resolveRelTarget(relsXml: string, rId: string): string | null {
   return null;
 }
 
+function normalizePartPath(path: string): string {
+  const pieces: string[] = [];
+  for (const piece of path.split('/')) {
+    if (!piece || piece === '.') continue;
+    if (piece === '..') pieces.pop();
+    else pieces.push(piece);
+  }
+  return pieces.join('/');
+}
+
+/** Resolve a relationship target owned by ppt/presentation.xml. */
+function presentationTargetPath(target: string | null): string | null {
+  if (!target) return null;
+  const xmlDecoded = target
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .split(/[?#]/, 1)[0];
+  let decoded = xmlDecoded;
+  try {
+    decoded = decodeURIComponent(xmlDecoded);
+  } catch {
+    // Keep the literal path when a producer wrote an invalid percent escape.
+  }
+  return normalizePartPath(decoded.startsWith('/') ? decoded.slice(1) : `ppt/${decoded}`);
+}
+
 function xmlAttr(tag: string, name: string): string | null {
   return tag.match(new RegExp(`\\s${escapeRegExp(name)}="([^"]*)"`))?.[1] ?? null;
 }
@@ -68,8 +95,8 @@ async function normalizeSlideMasterAndLayoutIds(
   for (const match of presentationXml.matchAll(/<p:sldMasterId\b[^>]*>/g)) {
     const rId = xmlAttr(match[0], 'r:id');
     const target = rId ? resolveRelTarget(presentationRels, rId) : null;
-    if (target?.startsWith('slideMasters/')) {
-      const path = `ppt/${target}`;
+    const path = presentationTargetPath(target);
+    if (path && /^ppt\/slideMasters\/[^/]+\.xml$/.test(path)) {
       masterPaths.push(path);
       seen.add(path);
     } else masterPaths.push(null);
@@ -189,7 +216,8 @@ export async function mergePptxDecks(
   if (addSlideSection) {
     for (const match of addSlideSection[1].matchAll(/r:id="([^"]+)"/g)) {
       const target = resolveRelTarget(addP.presentationRels, match[1]);
-      if (target && /^slides\/slide\d+\.xml$/.test(target)) addSlideFiles.push(`ppt/${target}`);
+      const path = presentationTargetPath(target);
+      if (path && /^ppt\/slides\/slide\d+\.xml$/.test(path)) addSlideFiles.push(path);
     }
   }
   if (addSlideFiles.length === 0) {
@@ -273,10 +301,13 @@ export async function mergePptxDecks(
   // ---- presentation.xml + rels: carry over addition's slide master(s), then its slides ----
   const addMasterSection = addP.presentationXml.match(/<p:sldMasterIdLst>([\s\S]*?)<\/p:sldMasterIdLst>/);
   if (addMasterSection) {
-    for (const m of addMasterSection[1].matchAll(/r:id="(rId\d+)"/g)) {
-      const origTarget = resolveRelTarget(addP.presentationRels, m[1]); // e.g. "slideMasters/slideMaster1.xml"
-      if (!origTarget) continue;
-      const newPath = renameMap.get(`ppt/${origTarget}`);
+    for (const match of addMasterSection[1].matchAll(/<p:sldMasterId\b[^>]*>/g)) {
+      const origRid = xmlAttr(match[0], 'r:id');
+      const origPath = presentationTargetPath(
+        origRid ? resolveRelTarget(addP.presentationRels, origRid) : null,
+      );
+      if (!origPath) continue;
+      const newPath = renameMap.get(origPath);
       if (!newPath) continue;
       const newTarget = newPath.replace(/^ppt\//, '');
       const rid = `rId${nextRid++}`;

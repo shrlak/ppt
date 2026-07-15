@@ -29,6 +29,17 @@ const song: Song = {
   linesPerSlide: 4,
 };
 
+const alternateSong: Song = {
+  id: 'alternate-conti-song',
+  title: '새 노래로 찬양해',
+  sections: [
+    { label: 'V1', lines: ['새 노래로 주를 찬양해', '변함없는 사랑 노래해'] },
+    { label: 'C', lines: ['기쁨으로 주께 나아가', '영원토록 주를 높이리'] },
+  ],
+  order: ['V1', 'C'],
+  linesPerSlide: 4,
+};
+
 const biblePlan: VerseSlidePlan = {
   globalData: {
     title: '로마서',
@@ -57,9 +68,12 @@ function slideFiles(zip: JSZip): string[] {
 describe('complete service deck', () => {
   it('keeps the mandatory sequence and produces a repair-free PPTX package', async () => {
     let deck: Uint8Array<ArrayBufferLike> = new Uint8Array(frontSlides);
-    deck = await mergePptxDecks(deck, await buildPptx(lyricsTemplate, [song]));
+    deck = await mergePptxDecks(deck, await buildPptx(lyricsTemplate, [song, alternateSong]));
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [17]));
     deck = await mergePptxDecks(deck, await buildBiblePptx(bibleTemplate, biblePlan));
+    // Simulates a separately authored sermon PPTX uploaded by the user. Its
+    // master/layout ids start in the same range as the other source decks.
+    deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [42]));
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [31]));
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [32]));
     deck = await mergePptxDecks(
@@ -83,7 +97,7 @@ describe('complete service deck', () => {
     expect(await zip.file('[Content_Types].xml')!.async('string')).not.toContain('/ppt/metadata');
 
     const slides = slideFiles(zip);
-    expect(slides.length).toBeGreaterThanOrEqual(4 + 3 + 1 + 1 + 1 + 1 + 21);
+    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 1 + 21);
 
     const first = await zip.file('ppt/slides/slide1.xml')!.async('string');
     expect(first).toContain('빛주사랑');
@@ -96,7 +110,9 @@ describe('complete service deck', () => {
     expect(firstBackSlide).toContain('공동체 고백송');
     const allText = (await Promise.all(slides.map((path) => zip.file(path)!.async('string')))).join('\n');
     expect(allText).toContain('주님의 사랑');
+    expect(allText).toContain('새 노래로 찬양해');
     expect(allText).toContain('하나님과 화평을 누리자');
+    expect(allText).toContain('송별');
     expect(allText).toContain('테스트 광고');
     expect(allText).toContain('공동체 고백송');
 

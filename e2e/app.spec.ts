@@ -8,6 +8,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
+const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
 
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
@@ -28,6 +29,18 @@ async function loadPptx(download: Download, saveTo: string): Promise<JSZip> {
 
 function slideFileNames(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+}
+
+async function masterAndLayoutIds(zip: JSZip): Promise<string[]> {
+  const presentation = await zip.file('ppt/presentation.xml')!.async('string');
+  const ids = [...presentation.matchAll(/<p:sldMasterId\b[^>]*\sid="([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  for (const name of Object.keys(zip.files).filter((path) => /^ppt\/slideMasters\/[^/]+\.xml$/.test(path))) {
+    const master = await zip.file(name)!.async('string');
+    ids.push(...[...master.matchAll(/<p:sldLayoutId\b[^>]*\sid="([^"]+)"/g)].map((match) => match[1]));
+  }
+  return ids;
 }
 
 async function moveFromLyricsToDownload(page: Page): Promise<void> {
@@ -317,4 +330,32 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
   expect(allText).toContain('새가족 환영'); // announcement item
   expect(allText).toContain('기도'); // fixed prayer slides
   expect(allText).toContain('공동체 고백송'); // mandatory back slides
+});
+
+test('keeps PowerPoint ids valid with a parsed conti and an uploaded sermon deck', async ({
+  page,
+}, testInfo) => {
+  await page.goto('./');
+  await uploadExamplePdf(page);
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('wizard-next-bible').click();
+
+  await page.getByTestId('sermon-input').setInputFiles(SERMON_PPTX);
+  await expect(page.getByText('업로드됨: bible-template.pptx')).toBeVisible();
+  await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-announcement').click();
+
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+  const zip = await loadPptx(download, testInfo.outputPath('conti-with-sermon.pptx'));
+  const ids = await masterAndLayoutIds(zip);
+  const slides = slideFileNames(zip);
+  const allText = (await Promise.all(slides.map((name) => zip.file(name)!.async('string')))).join('\n');
+
+  expect(ids.length).toBeGreaterThan(1);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(allText).toContain('주님의 사랑');
+  expect(allText).toContain('{{SERMON_TITLE}}');
+  expect(allText).toContain('공동체 고백송');
 });

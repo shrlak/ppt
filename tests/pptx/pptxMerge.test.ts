@@ -153,6 +153,41 @@ describe('mergePptxDecks', () => {
     await expect(assertPptxIntegrity(twice)).resolves.toBeUndefined();
   });
 
+  it('accepts independently authored relationship ids and absolute targets in an uploaded deck', async () => {
+    const uploadedZip = await JSZip.loadAsync(bibleTemplate);
+    const presentationPath = 'ppt/presentation.xml';
+    const relsPath = 'ppt/_rels/presentation.xml.rels';
+    const presentation = await uploadedZip.file(presentationPath)!.async('string');
+    const rels = await uploadedZip.file(relsPath)!.async('string');
+    const masterTag = rels.match(
+      /<Relationship\b(?=[^>]*Type="[^"]*\/slideMaster")(?=[^>]*Id="([^"]+)")[^>]*\/>/,
+    );
+    expect(masterTag?.[1]).toBeTruthy();
+    const originalMasterRid = masterTag![1];
+    const customMasterRid = 'sermon-master-relationship';
+    uploadedZip.file(
+      presentationPath,
+      presentation.replace(`r:id="${originalMasterRid}"`, `r:id="${customMasterRid}"`),
+    );
+    uploadedZip.file(
+      relsPath,
+      rels
+        .replace(`Id="${originalMasterRid}"`, `Id="${customMasterRid}"`)
+        .replace(/Target="(slideMasters|slides)\//g, 'Target="/ppt/$1/'),
+    );
+    const uploadedDeck = await uploadedZip.generateAsync({ type: 'uint8array' });
+
+    const merged = await mergePptxDecks(frontSlides, uploadedDeck);
+    const zip = await JSZip.loadAsync(merged);
+    const finalPresentation = await zip.file(presentationPath)!.async('string');
+    const ids = await slideMasterAndLayoutIds(zip);
+
+    expect(finalPresentation.match(/<p:sldMasterId\b/g)).toHaveLength(2);
+    expect(slideFiles(zip)).toHaveLength(7);
+    expect(new Set(ids).size).toBe(ids.length);
+    await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+  });
+
   it('throws when the addition deck has no slides', async () => {
     const lyricsDeck = await buildPptx(lyricsTemplate, songs);
     const emptyZip = new JSZip();

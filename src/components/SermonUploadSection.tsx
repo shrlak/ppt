@@ -15,7 +15,7 @@ export default function SermonUploadSection({ value, onChange }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleUpload(file: File) {
-    if (!file.name.endsWith('.pptx')) return;
+    if (!/\.pptx$/i.test(file.name)) return;
     onChange({ name: file.name, data: await file.arrayBuffer() });
   }
 
