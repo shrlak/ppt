@@ -65,6 +65,17 @@ describe('bench scoring', () => {
     expect(orderSimilarity([], ['I'])).toBe(0);
   });
 
+  it('aliases section labels like the app (V→V1, C→C1)', () => {
+    const parsed: ParsedScore = {
+      order: [],
+      sections: [
+        { label: 'V', lines: ['주님의 사랑 깊어져 가네', '나의 마음에'] },
+        { label: 'C1', lines: ['내 안에 기쁨의 노래'] },
+      ],
+    };
+    expect(lyricsSimilarity(parsed, truth)).toBeCloseTo(1);
+  });
+
   it('lyricsSimilarity rewards right-text-right-label highest', () => {
     const rightLabels: ParsedScore = {
       order: [],

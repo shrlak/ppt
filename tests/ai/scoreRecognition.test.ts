@@ -3,6 +3,7 @@ import {
   applyScoreToSong,
   recognizeScore,
   recognizeScoreBatch,
+  recognizeScoreBatchEnsemble,
   recognizeScoreRaced,
 } from '../../src/lib/ai/scoreRecognition';
 import { DEFAULT_AI_SETTINGS, RECOGNITION_MODEL_CATALOG } from '../../src/lib/ai/aiSettings';
@@ -291,6 +292,54 @@ describe('recognizeScoreBatch', () => {
     expect(out.engine).toBe('gemini');
     expect(out.scores).toEqual([first, empty]);
     expect(recognizeBatchWithNvidia).not.toHaveBeenCalled();
+  });
+});
+
+describe('recognizeScoreBatchEnsemble (multiple models at once)', () => {
+  const bySongA: ParsedScore = { title: 'A', order: [], sections: [{ label: 'V1', lines: ['a'] }] };
+  const bySongB: ParsedScore = { title: 'B', order: [], sections: [{ label: 'V1', lines: ['b'] }] };
+  const empty: ParsedScore = { order: [], sections: [] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('runs the top models in parallel and fills per-song gaps by priority', async () => {
+    // Model 1 (2.5-flash) reads song 0 but misses song 1; model 2 (2.0-flash)
+    // reads both. The merge takes song 0 from model 1 and song 1 from model 2.
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [bySongA, empty];
+      return [{ ...bySongA, title: 'A2' }, bySongB];
+    });
+
+    const out = await recognizeScoreBatchEnsemble(['img-1', 'img-2'], settings, 'full');
+
+    expect(out.scores[0].title).toBe('A');
+    expect(out.scores[1].title).toBe('B');
+    // Both models were called — at once, in the same group.
+    const models = vi.mocked(recognizeBatchWithGemini).mock.calls.map((call) => call[2]);
+    expect(models).toContain('gemini-2.5-flash');
+    expect(models).toContain('gemini-2.0-flash');
+  });
+
+  it('survives one model of the group failing entirely', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') throw new RecognitionError('HTTP 429', 429);
+      return [bySongA, bySongB];
+    });
+
+    const out = await recognizeScoreBatchEnsemble(['img-1', 'img-2'], settings, 'full');
+    expect(out.scores.map((score) => score.title)).toEqual(['A', 'B']);
+    expect(out.engine).toBe('gemini');
+  });
+
+  it('moves to the next parallel group when the whole group returns nothing', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([empty, empty]);
+    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([bySongA, bySongB]);
+
+    const out = await recognizeScoreBatchEnsemble(['img-1', 'img-2'], settings, 'full', undefined, 3);
+    expect(out.engine).toBe('nvidia');
+    expect(out.scores[0].title).toBe('A');
   });
 });
 

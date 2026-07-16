@@ -1,40 +1,92 @@
 // Run the recognition accuracy benchmark: feed the generated score pages
-// through the real Gemini engine (the same code path the app uses) and score
-// the answers against the ground truth manifest.
+// through the app's real recognition code and score the answers against the
+// ground truth manifest.
 //
 //   GEMINI_API_KEY=... npx vite-node bench/run-bench.ts
 //
-// Env knobs: BENCH_MODEL (default gemini-2.5-flash), BENCH_BATCH (pages per
-// request, default 10), BENCH_COUNT (limit songs), BENCH_OUT (default
-// bench/out), BENCH_SEARCH=1 to enable Google Search grounding.
+// Modes:
+//   BENCH_MODELS="gemini-2.5-flash,gemini-2.0-flash"  (default) — the app's
+//     ensemble path: all listed models read each batch AT ONCE and answers
+//     merge per song by priority (recognizeScoreBatchEnsemble).
+//   BENCH_MODEL="gemini-2.5-flash" — single-model direct engine call.
+//
+// Other knobs: BENCH_BATCH (pages per request, default 10), BENCH_COUNT
+// (limit songs), BENCH_OUT (default bench/out), BENCH_SEARCH=1 for Google
+// Search grounding, BENCH_DIFF_BELOW (print per-section diffs for songs
+// under this lyrics score; default 0.98).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { recognizeBatchWithGemini } from '../src/lib/ai/scoreAi';
+import { recognizeScoreBatchEnsemble } from '../src/lib/ai/scoreRecognition';
+import { DEFAULT_AI_SETTINGS, type AiSettings, type RecognitionAttempt } from '../src/lib/ai/aiSettings';
 import { RecognitionError } from '../src/lib/ai/recognitionError';
 import type { ParsedScore } from '../src/lib/ai/scoreParser';
-import { scoreSong, summarize, type SongReport, type TruthSong } from './scoring';
+import { normalizeText, scoreSong, summarize, type SongReport, type TruthSong } from './scoring';
 
 const OUT = process.env.BENCH_OUT ?? 'bench/out';
-const MODEL = process.env.BENCH_MODEL ?? 'gemini-2.5-flash';
+const SINGLE_MODEL = process.env.BENCH_MODEL ?? '';
+const MODELS = (process.env.BENCH_MODELS ?? (SINGLE_MODEL || 'gemini-2.5-flash,gemini-2.0-flash'))
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
+const ENSEMBLE = !SINGLE_MODEL;
 const BATCH = Math.max(1, Number(process.env.BENCH_BATCH ?? 10));
 const USE_SEARCH = process.env.BENCH_SEARCH === '1';
+const DIFF_BELOW = Number(process.env.BENCH_DIFF_BELOW ?? 0.98);
 const API_KEY = process.env.GEMINI_API_KEY ?? '';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function recognizeBatchWithRetry(dataUrls: string[]): Promise<ParsedScore[]> {
+function benchSettings(): AiSettings {
+  const attempts: RecognitionAttempt[] = MODELS.map((model) => ({ engine: 'gemini', model }));
+  return {
+    ...DEFAULT_AI_SETTINGS,
+    attempts,
+    geminiApiKey: API_KEY,
+    geminiUseSearch: USE_SEARCH,
+  };
+}
+
+async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise<ParsedScore[]> {
   let attempt = 0;
   for (;;) {
     try {
-      return await recognizeBatchWithGemini(dataUrls, API_KEY, MODEL, 'full', USE_SEARCH);
+      if (ENSEMBLE) {
+        // The app's own multi-model path: every listed model reads the batch
+        // simultaneously; per-song answers merge by priority.
+        return (await recognizeScoreBatchEnsemble(dataUrls, settings, 'full', undefined, MODELS.length)).scores;
+      }
+      return await recognizeBatchWithGemini(dataUrls, API_KEY, MODELS[0], 'full', USE_SEARCH);
     } catch (error) {
       attempt += 1;
       const status = error instanceof RecognitionError ? error.status : undefined;
-      const transient = status === 429 || status === 503 || (status !== undefined && status >= 500);
+      const transient = status === 429 || status === 503 || (status !== undefined && status >= 500) || ENSEMBLE;
       if (!transient || attempt > 4) throw error;
       const wait = attempt * 20_000;
-      console.warn(`batch failed (${status}), retry ${attempt}/4 in ${wait / 1000}s...`);
+      console.warn(`batch failed (${status ?? 'ensemble'}), retry ${attempt}/4 in ${wait / 1000}s...`);
       await delay(wait);
+    }
+  }
+}
+
+/** Compact per-section diff so CI logs show WHAT was misread, not just scores. */
+function printDiff(parsed: ParsedScore | undefined, truth: TruthSong): void {
+  if (!parsed) return;
+  const byLabel = new Map<string, string>();
+  for (const section of parsed.sections) {
+    const key = section.label.trim().toUpperCase();
+    byLabel.set(key, [byLabel.get(key) ?? '', section.lines.join(' ')].join(' ').trim());
+  }
+  for (const section of truth.sections) {
+    const want = normalizeText(section.lines.join(' '));
+    const label = section.label.trim().toUpperCase();
+    const digitless = !/\d/.test(label);
+    const got = normalizeText(
+      byLabel.get(label) ?? (digitless ? byLabel.get(`${label}1`) : byLabel.get(label.replace(/\d+$/, ''))) ?? '',
+    );
+    if (want !== got) {
+      console.log(`    [${section.label}] truth: ${want}`);
+      console.log(`    [${section.label}] model: ${got || '(없음)'} — parsed labels: ${[...byLabel.keys()].join(',')}`);
     }
   }
 }
@@ -47,7 +99,9 @@ async function main() {
   const manifest = JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8')) as TruthSong[];
   const limit = Number(process.env.BENCH_COUNT ?? manifest.length);
   const songs = manifest.slice(0, limit);
-  console.log(`benchmark: ${songs.length} songs, model=${MODEL}, batch=${BATCH}, search=${USE_SEARCH}`);
+  const settings = benchSettings();
+  const label = ENSEMBLE ? `ensemble(${MODELS.join('+')})` : MODELS[0];
+  console.log(`benchmark: ${songs.length} songs, models=${label}, batch=${BATCH}, search=${USE_SEARCH}`);
 
   const reports: SongReport[] = [];
   for (let start = 0; start < songs.length; start += BATCH) {
@@ -57,7 +111,7 @@ async function main() {
     );
     const startedAt = Date.now();
     try {
-      const parsed = await recognizeBatchWithRetry(dataUrls);
+      const parsed = await recognizeBatch(dataUrls, settings);
       const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
       group.forEach((truth, i) => {
         const report = scoreSong(parsed[i], truth);
@@ -67,6 +121,7 @@ async function main() {
             `(title ${report.titleScore.toFixed(2)}, order ${report.orderScore.toFixed(2)}, ` +
             `lyrics ${report.lyricsScore.toFixed(2)}) ${truth.title}`,
         );
+        if (report.lyricsScore < DIFF_BELOW) printDiff(parsed[i], truth);
       });
       console.log(`  batch ${start / BATCH + 1} done in ${seconds}s`);
     } catch (error) {
@@ -80,7 +135,7 @@ async function main() {
 
   const summary = summarize(reports);
   const lines = [
-    `# Recognition benchmark — ${MODEL}${USE_SEARCH ? ' + search' : ''}`,
+    `# Recognition benchmark — ${label}${USE_SEARCH ? ' + search' : ''}`,
     '',
     `- Songs: **${summary.songs}**`,
     `- Mean overall accuracy: **${(summary.meanOverall * 100).toFixed(1)}%**`,
@@ -98,7 +153,10 @@ async function main() {
           .join('\n')}`
       : 'No songs below 90%.',
   ];
-  writeFileSync(join(OUT, 'report.json'), JSON.stringify({ model: MODEL, useSearch: USE_SEARCH, summary, reports }, null, 2));
+  writeFileSync(
+    join(OUT, 'report.json'),
+    JSON.stringify({ models: MODELS, ensemble: ENSEMBLE, useSearch: USE_SEARCH, summary, reports }, null, 2),
+  );
   writeFileSync(join(OUT, 'summary.md'), lines.join('\n') + '\n');
   console.log('\n' + lines.join('\n'));
   console.log(`\nMEAN_OVERALL=${(summary.meanOverall * 100).toFixed(2)}`);

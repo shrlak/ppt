@@ -16,7 +16,12 @@ import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
-import { applyScoreToSong, recognizeScoreBatch, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
+import {
+  applyScoreToSong,
+  recognizeScoreBatch,
+  recognizeScoreBatchEnsemble,
+  recognizeScoreRaced,
+} from '../lib/ai/scoreRecognition';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
@@ -379,7 +384,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
-          const lyricResult = await recognizeScoreBatch(
+          // Multiple models read the conti at once; answers merge per song
+          // (highest-priority model wins, gaps filled by the next one).
+          const lyricResult = await recognizeScoreBatchEnsemble(
             remaining.map(({ image }) => image),
             settings,
             'full',

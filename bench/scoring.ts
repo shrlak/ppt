@@ -73,11 +73,24 @@ export function orderSimilarity(parsed: string[], truth: string[]): number {
 }
 
 /**
+ * Match a truth label to the parsed sections the same way the app's slide
+ * planner resolves order tokens (findSection): exact match first, then V→V1
+ * for digitless labels, then V2→V when the exact suffixed label is absent.
+ */
+function aliasedLookup(parsedByLabel: Map<string, string>, label: string): string {
+  const want = label.trim().toUpperCase();
+  const exact = parsedByLabel.get(want);
+  if (exact !== undefined) return exact;
+  if (!/\d/.test(want)) return parsedByLabel.get(`${want}1`) ?? '';
+  return parsedByLabel.get(want.replace(/\d+$/, '')) ?? '';
+}
+
+/**
  * Lyrics accuracy: for every ground-truth section, find the parsed section
- * with the same (normalized) label and compare full text; sections the model
- * mislabeled still earn credit through a whole-song text comparison, so the
- * score reflects "how much of the printed lyrics came back correctly,
- * attached to the right part".
+ * with the same label (aliased like the app: V↔V1, C2→C) and compare full
+ * text; sections the model mislabeled still earn credit through a whole-song
+ * text comparison, so the score reflects "how much of the printed lyrics
+ * came back correctly, attached to the right part".
  */
 export function lyricsSimilarity(parsed: ParsedScore, truth: TruthSong): number {
   const parsedByLabel = new Map<string, string>();
@@ -90,7 +103,7 @@ export function lyricsSimilarity(parsed: ParsedScore, truth: TruthSong): number 
   for (const section of truth.sections) {
     const truthText = section.lines.join(' ');
     const w = normalizeText(truthText).length || 1;
-    const candidate = parsedByLabel.get(section.label.trim().toUpperCase()) ?? '';
+    const candidate = aliasedLookup(parsedByLabel, section.label);
     labelled += textSimilarity(candidate, truthText) * w;
     weight += w;
   }

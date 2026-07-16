@@ -23,6 +23,13 @@ const args = Object.fromEntries(
 const COUNT = Number(args.count ?? 50);
 const OUT = args.out ?? 'bench/out';
 const WIDTH = Number(args.width ?? 1240);
+// 'scan' (default) mimics real 악보 images found on the web: chord symbols
+// above the staves, mixed serif/sans typography, paper tint, slight page
+// rotation, and scan noise. 'clean' keeps the pristine white render used by
+// the first benchmark trials.
+const STYLE = args.style ?? 'scan';
+
+const CHORDS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bm', 'Em', 'Am', 'F#m', 'G/B', 'Dm7', 'Am7', 'C/E', 'Gsus4', 'D7'];
 
 /** Deterministic PRNG so page layouts are reproducible across trials. */
 function mulberry32(seed) {
@@ -53,11 +60,23 @@ function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** One five-line staff with note heads, as inline SVG. */
+/** One five-line staff with note heads and chord symbols, as inline SVG. */
 function staffSvg(rand, width) {
-  const height = 64;
+  const height = 82;
   const lineGap = 9;
-  const top = 10;
+  const top = 28;
+  // Chord symbols above the measures — the classic contamination hazard when
+  // extracting lyrics from real scores.
+  const chords = [];
+  const chordCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < chordCount; i++) {
+    const x = 50 + ((width - 100) / chordCount) * i + rand() * 20;
+    chords.push(
+      `<text x="${x.toFixed(1)}" y="16" font-size="15" font-weight="700" font-family="Arial, sans-serif">${
+        CHORDS[Math.floor(rand() * CHORDS.length)]
+      }</text>`,
+    );
+  }
   const lines = Array.from(
     { length: 5 },
     (_, i) => `<line x1="0" y1="${top + i * lineGap}" x2="${width}" y2="${top + i * lineGap}" stroke="#222" stroke-width="1"/>`,
@@ -74,13 +93,30 @@ function staffSvg(rand, width) {
     );
   }
   const clef = `<text x="8" y="${top + 4 * lineGap - 2}" font-size="40" font-family="serif">𝄞</text>`;
-  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${lines}${clef}${notes.join('')}</svg>`;
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${chords.join('')}${lines}${clef}${notes.join('')}</svg>`;
+}
+
+/** Low-opacity turbulence overlay that reads like scanner grain. */
+function noiseOverlay(seed) {
+  return `
+    <svg class="noise" xmlns="http://www.w3.org/2000/svg">
+      <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="${seed}"/></filter>
+      <rect width="100%" height="100%" filter="url(#grain)" opacity="0.05"/>
+    </svg>`;
 }
 
 function pageHtml(song, seed, width) {
   const rand = mulberry32(seed);
   const bodyFont = 18 + Math.floor(rand() * 4);
   const staffWidth = width - 120;
+  const scan = STYLE === 'scan';
+  // Alternate typography per song like real score sites do.
+  const serif = scan && rand() < 0.4;
+  const fontStack = serif
+    ? "'Noto Serif KR', 'Noto Serif CJK KR', serif"
+    : "'Noto Sans KR', 'Noto Sans CJK KR', sans-serif";
+  const rotation = scan ? (rand() - 0.5) * 0.8 : 0;
+  const paper = scan ? '#fcfbf6' : '#fff';
   const sections = song.sections
     .map((section) => {
       const rows = section.lines
@@ -102,24 +138,29 @@ function pageHtml(song, seed, width) {
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { width: ${width}px; background: #fff; color: #111;
-           font-family: 'Noto Sans KR', 'Noto Sans CJK KR', sans-serif; padding: 44px 48px 60px; }
+    body { width: ${width}px; background: ${paper}; color: #151515;
+           font-family: ${fontStack}; padding: 44px 48px 60px; position: relative; }
+    .page { transform: rotate(${rotation.toFixed(2)}deg); }
+    .noise { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     .head { text-align: center; margin-bottom: 6px; position: relative; }
     .title { font-size: 34px; font-weight: 700; }
     .key { position: absolute; right: 0; top: 8px; font-size: 20px; font-weight: 700; }
-    .order { text-align: center; font-size: 19px; letter-spacing: 1px; margin: 10px 0 26px; font-weight: 700; }
-    .section { display: flex; gap: 14px; margin-bottom: 18px; }
-    .section-label { width: 44px; font-size: 21px; font-weight: 700; padding-top: 14px; }
+    .order { text-align: center; font-size: 19px; letter-spacing: 1px; margin: 10px 0 22px; font-weight: 700; }
+    .section { display: flex; gap: 14px; margin-bottom: 12px; }
+    .section-label { width: 44px; font-size: 21px; font-weight: 700; padding-top: 30px; }
     .section-body { flex: 1; }
-    .staff-row { margin-bottom: 8px; }
-    .lyric { font-size: ${bodyFont}px; margin: 2px 0 10px 42px; letter-spacing: 0.5px; }
+    .staff-row { margin-bottom: 4px; }
+    .lyric { font-size: ${bodyFont}px; margin: 0 0 8px 42px; letter-spacing: 0.5px; }
   </style></head><body>
-    <div class="head">
-      <div class="title">${escapeHtml(song.title)}</div>
-      ${song.key ? `<div class="key">Key: ${escapeHtml(song.key)}</div>` : ''}
+    <div class="page">
+      <div class="head">
+        <div class="title">${escapeHtml(song.title)}</div>
+        ${song.key ? `<div class="key">Key: ${escapeHtml(song.key)}</div>` : ''}
+      </div>
+      <div class="order">${song.order.map(escapeHtml).join(' - ')}</div>
+      ${sections}
     </div>
-    <div class="order">${song.order.map(escapeHtml).join(' - ')}</div>
-    ${sections}
+    ${scan ? noiseOverlay(seed) : ''}
   </body></html>`;
 }
 

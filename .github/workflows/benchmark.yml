@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: 'Gemini model to benchmark'
-        default: 'gemini-2.5-flash'
+        description: 'Model(s) to benchmark — comma-separated list runs the ensemble path'
+        default: 'gemini-2.5-flash,gemini-2.0-flash'
         type: string
       count:
         description: 'Number of songs'
@@ -32,7 +32,7 @@ on:
       - 'bench/**'
 
 env:
-  BENCH_MODEL_INPUT: ${{ inputs.model || 'gemini-2.5-flash' }}
+  BENCH_MODEL_INPUT: ${{ inputs.model || 'gemini-2.5-flash,gemini-2.0-flash' }}
   BENCH_COUNT_INPUT: ${{ inputs.count || '50' }}
   BENCH_BATCH_INPUT: ${{ inputs.batch || '10' }}
   BENCH_SEARCH_INPUT: ${{ inputs.search || '0' }}
@@ -90,7 +90,7 @@ jobs:
       - name: Run benchmark
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BENCH_MODEL: ${{ steps.params.outputs.model }}
+          BENCH_MODELS: ${{ steps.params.outputs.model }}
           BENCH_BATCH: ${{ steps.params.outputs.batch }}
           BENCH_SEARCH: ${{ steps.params.outputs.search }}
         run: npx vite-node bench/run-bench.ts

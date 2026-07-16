@@ -197,6 +197,70 @@ export async function recognizeScore(dataUrl: string, settings: AiSettings): Pro
 }
 
 /**
+ * Recognize a set of score pages with several models AT ONCE: the top
+ * `groupSize` attempts run in parallel, and the answers merge per song —
+ * each page takes the highest-priority model's non-empty result, and pages
+ * that model missed are filled from the next model's answer. One weak spot
+ * in one model no longer decides the whole conti, and the extra models cost
+ * no extra wall time because they run simultaneously. Falls through to the
+ * next parallel group when an entire group produced nothing.
+ */
+export async function recognizeScoreBatchEnsemble(
+  dataUrls: string[],
+  settings: AiSettings,
+  mode: BatchRecognitionMode,
+  hints?: (string | undefined)[],
+  groupSize = 2,
+): Promise<BatchRecognitionResult> {
+  if (dataUrls.length === 0) return { scores: [], engine: settings.attempts[0]?.engine ?? 'off' };
+  const attempts = planAttempts(settings, mode === 'full');
+  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
+
+  let lastError: Error | null = null;
+  for (let start = 0; start < attempts.length; start += groupSize) {
+    const group = attempts.slice(start, start + groupSize);
+    const settled = await Promise.allSettled(
+      group.map((attempt) =>
+        withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints)),
+      ),
+    );
+
+    // Merge per song in priority order: first non-empty answer wins.
+    const merged: (ParsedScore | undefined)[] = Array.from({ length: dataUrls.length });
+    const contributions = new Array(group.length).fill(0);
+    settled.forEach((result, attemptIndex) => {
+      if (result.status === 'rejected') {
+        lastError = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+        console.warn(
+          `${group[attemptIndex].engine} (${group[attemptIndex].model}) 동시 일괄 인식 실패:`,
+          lastError.message,
+        );
+        return;
+      }
+      result.value.forEach((score, songIndex) => {
+        if (merged[songIndex] === undefined && !isEmptyScore(score)) {
+          merged[songIndex] = score;
+          contributions[attemptIndex] += 1;
+        }
+      });
+    });
+
+    if (merged.some((score) => score !== undefined)) {
+      // Report the engine that contributed the most songs.
+      const primary = contributions.indexOf(Math.max(...contributions));
+      return {
+        scores: merged.map((score) => score ?? { order: [], sections: [] }),
+        engine: group[primary >= 0 ? primary : 0].engine,
+      };
+    }
+    console.warn(
+      `동시 일괄 인식 그룹 (${group.map((attempt) => attempt.model).join(', ')}) 전체 실패, 다음 그룹 시도`,
+    );
+  }
+  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+}
+
+/**
  * Recognize one score image by running several models AT ONCE. Used for
  * pages that already failed the batch pass ("if needed"): attempts run in
  * parallel groups of `groupSize` in priority order, and the first non-empty
