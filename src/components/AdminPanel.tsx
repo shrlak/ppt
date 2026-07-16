@@ -219,6 +219,9 @@ function RecognitionSettingsSection() {
     state: hasSharedSettings() ? 'loading' : 'local',
     message: hasSharedSettings() ? '공유 설정 확인 중…' : '공유 프록시 미연결 — 이 브라우저에만 저장됩니다.',
   });
+  // Once the admin edits anything, a late-arriving shared fetch must not
+  // clobber their in-progress change.
+  const editedRef = useRef(false);
 
   // Pull the shared copy when the panel opens, so this device edits the
   // order everyone is actually using.
@@ -226,7 +229,7 @@ function RecognitionSettingsSection() {
     if (!hasSharedSettings()) return;
     let cancelled = false;
     void fetchSharedSettings().then((shared) => {
-      if (cancelled) return;
+      if (cancelled || editedRef.current) return;
       if (shared) {
         setSettings(shared);
         setExcludedText(shared.excludedTitles.join('\n'));
@@ -241,6 +244,7 @@ function RecognitionSettingsSection() {
   }, []);
 
   const persist = useCallback((next: SharedRecognitionSettings) => {
+    editedRef.current = true;
     setSettings(next);
     saveLocalSharedSettings(next);
     invalidateSharedSettings();
