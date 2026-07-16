@@ -1,0 +1,87 @@
+name: Recognition Accuracy Benchmark
+
+# Measures real end-to-end recognition accuracy: renders synthetic 악보 pages
+# from library ground truth, runs them through the app's Gemini engine with
+# the repo's shared key, and reports per-song and mean accuracy. Run manually
+# from the Actions tab (or via the API) — it spends Gemini free-tier quota,
+# so it never runs automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Gemini model to benchmark'
+        default: 'gemini-2.5-flash'
+        type: string
+      count:
+        description: 'Number of songs'
+        default: '50'
+        type: string
+      batch:
+        description: 'Pages per request'
+        default: '10'
+        type: string
+      search:
+        description: 'Enable Google Search grounding (1/0)'
+        default: '0'
+        type: string
+
+jobs:
+  bench:
+    name: Benchmark ${{ inputs.model }} on ${{ inputs.count }} songs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require the shared Gemini key
+        run: |
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "::error::GEMINI_API_KEY repo secret is not set — the benchmark needs it."
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Korean fonts
+        run: sudo apt-get update -q && sudo apt-get install -y -q fonts-noto-cjk
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate score pages
+        run: node bench/generate-scores.mjs --count ${{ inputs.count }}
+
+      - name: Run benchmark
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BENCH_MODEL: ${{ inputs.model }}
+          BENCH_BATCH: ${{ inputs.batch }}
+          BENCH_SEARCH: ${{ inputs.search }}
+        run: npx vite-node bench/run-bench.ts
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f bench/out/summary.md ]; then
+            cat bench/out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report and pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report-${{ github.run_number }}
+          path: |
+            bench/out/report.json
+            bench/out/summary.md
+            bench/out/manifest.json
+            bench/out/pages/score-0*.png
+          if-no-files-found: warn
