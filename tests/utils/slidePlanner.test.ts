@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { findSection, planSlides, planAllSlides, unmatchedTokens } from '../../src/lib/utils/slidePlanner';
+import {
+  findSection,
+  planSlides,
+  planAllSlides,
+  unmatchedTokens,
+  sortSectionsByOrder,
+} from '../../src/lib/utils/slidePlanner';
 import type { Song } from '../../src/lib/utils/types';
 
 const lines = (n: number, prefix = 'line') =>
@@ -37,6 +43,46 @@ describe('findSection', () => {
 
   it('returns undefined for unknown tokens', () => {
     expect(findSection(sections, 'B')).toBeUndefined();
+  });
+});
+
+describe('sortSectionsByOrder', () => {
+  it('reorders sections to the order tokens, not their original listing', () => {
+    // Recognition returned Chorus before Verse, but the score's printed order is I-V1-V2-C.
+    const sections = [
+      { label: 'C', lines: ['후렴'] },
+      { label: 'V2', lines: ['2절'] },
+      { label: 'V1', lines: ['1절'] },
+    ];
+    const sorted = sortSectionsByOrder(sections, ['I', 'V1', 'V2', 'C']);
+    expect(sorted.map((s) => s.label)).toEqual(['V1', 'V2', 'C']);
+  });
+
+  it('collapses a repeated token to one placement', () => {
+    const sections = [
+      { label: 'V1', lines: ['1절'] },
+      { label: 'C', lines: ['후렴'] },
+    ];
+    const sorted = sortSectionsByOrder(sections, ['I', 'V1', 'C', 'C']);
+    expect(sorted.map((s) => s.label)).toEqual(['V1', 'C']);
+  });
+
+  it('appends sections the order never mentions, keeping their relative order', () => {
+    const sections = [
+      { label: 'V1', lines: ['1절'] },
+      { label: 'B', lines: ['브릿지'] },
+      { label: 'C', lines: ['후렴'] },
+    ];
+    const sorted = sortSectionsByOrder(sections, ['I', 'C']);
+    expect(sorted.map((s) => s.label)).toEqual(['C', 'V1', 'B']);
+  });
+
+  it('is a no-op when order is empty', () => {
+    const sections = [
+      { label: 'C', lines: ['후렴'] },
+      { label: 'V1', lines: ['1절'] },
+    ];
+    expect(sortSectionsByOrder(sections, [])).toEqual(sections);
   });
 });
 

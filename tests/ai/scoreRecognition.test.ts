@@ -140,4 +140,22 @@ describe('applyScoreToSong', () => {
     const next = applyScoreToSong(stub, { ...parsed, order: [] });
     expect(next.order).toEqual(['I', 'V1', 'C']);
   });
+
+  it('sorts sections to match the printed order even when the engine listed them out of sequence', () => {
+    // Recognition can read the lyric blocks top-to-bottom on the page and list
+    // Chorus before Verse 2, even though the score's own 진행 순서 line says
+    // V1 comes before V2 comes before C — the saved section list should follow
+    // the printed order, not the engine's listing order.
+    const outOfOrder: ParsedScore = {
+      title: '주님의 사랑',
+      order: ['I', 'V1', 'V2', 'C'],
+      sections: [
+        { label: 'C', lines: ['후렴 줄'] },
+        { label: 'V2', lines: ['둘째 절'] },
+        { label: 'V1', lines: ['첫째 절'] },
+      ],
+    };
+    const next = applyScoreToSong(stub, outOfOrder);
+    expect(next.sections.map((s) => s.label)).toEqual(['V1', 'V2', 'C']);
+  });
 });

@@ -6,6 +6,7 @@ import type { ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini, type BatchRecognitionMode } from './scoreAi';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
+import { sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
  * Base URL of the optional shared recognition proxy (see worker/), baked into
@@ -142,13 +143,13 @@ export function applyScoreToSong(song: Song, parsed: ParsedScore): Song {
 
   // Only fill sections/order if the user hasn't started writing lyrics.
   if (!hasLyrics(song) && parsed.sections.length > 0) {
-    next.sections = parsed.sections.map((s) => ({ label: s.label, lines: [...s.lines] }));
-    if (parsed.order.length > 0) {
-      next.order = [...parsed.order];
-    } else {
-      // Derive an order from the recognized parts (title slide handled by "I").
-      next.order = ['I', ...parsed.sections.map((s) => s.label)];
-    }
+    const recognized = parsed.sections.map((s) => ({ label: s.label, lines: [...s.lines] }));
+    const order =
+      parsed.order.length > 0
+        ? parsed.order
+        : ['I', ...recognized.map((s) => s.label)]; // no printed order: derive one (title slide is "I")
+    next.sections = sortSectionsByOrder(recognized, order);
+    next.order = [...order];
   } else if (parsed.order.length > 0 && song.order.join('-') === 'I') {
     // Lyrics already present but order is still the default — accept the order.
     next.order = [...parsed.order];

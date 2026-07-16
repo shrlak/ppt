@@ -18,6 +18,32 @@ export function findSection(sections: Section[], token: string): Section | undef
   return byLabel(want.replace(/\d+$/, ''));
 }
 
+/**
+ * Reorder recognized sections to match the first-appearance sequence of the
+ * score's printed 진행 순서 (order tokens), so the editable section list —
+ * and anything later saved into the library — reads in the same Verse →
+ * Pre-Chorus → Chorus → Bridge sequence printed on the score, not whatever
+ * order the recognition engine happened to list them in.
+ *
+ * Sections with no matching order token (or when order is empty) keep their
+ * original relative position, appended after the ones the order placed.
+ */
+export function sortSectionsByOrder(sections: Section[], order: string[]): Section[] {
+  const placed = new Set<Section>();
+  const sorted: Section[] = [];
+  for (const token of order) {
+    if (token === 'I') continue; // intro has no lyrics section to place
+    const section = findSection(sections, token);
+    if (!section || placed.has(section)) continue;
+    placed.add(section);
+    sorted.push(section);
+  }
+  for (const section of sections) {
+    if (!placed.has(section)) sorted.push(section);
+  }
+  return sorted;
+}
+
 function usableLines(section: Section | undefined): string[] {
   if (!section) return [];
   return section.lines.map((l) => l.trim()).filter((l) => l.length > 0);
