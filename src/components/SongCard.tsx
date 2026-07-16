@@ -111,6 +111,68 @@ export default function SongCard({
     onChange({ ...song, sections });
   }
 
+  // Recognition status + trigger, rendered inside the score pane normally
+  // and directly above the editor in the split-screen (editorOnly) view.
+  const recogBox = onRecognize && (
+    <div className="recog-box" data-testid="recog-box">
+      {recog?.status === 'running' ? (
+        <div className="recog-running" data-testid="recog-running">
+          <div className="recog-running-row">
+            <div className="spinner" />
+            <span>
+              {recog.phase ? `${PHASE_LABELS[recog.phase]}…` : '가사 인식 중…'}
+              {typeof recog.progress === 'number' && (
+                <strong className="recog-percent" data-testid="recog-percent">
+                  {' '}
+                  {progressPercent(recog.progress)}%
+                </strong>
+              )}
+            </span>
+            {onCancelRecognize && (
+              <button
+                type="button"
+                className="btn btn-chip"
+                data-testid="recognize-stop"
+                onClick={onCancelRecognize}
+              >
+                중지
+              </button>
+            )}
+          </div>
+          <div
+            className="recog-progress"
+            role="progressbar"
+            aria-label="가사 인식 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent(recog.progress)}
+          >
+            <span style={{ width: `${progressPercent(recog.progress)}%` }} />
+          </div>
+        </div>
+      ) : (
+        <>
+          <button className="btn btn-chip" data-testid="recognize-btn" onClick={onRecognize}>
+            {recog?.status === 'done' ? '↻ 다시 인식' : '✨ 가사 자동 인식'}
+          </button>
+          {recog?.status === 'error' && (
+            <span className="recog-error">
+              인식 실패 — 다시 시도하거나 직접 입력하세요.
+              {recog.message && <span className="recog-error-detail">{recog.message}</span>}
+            </span>
+          )}
+          {recog?.status === 'done' && (
+            <span className="recog-done">
+              {recog.engine === 'library'
+                ? '✓ 라이브러리의 저장된 가사를 불러왔습니다'
+                : `✓ ${recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해 주세요`}
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div
       className={`song-card${editorOnly ? ' song-card-editor-only' : ''}`}
@@ -163,71 +225,14 @@ export default function SongCard({
           <div className="score-pane">
             <img src={pageImage} alt="악보 미리보기" onClick={onZoom} />
             <span className="score-hint">클릭하면 콘티 전체를 보며 가사를 편집할 수 있어요 (p.{song.pageIndex})</span>
-            {onRecognize && (
-              <div className="recog-box" data-testid="recog-box">
-                {recog?.status === 'running' ? (
-                  <div className="recog-running" data-testid="recog-running">
-                    <div className="recog-running-row">
-                      <div className="spinner" />
-                      <span>
-                        {recog.phase ? `${PHASE_LABELS[recog.phase]}…` : '가사 인식 중…'}
-                        {typeof recog.progress === 'number' && (
-                          <strong className="recog-percent" data-testid="recog-percent">
-                            {' '}
-                            {progressPercent(recog.progress)}%
-                          </strong>
-                        )}
-                      </span>
-                      {onCancelRecognize && (
-                        <button
-                          type="button"
-                          className="btn btn-chip"
-                          data-testid="recognize-stop"
-                          onClick={onCancelRecognize}
-                        >
-                          중지
-                        </button>
-                      )}
-                    </div>
-                    <div
-                      className="recog-progress"
-                      role="progressbar"
-                      aria-label="가사 인식 진행률"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={progressPercent(recog.progress)}
-                    >
-                      <span style={{ width: `${progressPercent(recog.progress)}%` }} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <button className="btn btn-chip" data-testid="recognize-btn" onClick={onRecognize}>
-                      {recog?.status === 'done' ? '↻ 다시 인식' : '✨ 가사 자동 인식'}
-                    </button>
-                    {recog?.status === 'error' && (
-                      <span className="recog-error">
-                        인식 실패 — 다시 시도하거나 직접 입력하세요.
-                        {recog.message && <span className="recog-error-detail">{recog.message}</span>}
-                      </span>
-                    )}
-                    {recog?.status === 'done' && (
-                      <span className="recog-done">
-                        {recog.engine === 'library'
-                          ? '✓ 라이브러리의 저장된 가사를 불러왔습니다'
-                          : `✓ ${recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해 주세요`}
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+            {recogBox}
           </div>
         ) : song.pageIndex != null ? (
           <div className="score-pane score-loading">악보 미리보기 준비 중… (p.{song.pageIndex})</div>
         ) : null}
 
         <div className="editor-pane">
+          {editorOnly && recogBox}
           {song.sections.map((sec, i) => (
             <div className="section-row" key={i}>
               <input

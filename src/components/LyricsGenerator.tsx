@@ -921,6 +921,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
                 index={songs.findIndex((s) => s.id === zoomSong.id)}
                 total={songs.length}
                 recog={recog[zoomSong.id]}
+                onRecognize={zoomSong.pageIndex != null ? () => handleRecognizeClick(zoomSong) : undefined}
+                onCancelRecognize={() => cancelRecognition(zoomSong)}
                 onChange={updateSong}
                 onMove={moveSong}
                 onRemove={removeSong}

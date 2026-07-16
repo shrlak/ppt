@@ -185,6 +185,8 @@ test('score click opens the split view: whole conti left, lyric editor right', a
   // The right pane is the clicked song's editor; edits persist to the list.
   const editor = page.getByTestId('split-view-editor').getByTestId('song-card-editor');
   await expect(editor).toBeVisible();
+  // Recognition can be triggered and monitored from inside the split view.
+  await expect(editor.getByTestId('recognize-btn')).toBeVisible();
   if ((await editor.getByTestId('section-textarea').count()) === 0) {
     await editor.getByRole('button', { name: 'V1', exact: true }).click();
   }
