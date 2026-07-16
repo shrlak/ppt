@@ -1,4 +1,4 @@
-export type UsageProvider = 'gemini' | 'huggingface';
+export type UsageProvider = 'gemini' | 'nvidia' | 'huggingface';
 
 export interface UsageEvent {
   provider: UsageProvider;
@@ -31,8 +31,10 @@ export interface UsageRecord {
 }
 
 export const DEFAULT_GEMINI_MODEL: string;
+export const DEFAULT_NVIDIA_MODEL: string;
 export const DEFAULT_HUGGINGFACE_MODEL: string;
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT: number;
+export const DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT: number;
 export const DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD: number;
 export const DEFAULT_HUGGINGFACE_USD_PER_SECOND: number;
 

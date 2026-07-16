@@ -2,9 +2,16 @@
 // draft song. Called directly from the browser with the user's own free Google
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
-import type { Section } from '../utils/types';
-import { normalizeToken, parseOrder } from '../utils/orderParser';
-import { cleanLyricLine, type ParsedScore } from './scoreParser';
+import { RecognitionError } from './recognitionError';
+import {
+  coerceParsedScore,
+  coerceParsedScoreBatch,
+  parseModelJson,
+  type BatchRecognitionMode,
+  type ParsedScore,
+} from './scoreParser';
+
+export type { BatchRecognitionMode };
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -64,8 +71,6 @@ const RESPONSE_SCHEMA = {
   },
   required: ['title', 'sections'],
 };
-
-export type BatchRecognitionMode = 'titles' | 'full';
 
 const BATCH_TITLE_ITEM_SCHEMA = {
   type: 'object',
@@ -189,38 +194,9 @@ export function buildGeminiBatchBody(
   return body;
 }
 
-interface GeminiSectionLike {
-  label?: unknown;
-  lines?: unknown;
-}
-
 /** Coerce Gemini's parsed JSON payload into a ParsedScore, defensively. */
 export function parseGeminiPayload(payload: unknown): ParsedScore {
-  const obj = (payload ?? {}) as Record<string, unknown>;
-
-  const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
-  const key = typeof obj.key === 'string' && obj.key.trim() ? obj.key.trim() : undefined;
-
-  const orderTokens = Array.isArray(obj.order) ? obj.order.filter((t): t is string => typeof t === 'string') : [];
-  const order = parseOrder(orderTokens.join('-'));
-
-  const rawSections = Array.isArray(obj.sections) ? (obj.sections as GeminiSectionLike[]) : [];
-  const sections: Section[] = [];
-  for (const s of rawSections) {
-    // Normalize the label to a canonical token (후렴→C, Outro→O, …) so it lines
-    // up with the order tokens the slide planner matches against.
-    const label = typeof s?.label === 'string' ? normalizeToken(s.label) : '';
-    if (!label) continue;
-    const lines = Array.isArray(s?.lines)
-      ? s.lines
-          .filter((l): l is string => typeof l === 'string')
-          .map((l) => cleanLyricLine(l))
-          .filter((l) => l.length > 0)
-      : [];
-    sections.push({ label, lines });
-  }
-
-  return { title, key, order, sections };
+  return coerceParsedScore(payload);
 }
 
 /** Normalize a possibly sparse/out-of-order batch response back to image order. */
@@ -229,19 +205,7 @@ export function parseGeminiBatchPayload(
   imageCount: number,
   mode: BatchRecognitionMode,
 ): ParsedScore[] {
-  const obj = (payload ?? {}) as { results?: unknown };
-  const raw = Array.isArray(obj.results) ? obj.results : Array.isArray(payload) ? payload : [];
-  const results: ParsedScore[] = Array.from({ length: imageCount }, () => ({ order: [], sections: [] }));
-  raw.forEach((item, position) => {
-    if (!item || typeof item !== 'object') return;
-    const record = item as Record<string, unknown>;
-    const imageIndex = Number.isInteger(record.imageIndex) ? Number(record.imageIndex) : position;
-    if (imageIndex < 0 || imageIndex >= imageCount) return;
-    const score = parseGeminiPayload(record);
-    results[imageIndex] =
-      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
-  });
-  return results;
+  return coerceParsedScoreBatch(payload, imageCount, mode);
 }
 
 /** Pull the model's text part out of a generateContent response. */
@@ -290,25 +254,16 @@ export async function recognizeWithGemini(
     } catch {
       // ignore body parse errors; keep the status code
     }
-    throw new Error(`Gemini 호출 실패: ${detail}`);
+    throw new RecognitionError(`Gemini 호출 실패: ${detail}`, res.status);
   }
 
   const json = (await res.json()) as unknown;
-  const text = extractGeminiText(json).trim();
-  if (!text) throw new Error('Gemini 응답이 비어 있습니다.');
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    // Model occasionally wraps JSON in prose or code fences — salvage the object.
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('Gemini 응답을 JSON으로 해석하지 못했습니다.');
-    payload = JSON.parse(text.slice(start, end + 1));
-  }
-
-  return parseGeminiPayload(payload);
+  const payload = parseModelJson(
+    extractGeminiText(json),
+    'Gemini 응답이 비어 있습니다.',
+    'Gemini 응답을 JSON으로 해석하지 못했습니다.',
+  );
+  return coerceParsedScore(payload);
 }
 
 /** Recognize all supplied score images in one Gemini request. */
@@ -339,20 +294,13 @@ export async function recognizeBatchWithGemini(
     } catch {
       // Keep the status code when the error body is not JSON.
     }
-    throw new Error(`Gemini 일괄 호출 실패: ${detail}`);
+    throw new RecognitionError(`Gemini 일괄 호출 실패: ${detail}`, res.status);
   }
 
-  const text = extractGeminiText((await res.json()) as unknown).trim();
-  if (!text) throw new Error('Gemini 일괄 응답이 비어 있습니다.');
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('Gemini 일괄 응답을 JSON으로 해석하지 못했습니다.');
-    payload = JSON.parse(text.slice(start, end + 1));
-  }
-  return parseGeminiBatchPayload(payload, dataUrls.length, mode);
+  const payload = parseModelJson(
+    extractGeminiText((await res.json()) as unknown),
+    'Gemini 일괄 응답이 비어 있습니다.',
+    'Gemini 일괄 응답을 JSON으로 해석하지 못했습니다.',
+  );
+  return coerceParsedScoreBatch(payload, dataUrls.length, mode);
 }

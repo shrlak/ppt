@@ -1,10 +1,11 @@
 // Fixed configuration for score recognition: Gemini primary (via the shared
-// recognition proxy — see worker/ — or a build-time key), falling back to
-// Hugging Face once Gemini's tokens/quota are exhausted or it otherwise fails.
-// There is no user-facing settings screen; recognition always uses these
-// defaults, so it works as soon as the recognize button is pressed.
+// recognition proxy — see worker/ — or a build-time key), falling back to an
+// NVIDIA-hosted vision model (build.nvidia.com), then Hugging Face, once
+// Gemini's tokens/quota are exhausted or it otherwise fails. There is no
+// user-facing settings screen; recognition always uses these defaults, so it
+// works as soon as the recognize button is pressed.
 
-export type RecognitionEngine = 'gemini' | 'huggingface' | 'off';
+export type RecognitionEngine = 'gemini' | 'nvidia' | 'huggingface' | 'off';
 
 export interface AiSettings {
   engine: RecognitionEngine;
@@ -12,8 +13,9 @@ export interface AiSettings {
   geminiModel: string;
   /** Cross-check recognized lyrics against the web via Gemini's Google Search grounding. */
   geminiUseSearch: boolean;
+  nvidiaApiKey: string;
   huggingfaceApiKey: string;
-  /** Fallback engines to try if primary fails (e.g., ['huggingface']) */
+  /** Fallback engines to try if primary fails (e.g., ['nvidia', 'huggingface']) */
   fallbackEngines: RecognitionEngine[];
 }
 
@@ -24,12 +26,13 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
   geminiUseSearch: true,
+  nvidiaApiKey: '',
   huggingfaceApiKey: '',
-  fallbackEngines: ['huggingface'],
+  fallbackEngines: ['nvidia', 'huggingface'],
 };
 
 /** Engines that can appear in the administrator-configured priority order. */
-export const ORDERABLE_ENGINES: RecognitionEngine[] = ['gemini', 'huggingface'];
+export const ORDERABLE_ENGINES: RecognitionEngine[] = ['gemini', 'nvidia', 'huggingface'];
 
 export const DEFAULT_RECOGNITION_ORDER: RecognitionEngine[] = [...ORDERABLE_ENGINES];
 

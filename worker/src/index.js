@@ -1,14 +1,15 @@
 // Shared recognition proxy for the lyrics app's score-recognition feature.
 //
-// Holds the site owner's Gemini / Hugging Face API keys as Worker secrets
-// (never shipped to the browser) and forwards recognition requests to the
-// real provider with the key attached. The client sends the exact same
-// request body it would send directly to Gemini/Hugging Face — this Worker
-// is a thin, transparent relay, not a reimplementation of the recognition
+// Holds the site owner's Gemini / NVIDIA / Hugging Face API keys as Worker
+// secrets (never shipped to the browser) and forwards recognition requests
+// to the real provider with the key attached. The client sends the exact
+// same request body it would send directly to the provider — this Worker is
+// a thin, transparent relay, not a reimplementation of the recognition
 // logic.
 //
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
+//   POST /nvidia          -> https://integrate.api.nvidia.com/v1/chat/completions (build.nvidia.com catalog)
 //   POST /huggingface     -> https://api-inference.huggingface.co/models/:HUGGINGFACE_MODEL
 //   GET  /usage           -> current per-model usage from the shared proxy
 //
@@ -17,6 +18,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   DEFAULT_HUGGINGFACE_MODEL,
+  DEFAULT_NVIDIA_MODEL,
   buildUsageSnapshot,
   mergeUsageRecord,
   sanitizeUsageEvent,
@@ -24,6 +26,7 @@ import {
 } from './usage.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const HUGGINGFACE_ENDPOINT = 'https://api-inference.huggingface.co/models';
 
 // Always allow the production GitHub Pages origin, even if ALLOWED_ORIGINS
@@ -116,6 +119,21 @@ function geminiUsageMetadata(responseBody) {
   }
 }
 
+/** Token usage from an OpenAI-compatible chat-completions response body. */
+function openAiUsageMetadata(responseBody) {
+  try {
+    const parsed = JSON.parse(responseBody);
+    const usage = parsed?.usage || {};
+    return {
+      promptTokens: usage.prompt_tokens || 0,
+      outputTokens: usage.completion_tokens || 0,
+      totalTokens: usage.total_tokens || 0,
+    };
+  } catch {
+    return { promptTokens: 0, outputTokens: 0, totalTokens: 0 };
+  }
+}
+
 function providerComputeSeconds(response, wallSeconds) {
   const raw = response.headers.get('x-compute-time');
   const value = raw == null ? Number.NaN : Number(raw);
@@ -178,6 +196,44 @@ export default {
         success: res.ok,
         wallSeconds,
         ...geminiUsageMetadata(resBody),
+      });
+      return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
+    }
+
+    if (url.pathname === '/nvidia') {
+      if (!env.NVIDIA_API_KEY) {
+        return jsonResponse({ error: 'NVIDIA_API_KEY not configured on the proxy' }, 500, headers);
+      }
+      // The body is OpenAI-compatible JSON. The Worker pins the model: an env
+      // override (NVIDIA_MODEL) wins, then whatever the client asked for,
+      // then the default — so the site owner can switch build.nvidia.com
+      // models without redeploying the app.
+      let body;
+      try {
+        body = JSON.parse(await request.text());
+      } catch {
+        return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
+      }
+      const model = env.NVIDIA_MODEL || body?.model || DEFAULT_NVIDIA_MODEL;
+      body = { ...body, model };
+      const startedAt = Date.now();
+      const res = await fetch(NVIDIA_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const resBody = await res.text();
+      const wallSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
+      await recordUsage(env, {
+        provider: 'nvidia',
+        model,
+        success: res.ok,
+        wallSeconds,
+        ...openAiUsageMetadata(resBody),
       });
       return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
     }

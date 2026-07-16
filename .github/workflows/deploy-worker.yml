@@ -47,7 +47,9 @@ jobs:
           # non-empty repo secret get set — leave one blank to skip it.
           secrets: |
             GEMINI_API_KEY
+            NVIDIA_API_KEY
             HUGGINGFACE_API_KEY
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}

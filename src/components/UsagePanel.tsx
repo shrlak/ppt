@@ -1,5 +1,6 @@
-// Standalone usage page: shows the shared Gemini/Hugging Face API usage,
-// separated from AdminPanel so anyone can check it without the admin password.
+// Standalone usage page: shows the shared Gemini/NVIDIA/Hugging Face API
+// usage, separated from AdminPanel so anyone can check it without the admin
+// password.
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
 import { fetchAiUsage, hasSharedUsageMonitor, type AiUsageSnapshot, type ModelUsage } from '../lib/ai/usageMonitor';
@@ -9,6 +10,12 @@ interface Props {
 }
 
 const NUMBER_FORMAT = new Intl.NumberFormat('ko-KR');
+
+const PROVIDER_NAMES: Record<string, string> = {
+  gemini: 'Gemini',
+  nvidia: 'NVIDIA',
+  huggingface: 'Hugging Face',
+};
 
 function usagePercent(usage: ModelUsage): number {
   if (usage.limit <= 0) return 0;
@@ -25,12 +32,12 @@ function usageHeadline(usage: ModelUsage): string {
 function ModelUsageCard({ usage }: { usage: ModelUsage }) {
   const percent = usagePercent(usage);
   const level = percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'normal';
-  const providerName = usage.provider === 'gemini' ? 'Gemini' : 'Hugging Face';
+  const providerName = PROVIDER_NAMES[usage.provider] ?? usage.provider;
   const resetLabel = usage.period === 'day' ? '매일 자정(미 서부) 초기화' : '매월 초기화';
   const details =
-    usage.provider === 'gemini'
-      ? `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 토큰 ${NUMBER_FORMAT.format(usage.totalTokens)}개`
-      : `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 계산 ${usage.computeSeconds.toFixed(1)}초`;
+    usage.provider === 'huggingface'
+      ? `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 계산 ${usage.computeSeconds.toFixed(1)}초`
+      : `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 토큰 ${NUMBER_FORMAT.format(usage.totalTokens)}개`;
 
   return (
     <article className={`admin-usage-card usage-${level}`} data-testid={`admin-usage-${usage.provider}`}>
@@ -90,8 +97,8 @@ export default function UsagePanel({ onClose }: Props) {
           <div>
             <h4>무료 API 사용량</h4>
             <p>
-              가사 인식은 Gemini를 우선 사용하고, 토큰·한도가 소진되면 Hugging Face로 자동 전환됩니다.
-              아래는 공유 키를 사용하는 모든 브라우저의 모델별 사용량입니다.
+              가사 인식은 Gemini를 우선 사용하고, 토큰·한도가 소진되면 NVIDIA → Hugging Face 순으로
+              자동 전환됩니다. 아래는 공유 키를 사용하는 모든 브라우저의 모델별 사용량입니다.
             </p>
           </div>
           <button
@@ -117,7 +124,8 @@ export default function UsagePanel({ onClose }: Props) {
               ))}
             </div>
             <p className="admin-usage-note">
-              Gemini 막대는 AI Studio의 일일 요청 한도 기준입니다. Hugging Face 막대는 응답 계산 시간과
+              Gemini 막대는 AI Studio의 일일 요청 한도 기준입니다. NVIDIA 막대는 build.nvidia.com
+              무료 크레딧(요청 1회 = 1크레딧) 기준입니다. Hugging Face 막대는 응답 계산 시간과
               설정 단가로 추정하며, 최종 청구 내역은 공급자 대시보드가 기준입니다.
             </p>
           </>

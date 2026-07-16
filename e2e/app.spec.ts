@@ -127,18 +127,18 @@ test('admin panel reorders the recognition engines and persists the order', asyn
   await page.getByTestId('admin-unlock').click();
 
   const engines = page.getByTestId('admin-recognition-order').locator('.admin-engine');
-  await expect(engines).toHaveText([/Gemini/, /Hugging Face/]);
+  await expect(engines).toHaveText([/Gemini/, /NVIDIA/, /Hugging Face/]);
 
-  // Push Gemini below Hugging Face; the order persists across a reload.
+  // Push Gemini below NVIDIA; the order persists across a reload.
   await page.getByTestId('admin-engine-down-gemini').click();
-  await expect(engines).toHaveText([/Hugging Face/, /Gemini/]);
+  await expect(engines).toHaveText([/NVIDIA/, /Gemini/, /Hugging Face/]);
 
   await page.reload();
   await page.getByTestId('admin-open').click();
-  await expect(engines).toHaveText([/Hugging Face/, /Gemini/]);
+  await expect(engines).toHaveText([/NVIDIA/, /Gemini/, /Hugging Face/]);
 
   await page.getByTestId('admin-engine-reset').click();
-  await expect(engines).toHaveText([/Gemini/, /Hugging Face/]);
+  await expect(engines).toHaveText([/Gemini/, /NVIDIA/, /Hugging Face/]);
 });
 
 test('usage page shows AI usage next to the admin button', async ({ page }) => {

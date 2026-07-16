@@ -1,9 +1,13 @@
 // Hugging Face Inference API for score recognition fallback.
 // Uses open-source vision models to extract title, key, order, and lyrics from sheet music.
-import type { Section } from '../utils/types';
-import { normalizeToken, parseOrder } from '../utils/orderParser';
-import { cleanLyricLine, type ParsedScore } from './scoreParser';
-import type { BatchRecognitionMode } from './scoreAi';
+import { RecognitionError } from './recognitionError';
+import {
+  coerceParsedScore,
+  coerceParsedScoreBatch,
+  parseModelJson,
+  type BatchRecognitionMode,
+  type ParsedScore,
+} from './scoreParser';
 
 const ENDPOINT = 'https://api-inference.huggingface.co/models';
 
@@ -30,35 +34,8 @@ const BASE_PROMPT = [
   '반드시 유효한 JSON 객체 하나만 출력하고, 다른 설명은 넣지 마세요.',
 ].join('\n');
 
-interface HFSectionLike {
-  label?: unknown;
-  lines?: unknown;
-}
-
 export function parseHuggingFacePayload(payload: unknown): ParsedScore {
-  const obj = (payload ?? {}) as Record<string, unknown>;
-
-  const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
-  const key = typeof obj.key === 'string' && obj.key.trim() ? obj.key.trim() : undefined;
-
-  const orderTokens = Array.isArray(obj.order) ? obj.order.filter((t): t is string => typeof t === 'string') : [];
-  const order = parseOrder(orderTokens.join('-'));
-
-  const rawSections = Array.isArray(obj.sections) ? (obj.sections as HFSectionLike[]) : [];
-  const sections: Section[] = [];
-  for (const s of rawSections) {
-    const label = typeof s?.label === 'string' ? normalizeToken(s.label) : '';
-    if (!label) continue;
-    const lines = Array.isArray(s?.lines)
-      ? s.lines
-          .filter((l): l is string => typeof l === 'string')
-          .map((l) => cleanLyricLine(l))
-          .filter((l) => l.length > 0)
-      : [];
-    sections.push({ label, lines });
-  }
-
-  return { title, key, order, sections };
+  return coerceParsedScore(payload);
 }
 
 export function extractImageBase64(dataUrl: string): string {
@@ -101,19 +78,7 @@ export function parseHuggingFaceBatchPayload(
   imageCount: number,
   mode: BatchRecognitionMode,
 ): ParsedScore[] {
-  const obj = (payload ?? {}) as { results?: unknown };
-  const raw = Array.isArray(obj.results) ? obj.results : Array.isArray(payload) ? payload : [];
-  const results: ParsedScore[] = Array.from({ length: imageCount }, () => ({ order: [], sections: [] }));
-  raw.forEach((item, position) => {
-    if (!item || typeof item !== 'object') return;
-    const record = item as Record<string, unknown>;
-    const imageIndex = Number.isInteger(record.imageIndex) ? Number(record.imageIndex) : position;
-    if (imageIndex < 0 || imageIndex >= imageCount) return;
-    const score = parseHuggingFacePayload(record);
-    results[imageIndex] =
-      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
-  });
-  return results;
+  return coerceParsedScoreBatch(payload, imageCount, mode);
 }
 
 function generatedText(response: unknown): string {
@@ -129,15 +94,7 @@ function generatedText(response: unknown): string {
 }
 
 function parseGeneratedJson(text: string, emptyMessage: string): unknown {
-  if (!text) throw new Error(emptyMessage);
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('Hugging Face 응답을 JSON으로 해석하지 못했습니다.');
-    return JSON.parse(text.slice(start, end + 1));
-  }
+  return parseModelJson(text, emptyMessage, 'Hugging Face 응답을 JSON으로 해석하지 못했습니다.');
 }
 
 /**
@@ -183,7 +140,7 @@ export async function recognizeWithHuggingFace(
     } catch {
       // ignore body parse errors; keep the status code
     }
-    throw new Error(`Hugging Face 호출 실패: ${detail}`);
+    throw new RecognitionError(`Hugging Face 호출 실패: ${detail}`, res.status);
   }
 
   const json = (await res.json()) as unknown;
@@ -218,7 +175,7 @@ export async function recognizeBatchWithHuggingFace(
     } catch {
       // Keep the status code when the error body is not JSON.
     }
-    throw new Error(`Hugging Face 일괄 호출 실패: ${detail}`);
+    throw new RecognitionError(`Hugging Face 일괄 호출 실패: ${detail}`, res.status);
   }
 
   const json = (await res.json()) as unknown;

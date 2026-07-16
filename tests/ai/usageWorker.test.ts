@@ -51,6 +51,27 @@ describe('AI proxy usage records', () => {
     ).toContain('gemini-2.5-flash');
   });
 
+  it('accumulates NVIDIA requests per UTC month', () => {
+    const record = mergeUsageRecord(undefined, {
+      provider: 'nvidia',
+      model: 'nvidia/nemotron-nano-12b-v2-vl',
+      success: true,
+      timestamp: '2026-07-15T16:00:00.000Z',
+      promptTokens: 900,
+      outputTokens: 120,
+      totalTokens: 1020,
+    });
+
+    expect(record).toMatchObject({
+      provider: 'nvidia',
+      period: 'month',
+      periodKey: '2026-07',
+      requests: 1,
+      successfulRequests: 1,
+      totalTokens: 1020,
+    });
+  });
+
   it('builds request and estimated-credit bars for the current periods', () => {
     const now = new Date('2026-07-15T16:00:00.000Z');
     const gemini = mergeUsageRecord(undefined, {
@@ -59,6 +80,13 @@ describe('AI proxy usage records', () => {
       success: true,
       timestamp: now,
       totalTokens: 500,
+    });
+    const nvidia = mergeUsageRecord(undefined, {
+      provider: 'nvidia',
+      model: 'nvidia/nemotron-nano-12b-v2-vl',
+      success: true,
+      timestamp: now,
+      totalTokens: 800,
     });
     const huggingFace = mergeUsageRecord(undefined, {
       provider: 'huggingface',
@@ -69,22 +97,30 @@ describe('AI proxy usage records', () => {
       computeSource: 'provider',
     });
     const snapshot = buildUsageSnapshot(
-      [gemini, huggingFace],
+      [gemini, nvidia, huggingFace],
       {
         GEMINI_DAILY_REQUEST_LIMIT: '100',
+        NVIDIA_MONTHLY_REQUEST_LIMIT: '1000',
         HUGGINGFACE_MONTHLY_CREDIT_USD: '0.10',
         HUGGINGFACE_USD_PER_SECOND: '0.00012',
       },
       now,
     );
 
-    expect(snapshot.models).toHaveLength(2);
+    expect(snapshot.models).toHaveLength(3);
     expect(snapshot.models[0]).toMatchObject({ provider: 'gemini', used: 1, limit: 100 });
     expect(snapshot.models[1]).toMatchObject({
+      provider: 'nvidia',
+      metric: 'requests',
+      used: 1,
+      limit: 1000,
+      estimated: false,
+    });
+    expect(snapshot.models[2]).toMatchObject({
       provider: 'huggingface',
       limit: 0.1,
       providerMeasuredRequests: 1,
     });
-    expect(snapshot.models[1].used).toBeCloseTo(0.0012);
+    expect(snapshot.models[2].used).toBeCloseTo(0.0012);
   });
 });

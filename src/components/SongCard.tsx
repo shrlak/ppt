@@ -2,23 +2,33 @@ import { useEffect, useState } from 'react';
 import type { Song } from '../lib/utils/types';
 import { formatOrder, parseOrder } from '../lib/utils/orderParser';
 import { planSlides, unmatchedTokens } from '../lib/utils/slidePlanner';
+import { progressPercent, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { nextAvailableLabel } from './songLabels';
 
 /** Live status of auto-recognizing a song's score image. */
 export interface RecogState {
   status: 'running' | 'done' | 'error';
+  /** Overall pipeline progress, 0–1. Rendered as a percentage + bar. */
   progress?: number;
   message?: string;
-  /** Current stage of the two-pass batch recognition flow. */
-  phase?: 'titles' | 'lyrics';
+  /** Current stage of the staged batch recognition flow. */
+  phase?: RecognitionPhase;
   /** Engine that produced the result, or 'library' when recognition was skipped. */
   engine?: string;
 }
 
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
+  nvidia: 'NVIDIA',
   huggingface: 'Hugging Face',
   library: '라이브러리',
+};
+
+const PHASE_LABELS: Record<RecognitionPhase, string> = {
+  render: '악보 이미지 준비 중',
+  titles: '전체 곡 제목 확인 중',
+  lyrics: '전체 가사 일괄 인식 중',
+  rescue: '남은 곡 다시 인식 중',
 };
 
 interface Props {
@@ -146,26 +156,39 @@ export default function SongCard({
             {onRecognize && (
               <div className="recog-box" data-testid="recog-box">
                 {recog?.status === 'running' ? (
-                  <div className="recog-running">
-                    <div className="spinner" />
-                    <span>
-                      {recog.phase === 'titles'
-                        ? '전체 곡 제목 확인 중…'
-                        : recog.phase === 'lyrics'
-                          ? '전체 가사 일괄 인식 중…'
-                          : '가사 인식 중…'}
-                      {typeof recog.progress === 'number' ? ` ${Math.round(recog.progress * 100)}%` : ''}
-                    </span>
-                    {onCancelRecognize && (
-                      <button
-                        type="button"
-                        className="btn btn-chip"
-                        data-testid="recognize-stop"
-                        onClick={onCancelRecognize}
-                      >
-                        중지
-                      </button>
-                    )}
+                  <div className="recog-running" data-testid="recog-running">
+                    <div className="recog-running-row">
+                      <div className="spinner" />
+                      <span>
+                        {recog.phase ? `${PHASE_LABELS[recog.phase]}…` : '가사 인식 중…'}
+                        {typeof recog.progress === 'number' && (
+                          <strong className="recog-percent" data-testid="recog-percent">
+                            {' '}
+                            {progressPercent(recog.progress)}%
+                          </strong>
+                        )}
+                      </span>
+                      {onCancelRecognize && (
+                        <button
+                          type="button"
+                          className="btn btn-chip"
+                          data-testid="recognize-stop"
+                          onClick={onCancelRecognize}
+                        >
+                          중지
+                        </button>
+                      )}
+                    </div>
+                    <div
+                      className="recog-progress"
+                      role="progressbar"
+                      aria-label="가사 인식 진행률"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={progressPercent(recog.progress)}
+                    >
+                      <span style={{ width: `${progressPercent(recog.progress)}%` }} />
+                    </div>
                   </div>
                 ) : (
                   <>

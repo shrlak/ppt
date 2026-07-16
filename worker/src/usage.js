@@ -1,18 +1,27 @@
 // Pure usage-metering helpers shared by the Worker and its unit tests.
-// Gemini's free tier is request-limited per model/project/day, while Hugging
-// Face's included Inference Providers allowance is a monthly dollar credit.
-// Provider dashboards remain authoritative; this module maintains the app's
-// own counter because neither API exposes a portable "remaining credit" API.
+// Gemini's free tier is request-limited per model/project/day, NVIDIA's API
+// catalog (build.nvidia.com) grants a pool of free credits where one request
+// costs one credit, and Hugging Face's included Inference Providers allowance
+// is a monthly dollar credit. Provider dashboards remain authoritative; this
+// module maintains the app's own counter because none of these APIs exposes a
+// portable "remaining credit" API.
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
 export const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT = 250;
+// build.nvidia.com grants free API credits (1 credit = 1 request). The pool
+// is per-account rather than per-month; the monthly bar is a pacing guide.
+export const DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT = 1000;
 export const DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD = 0.1;
 // Hugging Face bills hf-inference by compute time x hardware price. This
 // default mirrors the public pricing example and is deliberately configurable.
 export const DEFAULT_HUGGINGFACE_USD_PER_SECOND = 0.00012;
 
-const PROVIDERS = new Set(['gemini', 'huggingface']);
+const PROVIDERS = new Set(['gemini', 'nvidia', 'huggingface']);
+
+/** Display/sort order of providers, matching the recognition priority. */
+const PROVIDER_RANK = { gemini: 0, nvidia: 1, huggingface: 2 };
 
 function finiteNonNegative(value, fallback = 0) {
   const number = Number(value);
@@ -47,6 +56,7 @@ export function usagePeriod(provider, value = new Date()) {
   if (provider === 'gemini') {
     return { period: 'day', periodKey: pacificDateKey(value) };
   }
+  // NVIDIA credits and Hugging Face credit are both tracked per UTC month.
   return { period: 'month', periodKey: utcMonthKey(value) };
 }
 
@@ -133,6 +143,10 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
     env.GEMINI_DAILY_REQUEST_LIMIT,
     DEFAULT_GEMINI_DAILY_REQUEST_LIMIT,
   );
+  const nvidiaLimit = positiveNumber(
+    env.NVIDIA_MONTHLY_REQUEST_LIMIT,
+    DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT,
+  );
   const huggingFaceLimit = positiveNumber(
     env.HUGGINGFACE_MONTHLY_CREDIT_USD,
     DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD,
@@ -143,6 +157,7 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
   );
   const defaults = [
     emptyRecord('gemini', env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL, now),
+    emptyRecord('nvidia', env.NVIDIA_MODEL || DEFAULT_NVIDIA_MODEL, now),
     emptyRecord('huggingface', env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL, now),
   ];
   const current = Array.isArray(records)
@@ -181,6 +196,17 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
           estimated: false,
         };
       }
+      if (record.provider === 'nvidia') {
+        // build.nvidia.com charges one credit per request, so the request
+        // count IS the credit spend — no estimation involved.
+        return {
+          ...common,
+          metric: 'requests',
+          used: requests,
+          limit: nvidiaLimit,
+          estimated: false,
+        };
+      }
       return {
         ...common,
         metric: 'usd',
@@ -191,7 +217,9 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
       };
     })
     .sort((a, b) => {
-      if (a.provider !== b.provider) return a.provider === 'gemini' ? -1 : 1;
+      if (a.provider !== b.provider) {
+        return (PROVIDER_RANK[a.provider] ?? 9) - (PROVIDER_RANK[b.provider] ?? 9);
+      }
       return a.model.localeCompare(b.model);
     });
 

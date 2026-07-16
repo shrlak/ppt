@@ -39,6 +39,40 @@ describe('parseUsageSnapshot', () => {
     });
   });
 
+  it('accepts NVIDIA usage rows', () => {
+    const snapshot = parseUsageSnapshot({
+      generatedAt: '2026-07-15T12:00:00.000Z',
+      source: 'shared-proxy',
+      models: [
+        {
+          provider: 'nvidia',
+          model: 'nvidia/nemotron-nano-12b-v2-vl',
+          period: 'month',
+          periodKey: '2026-07',
+          requests: 4,
+          successfulRequests: 4,
+          failedRequests: 0,
+          promptTokens: 4000,
+          outputTokens: 900,
+          totalTokens: 4900,
+          computeSeconds: 0,
+          providerMeasuredRequests: 0,
+          metric: 'requests',
+          used: 4,
+          limit: 1000,
+          estimated: false,
+        },
+      ],
+    });
+
+    expect(snapshot.models[0]).toMatchObject({
+      provider: 'nvidia',
+      metric: 'requests',
+      used: 4,
+      limit: 1000,
+    });
+  });
+
   it('rejects unknown providers instead of displaying untrusted data', () => {
     expect(() =>
       parseUsageSnapshot({

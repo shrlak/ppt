@@ -16,12 +16,22 @@ import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
 import { getAiSettings } from '../lib/ai/aiSettings';
-import { applyScoreToSong, recognizeScoreBatch } from '../lib/ai/scoreRecognition';
+import { applyScoreToSong, recognizeScore, recognizeScoreBatch } from '../lib/ai/scoreRecognition';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
+import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { showToast } from '../lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
+
+/**
+ * Width (CSS px) score pages are rendered at for recognition. Higher than the
+ * on-screen preview so the models can read small lyric type under the staves.
+ */
+const RECOGNITION_RENDER_WIDTH = 1600;
+
+/** How often the recognition progress percentage refreshes on screen. */
+const PROGRESS_TICK_MS = 400;
 
 function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
@@ -161,9 +171,13 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   }, []);
 
   /**
-   * Recognize every supplied score as one two-stage job:
-   * 1) one title-only request for all pages, then resolve library hits;
-   * 2) one full-lyrics request containing only the unmatched pages.
+   * Recognize every supplied score as one staged job with a live percentage:
+   * 1) render the score pages (real per-page progress);
+   * 2) one title-only request for all pages, then resolve library hits
+   *    (best-effort — a failure here just skips early library matching);
+   * 3) one full-lyrics request containing only the unmatched pages;
+   * 4) rescue pass — any page the batch answer left without lyrics is retried
+   *    individually, so one bad page can't blank out the whole conti.
    */
   const recognizeSongsBatch = useCallback(
     async (targets: Song[]) => {
@@ -172,38 +186,82 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       if (!doc || active.length === 0) return;
 
       const isCancelled = (id: string) => scanCancelledRef.current.has(id);
-      const setRunning = (ids: string[], phase: 'titles' | 'lyrics', progress: number) => {
+
+      // One ticker drives every card in the batch. The interval only fires
+      // between awaits, and each stage transition updates `tracked` in the
+      // same synchronous block that resolves cards, so a card marked done or
+      // errored is never flipped back to running by a late tick.
+      const tracked = { ids: active.map((song) => song.id), phase: 'render' as RecognitionPhase, startedAt: Date.now(), realFraction: 0 };
+      const applyProgress = () => {
+        const value = recognitionProgress(tracked.phase, Date.now() - tracked.startedAt, tracked.realFraction);
         setRecog((current) => {
           const next = { ...current };
-          for (const id of ids) {
-            if (!isCancelled(id)) next[id] = { status: 'running', phase, progress };
+          for (const id of tracked.ids) {
+            // A card resolved mid-stage (library hit or rescue finish) stays
+            // done — the tick must not flip it back to running.
+            if (!isCancelled(id) && !resolvedIds.has(id)) {
+              next[id] = { status: 'running', phase: tracked.phase, progress: value };
+            }
           }
           return next;
         });
       };
-      const activeIds = active.map((song) => song.id);
+      const enterPhase = (phase: RecognitionPhase, ids: string[]) => {
+        tracked.phase = phase;
+        tracked.ids = ids;
+        tracked.startedAt = Date.now();
+        tracked.realFraction = 0;
+        applyProgress();
+      };
+      const ticker = window.setInterval(applyProgress, PROGRESS_TICK_MS);
+
       const resolvedIds = new Set<string>();
-      setRunning(activeIds, 'titles', 0);
+      const markDone = (ids: string[], engine: string) => {
+        for (const id of ids) resolvedIds.add(id);
+        setRecog((current) => {
+          const next = { ...current };
+          for (const id of ids) {
+            if (!isCancelled(id)) next[id] = { status: 'done', engine };
+          }
+          return next;
+        });
+      };
+      enterPhase('render', tracked.ids);
 
       try {
         // Rendering and recognition are both batched: no per-song request loop.
+        let renderedPages = 0;
         const images = await Promise.all(
-          active.map((song) => doc.renderPage(song.pageIndex as number, 1240)),
+          active.map(async (song) => {
+            const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH);
+            renderedPages += 1;
+            tracked.realFraction = renderedPages / active.length;
+            return url;
+          }),
         );
         const settings = getAiSettings();
-        const titleResult = await recognizeScoreBatch(images, settings, 'titles');
+
+        // Quick title pass. Best-effort: on failure the full pass still runs,
+        // it just can't resolve library songs early.
+        enterPhase('titles', tracked.ids);
+        let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
+        try {
+          titleScores = (await recognizeScoreBatch(images, settings, 'titles')).scores;
+        } catch (error) {
+          console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
+        }
 
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
         const titlePlan = planScoreBatch(
-          titleResult.scores,
+          titleScores,
           active.map((song) => song.title),
           libraryRef.current,
         );
 
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
-          const identity = titleResult.scores[index] ?? { order: [], sections: [] };
+          const identity = titleScores[index] ?? { order: [], sections: [] };
           const hit = titlePlan.libraryMatches[index];
           if (hit) {
             resolvedIds.add(song.id);
@@ -228,18 +286,28 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         const remaining = unmatched.filter(({ song }) => !isCancelled(song.id));
         if (remaining.length === 0) return;
 
-        const remainingIds = remaining.map(({ song }) => song.id);
-        setRunning(remainingIds, 'lyrics', 0);
-        const lyricResult = await recognizeScoreBatch(
-          remaining.map(({ image }) => image),
-          settings,
-          'full',
-        );
+        // Full-lyrics pass for every unmatched page in one request. If the
+        // whole batch fails (payload too large, every engine down for batch
+        // requests), the rescue pass below still tries each page separately.
+        enterPhase('lyrics', remaining.map(({ song }) => song.id));
+        let lyricScores: ParsedScore[] | null = null;
+        let lyricEngine = '';
+        try {
+          const lyricResult = await recognizeScoreBatch(
+            remaining.map(({ image }) => image),
+            settings,
+            'full',
+          );
+          lyricScores = lyricResult.scores;
+          lyricEngine = lyricResult.engine;
+        } catch (error) {
+          console.warn('가사 일괄 인식 실패, 곡별 인식으로 전환:', error instanceof Error ? error.message : error);
+        }
 
         const scoreById = new Map<string, ParsedScore>();
         remaining.forEach(({ song, identity }, index) => {
           if (isCancelled(song.id)) return;
-          const full = lyricResult.scores[index] ?? { order: [], sections: [] };
+          const full = lyricScores?.[index] ?? { order: [], sections: [] };
           scoreById.set(song.id, {
             ...full,
             title: full.title ?? identity.title,
@@ -261,24 +329,73 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           }
         }
 
-        if (scoreById.size > 0) {
-          for (const id of scoreById.keys()) pendingAutoSaveRef.current.add(id);
+        // Apply the pages the batch pass actually read; pages that came back
+        // without any lyrics move on to the per-page rescue pass instead of
+        // being silently marked done while empty.
+        const recognized = [...scoreById.entries()].filter(([, score]) => score.sections.length > 0);
+        if (recognized.length > 0) {
+          for (const [id] of recognized) pendingAutoSaveRef.current.add(id);
           setSongs((current) =>
             current.map((song) => {
               const score = scoreById.get(song.id);
-              if (!score || isCancelled(song.id)) return song;
+              if (!score || score.sections.length === 0 || isCancelled(song.id)) return song;
               return applyScoreToSong(song, score);
             }),
           );
+          markDone(recognized.map(([id]) => id), lyricEngine);
         }
-        setRecog((current) => {
-          const next = { ...current };
-          for (const id of scoreById.keys()) {
-            if (!isCancelled(id)) next[id] = { status: 'done', engine: lyricResult.engine };
-          }
-          return next;
-        });
 
+        const needRescue = remaining.filter(
+          ({ song }) =>
+            !isCancelled(song.id) &&
+            !resolvedIds.has(song.id) &&
+            (scoreById.get(song.id)?.sections.length ?? 0) === 0,
+        );
+        if (needRescue.length === 0) return;
+
+        enterPhase('rescue', needRescue.map(({ song }) => song.id));
+        const failures = new Map<string, string>();
+        await Promise.all(
+          needRescue.map(async ({ song, image, identity }) => {
+            try {
+              const single = await recognizeScore(image, settings);
+              if (isCancelled(song.id)) return;
+              const known = scoreById.get(song.id);
+              const merged: ParsedScore = {
+                ...single.score,
+                title: single.score.title ?? known?.title ?? identity.title,
+                key: single.score.key ?? known?.key ?? identity.key,
+              };
+              const hit = merged.title?.trim() ? findEntry(libraryRef.current, merged.title) : undefined;
+              if (hit) {
+                resolvedIds.add(song.id);
+                fillFromLibrary(song, hit);
+                return;
+              }
+              if (merged.sections.length === 0) {
+                failures.set(song.id, '가사를 읽지 못했습니다.');
+                return;
+              }
+              pendingAutoSaveRef.current.add(song.id);
+              setSongs((current) =>
+                current.map((s) => (s.id === song.id && !isCancelled(song.id) ? applyScoreToSong(s, merged) : s)),
+              );
+              markDone([song.id], single.engine);
+            } catch (error) {
+              failures.set(song.id, error instanceof Error ? error.message : String(error));
+            }
+          }),
+        );
+
+        if (failures.size > 0) {
+          setRecog((current) => {
+            const next = { ...current };
+            for (const [id, message] of failures) {
+              if (!isCancelled(id)) next[id] = { status: 'error', message };
+            }
+            return next;
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setRecog((current) => {
@@ -290,9 +407,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           }
           return next;
         });
+      } finally {
+        window.clearInterval(ticker);
       }
     },
-    [fillFromLibrary, saveToLibrary],
+    [fillFromLibrary],
   );
 
   const handleRecognizeClick = useCallback(

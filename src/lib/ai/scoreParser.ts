@@ -15,6 +15,89 @@ export interface ParsedScore {
   sections: Section[];
 }
 
+/** Batch recognition depth: quick title/key identification, or full lyrics. */
+export type BatchRecognitionMode = 'titles' | 'full';
+
+interface SectionLike {
+  label?: unknown;
+  lines?: unknown;
+}
+
+/**
+ * Coerce a model's parsed JSON payload into a ParsedScore, defensively. All
+ * vision engines (Gemini, NVIDIA, Hugging Face) answer with the same shape,
+ * so they share this one normalizer: labels are canonicalized (후렴→C, …) to
+ * line up with the order tokens the slide planner matches against, and lyric
+ * lines get their note-split hyphens joined back into words.
+ */
+export function coerceParsedScore(payload: unknown): ParsedScore {
+  const obj = (payload ?? {}) as Record<string, unknown>;
+
+  const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
+  const key = typeof obj.key === 'string' && obj.key.trim() ? obj.key.trim() : undefined;
+
+  const orderTokens = Array.isArray(obj.order) ? obj.order.filter((t): t is string => typeof t === 'string') : [];
+  const order = parseOrder(orderTokens.join('-'));
+
+  const rawSections = Array.isArray(obj.sections) ? (obj.sections as SectionLike[]) : [];
+  const sections: Section[] = [];
+  for (const s of rawSections) {
+    const label = typeof s?.label === 'string' ? normalizeToken(s.label) : '';
+    if (!label) continue;
+    const lines = Array.isArray(s?.lines)
+      ? s.lines
+          .filter((l): l is string => typeof l === 'string')
+          .map((l) => cleanLyricLine(l))
+          .filter((l) => l.length > 0)
+      : [];
+    sections.push({ label, lines });
+  }
+
+  return { title, key, order, sections };
+}
+
+/**
+ * Normalize a possibly sparse/out-of-order batch response (`{results:[…]}`
+ * with per-item imageIndex) back into image order. Missing images become
+ * empty ParsedScores so the result stays aligned with the input.
+ */
+export function coerceParsedScoreBatch(
+  payload: unknown,
+  imageCount: number,
+  mode: BatchRecognitionMode,
+): ParsedScore[] {
+  const obj = (payload ?? {}) as { results?: unknown };
+  const raw = Array.isArray(obj.results) ? obj.results : Array.isArray(payload) ? payload : [];
+  const results: ParsedScore[] = Array.from({ length: imageCount }, () => ({ order: [], sections: [] }));
+  raw.forEach((item, position) => {
+    if (!item || typeof item !== 'object') return;
+    const record = item as Record<string, unknown>;
+    const imageIndex = Number.isInteger(record.imageIndex) ? Number(record.imageIndex) : position;
+    if (imageIndex < 0 || imageIndex >= imageCount) return;
+    const score = coerceParsedScore(record);
+    results[imageIndex] =
+      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
+  });
+  return results;
+}
+
+/**
+ * Parse a model's text answer as JSON, salvaging the outermost object when
+ * the model wrapped it in prose or a ```json code fence.
+ */
+export function parseModelJson(text: string, emptyMessage: string, unparsableMessage: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error(emptyMessage);
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start === -1 || end <= start) throw new Error(unparsableMessage);
+    return JSON.parse(trimmed.slice(start, end + 1));
+  }
+}
+
 /** A bare canonical part token like I, V1, PC, C2, B, O, T. */
 const PART_TOKEN = /^(I|V\d*|PC\d*|C\d*|B\d*|O\d*|T\d*)$/i;
 

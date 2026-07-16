@@ -1,4 +1,4 @@
-export type UsageProvider = 'gemini' | 'huggingface';
+export type UsageProvider = 'gemini' | 'nvidia' | 'huggingface';
 export type UsageMetric = 'requests' | 'usd';
 
 export interface ModelUsage {
@@ -51,7 +51,8 @@ export function parseUsageSnapshot(raw: unknown): AiUsageSnapshot {
     const provider = model.provider;
     const metric = model.metric;
     const period = model.period;
-    if (provider !== 'gemini' && provider !== 'huggingface') throw new Error('알 수 없는 AI 공급자입니다.');
+    if (provider !== 'gemini' && provider !== 'nvidia' && provider !== 'huggingface')
+      throw new Error('알 수 없는 AI 공급자입니다.');
     if (metric !== 'requests' && metric !== 'usd') throw new Error('알 수 없는 사용량 단위입니다.');
     if (period !== 'day' && period !== 'month') throw new Error('알 수 없는 사용량 기간입니다.');
     if (typeof model.model !== 'string' || !model.model.trim()) throw new Error('AI 모델명이 없습니다.');

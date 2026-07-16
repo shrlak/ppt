@@ -2,10 +2,12 @@
 // image into a draft song and merge it onto an existing Song without clobbering
 // anything the user has already typed.
 import type { Song } from '../utils/types';
-import type { ParsedScore } from './scoreParser';
+import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionEngine } from './aiSettings';
-import { recognizeBatchWithGemini, recognizeWithGemini, type BatchRecognitionMode } from './scoreAi';
+import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
+import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
+import { isTransientRecognitionError } from './recognitionError';
 import { sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
@@ -14,6 +16,28 @@ import { sortSectionsByOrder } from '../utils/slidePlanner';
  * the actual API keys live only on the proxy server.
  */
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
+
+/** Wait before the single transient-failure retry (rate limit bursts, 5xx). */
+const TRANSIENT_RETRY_DELAY_MS = 1500;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run an engine call, retrying once after a short pause when the failure is
+ * transient (429/408/5xx/network). One retry rescues rate-limit bursts and
+ * hiccups without materially delaying the fallback to the next engine.
+ */
+async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!isTransientRecognitionError(error)) throw error;
+    await delay(TRANSIENT_RETRY_DELAY_MS);
+    return call();
+  }
+}
 
 async function recognizeWithEngine(
   engine: RecognitionEngine,
@@ -24,6 +48,11 @@ async function recognizeWithEngine(
     const key = settings.geminiApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
     return recognizeWithGemini(dataUrl, key, settings.geminiModel, settings.geminiUseSearch, PROXY_URL);
+  }
+  if (engine === 'nvidia') {
+    const key = settings.nvidiaApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
+    return recognizeWithNvidia(dataUrl, key, undefined, PROXY_URL);
   }
   if (engine === 'huggingface') {
     const key = settings.huggingfaceApiKey.trim();
@@ -63,6 +92,11 @@ async function recognizeBatchWithEngine(
       PROXY_URL,
     );
   }
+  if (engine === 'nvidia') {
+    const key = settings.nvidiaApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
+    return recognizeBatchWithNvidia(dataUrls, key, mode, undefined, PROXY_URL);
+  }
   if (engine === 'huggingface') {
     const key = settings.huggingfaceApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
@@ -71,9 +105,18 @@ async function recognizeBatchWithEngine(
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
 
+/** True when the result carries nothing usable at all. */
+function isEmptyScore(score: ParsedScore | undefined): boolean {
+  if (!score) return true;
+  return !score.title && !score.key && score.order.length === 0 && score.sections.length === 0;
+}
+
 /**
- * Recognize a set of score pages as one operation. Gemini and Hugging Face
- * each use one multimodal request for the entire set.
+ * Recognize a set of score pages as one operation. Each engine uses one
+ * multimodal request for the entire set. An engine answer where every page
+ * came back completely empty counts as a failure — a well-formed but blank
+ * response must fall through to the next engine, not silently produce blank
+ * cards.
  */
 export async function recognizeScoreBatch(
   dataUrls: string[],
@@ -87,7 +130,12 @@ export async function recognizeScoreBatch(
   let lastError: Error | null = null;
   for (const engine of engines) {
     try {
-      const scores = await recognizeBatchWithEngine(engine, dataUrls, settings, mode);
+      const scores = await withTransientRetry(() =>
+        recognizeBatchWithEngine(engine, dataUrls, settings, mode),
+      );
+      if (scores.every((score) => isEmptyScore(score))) {
+        throw new Error('인식 결과가 비어 있습니다.');
+      }
       return { scores, engine };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -99,8 +147,9 @@ export async function recognizeScoreBatch(
 
 /**
  * Run recognition on one score image in priority order — Gemini until its
- * tokens/quota run out or it otherwise fails, then Hugging Face (per
- * DEFAULT_AI_SETTINGS).
+ * tokens/quota run out or it otherwise fails, then the NVIDIA-hosted vision
+ * model, then Hugging Face (per DEFAULT_AI_SETTINGS). An empty answer also
+ * moves on to the next engine.
  */
 export async function recognizeScore(dataUrl: string, settings: AiSettings): Promise<RecognitionResult> {
   const engines = [settings.engine, ...settings.fallbackEngines].filter((e) => e !== 'off');
@@ -111,7 +160,9 @@ export async function recognizeScore(dataUrl: string, settings: AiSettings): Pro
   let lastError: Error | null = null;
   for (const engine of engines) {
     try {
-      return { score: await recognizeWithEngine(engine, dataUrl, settings), engine };
+      const score = await withTransientRetry(() => recognizeWithEngine(engine, dataUrl, settings));
+      if (isEmptyScore(score)) throw new Error('인식 결과가 비어 있습니다.');
+      return { score, engine };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${engine} 인식 실패, 다음 엔진 시도:`, lastError.message);

@@ -14,6 +14,7 @@ import { showToast } from '../lib/utils/toast';
 
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
+  nvidia: 'NVIDIA',
   huggingface: 'Hugging Face',
 };
 

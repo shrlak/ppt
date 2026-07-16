@@ -1,10 +1,10 @@
 # Shared Recognition Proxy
 
 A minimal Cloudflare Worker that lets everyone using the deployed lyrics app
-recognize scores with Gemini / Hugging Face **without each person needing
-their own API key**. It holds your keys as server-side secrets and relays
-requests to the real provider — the keys never appear in the browser or in
-the app's JavaScript bundle.
+recognize scores with Gemini / NVIDIA / Hugging Face **without each person
+needing their own API key**. It holds your keys as server-side secrets and
+relays requests to the real provider — the keys never appear in the browser
+or in the app's JavaScript bundle.
 
 Without this, "bring your own key" (the app's default) is the only safe
 option: a key baked directly into the static site's build would be visible
@@ -14,9 +14,17 @@ to anyone who opens dev tools, since the app has no backend of its own.
 
 ```
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
+Browser  ──POST /nvidia────────▶  Worker (adds real key)  ──▶  NVIDIA API catalog (build.nvidia.com)
 Browser  ──POST /huggingface───▶  Worker (adds real key)  ──▶  Hugging Face API
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 ```
+
+The `/nvidia` route matters more than the other two for people without their
+own keys: `integrate.api.nvidia.com` does not answer browser CORS requests,
+so the NVIDIA engine only works through this proxy. The Worker pins the
+NVIDIA model server-side — set `NVIDIA_MODEL` in `wrangler.toml` to any
+vision model from <https://build.nvidia.com/models> (default:
+`nvidia/nemotron-nano-12b-v2-vl`, NVIDIA's document/OCR vision model).
 
 The Worker is a thin relay: it forwards the exact request body the browser
 would have sent directly to the provider, just with the real key attached
@@ -31,10 +39,13 @@ browser using the site.
 
 Gemini does not publish a portable API for the active project's remaining
 quota. Set `GEMINI_DAILY_REQUEST_LIMIT` in `wrangler.toml` to the current RPD
-shown in AI Studio. Hugging Face's bar uses its monthly free credit and an
-estimate based on `x-compute-time`; adjust `HUGGINGFACE_MONTHLY_CREDIT_USD` and
-`HUGGINGFACE_USD_PER_SECOND` if the account allowance or hardware rate changes.
-Provider billing dashboards remain authoritative.
+shown in AI Studio. NVIDIA's build.nvidia.com free tier is a pool of credits
+where one request costs one credit — set `NVIDIA_MONTHLY_REQUEST_LIMIT` to
+your remaining credits to pace usage. Hugging Face's bar uses its monthly
+free credit and an estimate based on `x-compute-time`; adjust
+`HUGGINGFACE_MONTHLY_CREDIT_USD` and `HUGGINGFACE_USD_PER_SECOND` if the
+account allowance or hardware rate changes. Provider billing dashboards
+remain authoritative.
 
 ## Deploy — automated via GitHub Actions (recommended)
 
@@ -59,8 +70,10 @@ run a CLI command or touch the raw key outside GitHub's own secret UI.
    committed file):
    - `CLOUDFLARE_API_TOKEN` — from step 2
    - `CLOUDFLARE_ACCOUNT_ID` — from step 1
-   - `GEMINI_API_KEY` — your Gemini key (optional; skip if only sharing Hugging Face)
-   - `HUGGINGFACE_API_KEY` — your Hugging Face key (optional; skip if only sharing Gemini)
+   - `GEMINI_API_KEY` — your Gemini key (optional; skip to share only the other providers)
+   - `NVIDIA_API_KEY` — your build.nvidia.com key (optional; create one free at
+     <https://build.nvidia.com> → account settings → API Keys)
+   - `HUGGINGFACE_API_KEY` — your Hugging Face key (optional)
 
 4. Edit `wrangler.toml` in this repo — set `ALLOWED_ORIGINS` to your deployed
    site's origin (e.g. `https://<your-username>.github.io`, no trailing
@@ -92,6 +105,7 @@ cd worker
 npm install
 npx wrangler login
 npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put NVIDIA_API_KEY
 npx wrangler secret put HUGGINGFACE_API_KEY
 npx wrangler deploy
 ```

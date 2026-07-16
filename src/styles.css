@@ -319,6 +319,10 @@ body {
   background: rgba(234, 179, 8, 0.16);
   color: #9a6700;
 }
+.admin-provider-badge.provider-nvidia {
+  background: rgba(118, 185, 0, 0.16);
+  color: #4d7c0f;
+}
 .admin-estimate-badge {
   background: var(--surface);
   color: var(--ink-faint);
@@ -1697,14 +1701,37 @@ body {
 }
 .recog-running {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 6px;
   color: var(--accent-dark);
   font-size: 0.82rem;
+}
+.recog-running-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .recog-running .spinner {
   width: 16px;
   height: 16px;
+}
+.recog-percent {
+  font-variant-numeric: tabular-nums;
+}
+.recog-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hairline);
+}
+.recog-progress span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.35s var(--ease);
 }
 .recog-error {
   color: var(--danger-ink);
