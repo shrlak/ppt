@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyScoreToSong, recognizeScore, recognizeScoreBatch } from '../../src/lib/ai/scoreRecognition';
-import { DEFAULT_AI_SETTINGS } from '../../src/lib/ai/aiSettings';
+import {
+  applyScoreToSong,
+  recognizeScore,
+  recognizeScoreBatch,
+  recognizeScoreRaced,
+} from '../../src/lib/ai/scoreRecognition';
+import { DEFAULT_AI_SETTINGS, RECOGNITION_MODEL_CATALOG } from '../../src/lib/ai/aiSettings';
 import { RecognitionError } from '../../src/lib/ai/recognitionError';
 import type { Song } from '../../src/lib/utils/types';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
+
+const GEMINI_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'gemini').length;
+const NVIDIA_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length;
 
 vi.mock('../../src/lib/ai/scoreAi', () => ({
   recognizeWithGemini: vi.fn(),
@@ -87,9 +95,11 @@ describe('recognizeScore engine priority', () => {
     vi.mocked(recognizeWithNvidia).mockResolvedValue(result);
     const out = await recognizeScore('data:image/png;base64,x', settings);
     expect(out.engine).toBe('nvidia');
-    // Both Gemini lyric models (Pro, Flash) are tried before leaving Gemini.
-    expect(recognizeWithGemini).toHaveBeenCalledTimes(2);
+    // Every catalog Gemini model is tried before leaving Gemini.
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
     expect(recognizeWithNvidia).toHaveBeenCalledTimes(1);
+    // The first NVIDIA attempt uses the catalog's top NVIDIA model.
+    expect(vi.mocked(recognizeWithNvidia).mock.calls[0][2]).toBe('nvidia/nemotron-nano-12b-v2-vl');
     expect(recognizeWithHuggingFace).not.toHaveBeenCalled();
   });
 
@@ -101,14 +111,14 @@ describe('recognizeScore engine priority', () => {
     expect(out.engine).toBe('huggingface');
   });
 
-  it('throws once every engine fails', async () => {
+  it('throws once every attempt fails', async () => {
     vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeWithNvidia).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeWithHuggingFace).mockRejectedValue(new Error('down'));
     await expect(recognizeScore('data:image/png;base64,x', settings)).rejects.toThrow('down');
-    // Gemini is tried once per lyric model (Pro, then Flash).
-    expect(recognizeWithGemini).toHaveBeenCalledTimes(2);
-    expect(recognizeWithNvidia).toHaveBeenCalledTimes(1);
+    // One call per catalog model of each provider.
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
+    expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
     expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(1);
   });
 
@@ -130,8 +140,8 @@ describe('recognizeScore engine priority', () => {
     vi.mocked(recognizeWithNvidia).mockResolvedValue(result);
     const out = await recognizeScore('data:image/png;base64,x', settings);
     expect(out.engine).toBe('nvidia');
-    // One call per Gemini lyric model, no per-model retries.
-    expect(recognizeWithGemini).toHaveBeenCalledTimes(2);
+    // One call per Gemini catalog model, no per-model retries.
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
   });
 
   it('treats a completely empty answer as a failure and tries the next engine', async () => {
@@ -139,6 +149,53 @@ describe('recognizeScore engine priority', () => {
     vi.mocked(recognizeWithNvidia).mockResolvedValue(result);
     const out = await recognizeScore('data:image/png;base64,x', settings);
     expect(out.engine).toBe('nvidia');
+  });
+});
+
+describe('recognizeScoreRaced (multiple models at once)', () => {
+  const result: ParsedScore = { title: 't', key: 'C', order: [], sections: [] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('runs the top priority group in parallel and returns the first good answer', async () => {
+    vi.mocked(recognizeWithGemini).mockImplementation(async (_url, _key, model) => {
+      if (model === 'gemini-2.5-flash') return result;
+      throw new Error('quota');
+    });
+    const out = await recognizeScoreRaced('data:image/png;base64,x', settings);
+    expect(out.engine).toBe('gemini');
+    // Default group size 3 → the three Gemini models fired together.
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(3);
+    expect(recognizeWithNvidia).not.toHaveBeenCalled();
+  });
+
+  it('moves to the next parallel group when the whole group fails', async () => {
+    vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeWithNvidia).mockImplementation(async (_url, _key, model) => {
+      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return result;
+      throw new Error('down');
+    });
+    const out = await recognizeScoreRaced('data:image/png;base64,x', settings);
+    expect(out.engine).toBe('nvidia');
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(3);
+  });
+
+  it('honors a custom administrator priority order', async () => {
+    const custom = {
+      ...settings,
+      attempts: [
+        { engine: 'nvidia' as const, model: 'google/gemma-3-27b-it' },
+        { engine: 'gemini' as const, model: 'gemini-2.5-flash' },
+      ],
+    };
+    vi.mocked(recognizeWithNvidia).mockResolvedValue(result);
+    vi.mocked(recognizeWithGemini).mockResolvedValue(result);
+    const out = await recognizeScoreRaced('data:image/png;base64,x', custom, 1);
+    expect(out.engine).toBe('nvidia');
+    expect(vi.mocked(recognizeWithNvidia).mock.calls[0][2]).toBe('google/gemma-3-27b-it');
+    expect(recognizeWithGemini).not.toHaveBeenCalled();
   });
 });
 

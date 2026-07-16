@@ -1,22 +1,25 @@
 // Administrator panel: replace or restore the front/back slide decks that
-// frame every generated presentation. Replacements persist in this browser
-// (IndexedDB) and override the bundled files at generation time.
-import { useEffect, useRef, useState } from 'react';
+// frame every generated presentation (stored in this browser via IndexedDB),
+// plus the shared recognition settings — model priority and excluded titles —
+// which are stored on the recognition proxy so every device sees the same
+// configuration.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
 import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from '../lib/storage/deckStore';
 import {
-  DEFAULT_RECOGNITION_ORDER,
-  loadRecognitionOrder,
-  saveRecognitionOrder,
-  type RecognitionEngine,
+  DEFAULT_ATTEMPT_ORDER,
+  attemptKey,
+  fetchSharedSettings,
+  findModelInfo,
+  hasSharedSettings,
+  invalidateSharedSettings,
+  loadLocalSharedSettings,
+  pushSharedSettings,
+  sanitizeExcludedTitles,
+  saveLocalSharedSettings,
+  type SharedRecognitionSettings,
 } from '../lib/ai/aiSettings';
 import { showToast } from '../lib/utils/toast';
-
-const ENGINE_LABELS: Record<string, string> = {
-  gemini: 'Gemini',
-  nvidia: 'NVIDIA',
-  huggingface: 'Hugging Face',
-};
 
 interface Props {
   onClose: () => void;
@@ -197,80 +200,167 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
   return (
     <Modal title="관리자 설정" onClose={onClose}>
       <p className="admin-intro">
-        PPT의 front/back 슬라이드와 가사 인식 AI 순서를 관리합니다. 교체한 파일은 이 브라우저에
-        저장되며, 언제든지 기본 파일로 복원할 수 있습니다. 공유 API 사용량은 헤더의 '사용량' 버튼에서
-        확인할 수 있습니다.
+        PPT의 front/back 슬라이드와 가사 인식 설정을 관리합니다. 슬라이드 파일은 이 브라우저에
+        저장되고, 인식 모델 우선순위와 제외 곡 목록은 공유 서버에 저장되어 모든 기기에 동일하게
+        적용됩니다. 공유 API 사용량은 헤더의 '사용량' 버튼에서 확인할 수 있습니다.
       </p>
       {SLOTS.map(({ slot, label, description }) => (
         <DeckSlotRow key={slot} slot={slot} label={label} description={description} onDeckChange={onDeckChange} />
       ))}
-      <RecognitionOrderSection />
+      <RecognitionSettingsSection />
     </Modal>
   );
 }
 
-function RecognitionOrderSection() {
-  const [order, setOrder] = useState<RecognitionEngine[]>(() => loadRecognitionOrder());
-  const isDefault = order.join() === DEFAULT_RECOGNITION_ORDER.join();
+function RecognitionSettingsSection() {
+  const [settings, setSettings] = useState<SharedRecognitionSettings>(() => loadLocalSharedSettings());
+  const [excludedText, setExcludedText] = useState(() => settings.excludedTitles.join('\n'));
+  const [sync, setSync] = useState<{ state: 'loading' | 'saving' | 'synced' | 'local' | 'error'; message: string }>({
+    state: hasSharedSettings() ? 'loading' : 'local',
+    message: hasSharedSettings() ? '공유 설정 확인 중…' : '공유 프록시 미연결 — 이 브라우저에만 저장됩니다.',
+  });
+
+  // Pull the shared copy when the panel opens, so this device edits the
+  // order everyone is actually using.
+  useEffect(() => {
+    if (!hasSharedSettings()) return;
+    let cancelled = false;
+    void fetchSharedSettings().then((shared) => {
+      if (cancelled) return;
+      if (shared) {
+        setSettings(shared);
+        setExcludedText(shared.excludedTitles.join('\n'));
+        setSync({ state: 'synced', message: '모든 기기와 동기화되어 있습니다.' });
+      } else {
+        setSync({ state: 'error', message: '공유 설정을 불러오지 못해 이 브라우저의 값을 사용합니다.' });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback((next: SharedRecognitionSettings) => {
+    setSettings(next);
+    saveLocalSharedSettings(next);
+    invalidateSharedSettings();
+    if (!hasSharedSettings()) {
+      setSync({ state: 'local', message: '공유 프록시 미연결 — 이 브라우저에만 저장되었습니다.' });
+      return;
+    }
+    setSync({ state: 'saving', message: '모든 기기에 적용하는 중…' });
+    void pushSharedSettings(next, ADMIN_PASSWORD)
+      .then(() => setSync({ state: 'synced', message: '저장됨 — 모든 기기에 적용됩니다.' }))
+      .catch((error) =>
+        setSync({
+          state: 'error',
+          message: `${error instanceof Error ? error.message : String(error)} (이 브라우저에는 저장됨)`,
+        }),
+      );
+  }, []);
 
   function move(index: number, delta: -1 | 1) {
     const to = index + delta;
-    if (to < 0 || to >= order.length) return;
-    const next = order.slice();
-    [next[index], next[to]] = [next[to], next[index]];
-    saveRecognitionOrder(next);
-    setOrder(next);
+    if (to < 0 || to >= settings.attempts.length) return;
+    const attempts = settings.attempts.slice();
+    [attempts[index], attempts[to]] = [attempts[to], attempts[index]];
+    persist({ ...settings, attempts });
   }
 
-  function reset() {
-    saveRecognitionOrder(DEFAULT_RECOGNITION_ORDER);
-    setOrder([...DEFAULT_RECOGNITION_ORDER]);
+  function resetOrder() {
+    persist({ ...settings, attempts: [...DEFAULT_ATTEMPT_ORDER] });
   }
+
+  function saveExcluded() {
+    const excludedTitles = sanitizeExcludedTitles(excludedText.split('\n'));
+    setExcludedText(excludedTitles.join('\n'));
+    persist({ ...settings, excludedTitles });
+    showToast('제외 곡 목록을 저장했습니다.');
+  }
+
+  const isDefaultOrder =
+    settings.attempts.map(attemptKey).join() === DEFAULT_ATTEMPT_ORDER.map(attemptKey).join();
 
   return (
-    <section className="admin-deck admin-recognition" data-testid="admin-recognition-order">
-      <div className="admin-deck-info">
-        <h4>가사 인식 AI 순서</h4>
-        <p>위에서부터 차례로 시도하고, 실패하면 다음 엔진으로 넘어갑니다.</p>
-        <ol className="admin-engine-list">
-          {order.map((engine, index) => (
-            <li key={engine} className="admin-engine" data-testid={`admin-engine-${engine}`}>
-              <span className="admin-engine-label">
-                {index + 1}. {ENGINE_LABELS[engine] ?? engine}
-              </span>
-              <span className="admin-engine-actions">
-                <button
-                  type="button"
-                  className="btn btn-chip"
-                  aria-label={`${ENGINE_LABELS[engine] ?? engine} 순서 올리기`}
-                  data-testid={`admin-engine-up-${engine}`}
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-chip"
-                  aria-label={`${ENGINE_LABELS[engine] ?? engine} 순서 내리기`}
-                  data-testid={`admin-engine-down-${engine}`}
-                  disabled={index === order.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  ↓
-                </button>
-              </span>
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div className="admin-deck-actions">
-        {!isDefault && (
-          <button type="button" className="btn" data-testid="admin-engine-reset" onClick={reset}>
-            기본 순서로
+    <>
+      <section className="admin-deck admin-recognition" data-testid="admin-recognition-order">
+        <div className="admin-deck-info">
+          <h4>가사 인식 모델 우선순위</h4>
+          <p>
+            위에서부터 차례로 시도하고, 실패하거나 한도가 차면 다음 모델로 넘어갑니다. 어려운
+            페이지는 상위 모델 여러 개를 동시에 사용해 가장 먼저 읽어낸 결과를 씁니다. 변경은 모든
+            기기에 적용되어 다음 변경 전까지 유지됩니다.
+          </p>
+          <p className={`admin-sync admin-sync-${sync.state}`} data-testid="admin-settings-sync" role="status">
+            {sync.message}
+          </p>
+          <ol className="admin-engine-list">
+            {settings.attempts.map((attempt, index) => {
+              const info = findModelInfo(attempt);
+              const label = info?.label ?? `${attempt.engine} · ${attempt.model}`;
+              return (
+                <li key={attemptKey(attempt)} className="admin-engine" data-testid={`admin-attempt-${index}`}>
+                  <span className="admin-engine-label">
+                    {index + 1}. {label}
+                    {info?.note && <em className="admin-engine-note">{info.note}</em>}
+                  </span>
+                  <span className="admin-engine-actions">
+                    <button
+                      type="button"
+                      className="btn btn-chip"
+                      aria-label={`${label} 순서 올리기`}
+                      data-testid={`admin-attempt-up-${index}`}
+                      disabled={index === 0}
+                      onClick={() => move(index, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-chip"
+                      aria-label={`${label} 순서 내리기`}
+                      data-testid={`admin-attempt-down-${index}`}
+                      disabled={index === settings.attempts.length - 1}
+                      onClick={() => move(index, 1)}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+        <div className="admin-deck-actions">
+          {!isDefaultOrder && (
+            <button type="button" className="btn" data-testid="admin-attempt-reset" onClick={resetOrder}>
+              기본 순서로
+            </button>
+          )}
+        </div>
+      </section>
+      <section className="admin-deck admin-recognition" data-testid="admin-excluded-section">
+        <div className="admin-deck-info">
+          <h4>찬양 편집 제외 곡</h4>
+          <p>
+            한 줄에 하나씩 적으세요. 인식된 곡 제목이 이 목록과 일치하면 (공동체 고백송, 예배 전 준비
+            찬양 등) 찬양 편집에 표시하지 않습니다. 모든 기기에 적용됩니다.
+          </p>
+          <textarea
+            className="admin-excluded-input"
+            data-testid="admin-excluded-titles"
+            rows={Math.max(3, excludedText.split('\n').length)}
+            placeholder={'공동체 고백송\n예배 전 준비 찬양'}
+            value={excludedText}
+            onChange={(event) => setExcludedText(event.target.value)}
+          />
+        </div>
+        <div className="admin-deck-actions">
+          <button type="button" className="btn" data-testid="admin-excluded-save" onClick={saveExcluded}>
+            제외 목록 저장
           </button>
-        )}
-      </div>
-    </section>
+        </div>
+      </section>
+    </>
   );
 }

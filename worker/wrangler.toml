@@ -15,8 +15,9 @@ ALLOWED_ORIGINS = "https://shrlak.github.io"
 # while hf-inference cost is estimated from compute time.
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_DAILY_REQUEST_LIMIT = "250"
-# Vision model from https://build.nvidia.com/models used by POST /nvidia.
-# Nemotron Nano 12B v2 VL is NVIDIA's document/OCR-focused vision model.
+# Fallback vision model for POST /nvidia when the client doesn't request an
+# allowlisted https://build.nvidia.com/models model (clients normally pick
+# from the shared priority list; see src/config.js for the allowlist).
 NVIDIA_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 NVIDIA_MONTHLY_REQUEST_LIMIT = "1000"
 HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
@@ -34,3 +35,6 @@ new_sqlite_classes = ["UsageTracker"]
 #   npx wrangler secret put GEMINI_API_KEY
 #   npx wrangler secret put NVIDIA_API_KEY
 #   npx wrangler secret put HUGGINGFACE_API_KEY
+# POST /settings (shared recognition settings) is guarded by the 관리자 설정
+# password. It defaults to the app's built-in admin password; override with:
+#   npx wrangler secret put ADMIN_PASSWORD

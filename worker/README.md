@@ -17,7 +17,17 @@ Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  
 Browser  ──POST /nvidia────────▶  Worker (adds real key)  ──▶  NVIDIA API catalog (build.nvidia.com)
 Browser  ──POST /huggingface───▶  Worker (adds real key)  ──▶  Hugging Face API
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
+Everyone ◀──GET /settings──────  shared recognition settings (model priority, excluded titles)
+Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
 ```
+
+`GET/POST /settings` is what makes 관리자 설정 changes apply to **every
+device**: the model priority and excluded-title list live in the Worker's
+Durable Object, every browser fetches them before recognizing, and writes
+require the admin password (default: the app's built-in one; override with
+the `ADMIN_PASSWORD` secret). Only models from the shared catalog
+(`src/config.js`, mirrored in the app) can be prioritized, and POST /nvidia
+only forwards allowlisted catalog models to the shared key.
 
 The `/nvidia` route matters more than the other two for people without their
 own keys: `integrate.api.nvidia.com` does not answer browser CORS requests,

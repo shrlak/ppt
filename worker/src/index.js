@@ -9,9 +9,11 @@
 //
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
-//   POST /nvidia          -> https://integrate.api.nvidia.com/v1/chat/completions (build.nvidia.com catalog)
+//   POST /nvidia          -> https://integrate.api.nvidia.com/v1/chat/completions (allowlisted build.nvidia.com models)
 //   POST /huggingface     -> https://api-inference.huggingface.co/models/:HUGGINGFACE_MODEL
 //   GET  /usage           -> current per-model usage from the shared proxy
+//   GET  /settings        -> shared recognition settings (model priority, excluded titles)
+//   POST /settings        -> update shared settings (관리자 비밀번호 required)
 //
 // See worker/README.md for deployment instructions.
 
@@ -24,6 +26,7 @@ import {
   sanitizeUsageEvent,
   usageStorageKey,
 } from './usage.js';
+import { adminPassword, allowedNvidiaModels, sanitizeSharedSettings } from './config.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -63,7 +66,11 @@ function jsonResponse(obj, status, headers) {
   });
 }
 
-/** Strongly consistent shared counter, persisted by a SQLite Durable Object. */
+/**
+ * Strongly consistent shared state, persisted by a SQLite Durable Object:
+ * usage counters plus the shared recognition settings (model priority and
+ * excluded titles) every device reads.
+ */
 export class UsageTracker extends DurableObject {
   async record(rawEvent) {
     const event = sanitizeUsageEvent(rawEvent);
@@ -79,6 +86,15 @@ export class UsageTracker extends DurableObject {
   async records() {
     const stored = await this.ctx.storage.list({ prefix: 'usage:' });
     return [...stored.values()];
+  }
+
+  async getSharedSettings() {
+    return (await this.ctx.storage.get('shared-settings')) ?? null;
+  }
+
+  async setSharedSettings(value) {
+    await this.ctx.storage.put('shared-settings', value);
+    return value;
   }
 }
 
@@ -169,6 +185,42 @@ export default {
       }
     }
 
+    // Shared recognition settings: everyone reads the same model priority
+    // and excluded-title list; writes require the 관리자 설정 password.
+    if (url.pathname === '/settings') {
+      const tracker = usageTracker(env);
+      if (request.method === 'GET') {
+        let stored = null;
+        try {
+          stored = tracker ? await tracker.getSharedSettings() : null;
+        } catch {
+          // Fall through to defaults — reads must never fail the client.
+        }
+        return jsonResponse(sanitizeSharedSettings(stored), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      }
+      if (request.method === 'POST') {
+        if (!tracker) {
+          return jsonResponse({ error: 'shared settings storage is not configured' }, 503, headers);
+        }
+        let body;
+        try {
+          body = JSON.parse(await request.text());
+        } catch {
+          return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
+        }
+        if (typeof body?.password !== 'string' || body.password !== adminPassword(env)) {
+          return jsonResponse({ error: '관리자 비밀번호가 올바르지 않습니다.' }, 403, headers);
+        }
+        const settings = sanitizeSharedSettings(body);
+        await tracker.setSharedSettings(settings);
+        return jsonResponse(settings, 200, { ...headers, 'Cache-Control': 'no-store' });
+      }
+      return jsonResponse({ error: 'not found' }, 404, headers);
+    }
+
     if (request.method !== 'POST') {
       return jsonResponse({ error: 'not found' }, 404, headers);
     }
@@ -204,17 +256,20 @@ export default {
       if (!env.NVIDIA_API_KEY) {
         return jsonResponse({ error: 'NVIDIA_API_KEY not configured on the proxy' }, 500, headers);
       }
-      // The body is OpenAI-compatible JSON. The Worker pins the model: an env
-      // override (NVIDIA_MODEL) wins, then whatever the client asked for,
-      // then the default — so the site owner can switch build.nvidia.com
-      // models without redeploying the app.
+      // The body is OpenAI-compatible JSON. The client picks the model from
+      // the shared priority list, but only allowlisted catalog models (plus
+      // the NVIDIA_MODEL env value) may use the shared key — anything else
+      // falls back to the configured default.
       let body;
       try {
         body = JSON.parse(await request.text());
       } catch {
         return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
       }
-      const model = env.NVIDIA_MODEL || body?.model || DEFAULT_NVIDIA_MODEL;
+      const requested = typeof body?.model === 'string' ? body.model : '';
+      const model = allowedNvidiaModels(env).has(requested)
+        ? requested
+        : env.NVIDIA_MODEL || DEFAULT_NVIDIA_MODEL;
       body = { ...body, model };
       const startedAt = Date.now();
       const res = await fetch(NVIDIA_ENDPOINT, {

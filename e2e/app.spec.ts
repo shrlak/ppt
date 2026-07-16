@@ -120,31 +120,89 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
 });
 
-test('admin panel reorders the recognition engines and persists the order', async ({ page }) => {
+test('admin panel reorders the recognition model priority and persists it', async ({ page }) => {
   await page.goto('./');
   await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
 
-  const engines = page.getByTestId('admin-recognition-order').locator('.admin-engine');
-  await expect(engines).toHaveText([/Gemini/, /NVIDIA/, /Hugging Face/]);
+  const rows = page.getByTestId('admin-recognition-order').locator('.admin-engine');
+  // Full model catalog listed, strongest first.
+  await expect(rows.first()).toContainText('Gemini 2.5 Pro');
+  expect(await rows.count()).toBeGreaterThan(3);
 
-  // Push Gemini below NVIDIA; the order persists across a reload.
-  await page.getByTestId('admin-engine-down-gemini').click();
-  await expect(engines).toHaveText([/NVIDIA/, /Gemini/, /Hugging Face/]);
+  // Push the top model down one; the order persists across a reload.
+  await page.getByTestId('admin-attempt-down-0').click();
+  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
+  await expect(rows.nth(1)).toContainText('Gemini 2.5 Pro');
 
   await page.reload();
   await page.getByTestId('admin-open').click();
-  await expect(engines).toHaveText([/NVIDIA/, /Gemini/, /Hugging Face/]);
+  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
 
-  await page.getByTestId('admin-engine-reset').click();
-  await expect(engines).toHaveText([/Gemini/, /NVIDIA/, /Hugging Face/]);
+  await page.getByTestId('admin-attempt-reset').click();
+  await expect(rows.first()).toContainText('Gemini 2.5 Pro');
+});
+
+test('admin panel edits the excluded-title list and persists it', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+
+  const textarea = page.getByTestId('admin-excluded-titles');
+  await expect(textarea).toHaveValue(/공동체 고백송/);
+  await textarea.fill('공동체 고백송\n예배 전 준비 찬양\n파송의 노래');
+  await page.getByTestId('admin-excluded-save').click();
+
+  await page.reload();
+  await page.getByTestId('admin-open').click();
+  await expect(page.getByTestId('admin-excluded-titles')).toHaveValue(/파송의 노래/);
 });
 
 test('usage page shows AI usage next to the admin button', async ({ page }) => {
   await page.goto('./');
   await page.getByTestId('usage-open').click();
   await expect(page.getByTestId('admin-ai-usage')).toBeVisible();
+});
+
+test('score click opens the split view: whole conti left, lyric editor right', async ({ page }) => {
+  await page.goto('./');
+  await uploadExamplePdf(page);
+
+  // Wait for a score preview to render, then click it.
+  const firstScoreImg = page.locator('.score-pane img').first();
+  await expect(firstScoreImg).toBeVisible({ timeout: PARSE_TIMEOUT });
+  await firstScoreImg.click();
+
+  await expect(page.getByTestId('split-view')).toBeVisible();
+  // The left pane lists every PDF page (the sample conti has 6), not just one.
+  await expect
+    .poll(async () => page.locator('.split-page').count(), { timeout: PARSE_TIMEOUT })
+    .toBeGreaterThan(1);
+  await expect(page.locator('.split-page-active')).toHaveCount(1);
+
+  // The right pane is the clicked song's editor; edits persist to the list.
+  const editor = page.getByTestId('split-view-editor').getByTestId('song-card-editor');
+  await expect(editor).toBeVisible();
+  if ((await editor.getByTestId('section-textarea').count()) === 0) {
+    await editor.getByRole('button', { name: 'V1', exact: true }).click();
+  }
+  const textarea = editor.getByTestId('section-textarea').first();
+  // 4 lines fit one slide at the default 4 lines/slide, so the blank line is
+  // what forces the 2-slide split.
+  await textarea.fill('첫 줄\n둘째 줄\n\n셋째 줄\n넷째 줄');
+  const editedSlides = editor.locator('.mini-slide.lyrics').filter({ hasText: /(첫|둘째|셋째|넷째) 줄/ });
+  await expect(editedSlides).toHaveCount(2);
+  await expect(editedSlides.nth(0)).toContainText('둘째 줄');
+  await expect(editedSlides.nth(0)).not.toContainText('셋째 줄');
+  await expect(editedSlides.nth(1)).toContainText('셋째 줄');
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('split-view')).toBeHidden();
+  await expect(
+    page.getByTestId('song-card').first().getByTestId('section-textarea').first(),
+  ).toHaveValue(/셋째 줄/);
 });
 
 test('typing a library title into a blank song pulls up its saved lyrics', async ({ page }) => {

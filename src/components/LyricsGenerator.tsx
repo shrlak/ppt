@@ -15,11 +15,12 @@ import SongCard, { type RecogState } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
-import { getAiSettings } from '../lib/ai/aiSettings';
-import { applyScoreToSong, recognizeScore, recognizeScoreBatch } from '../lib/ai/scoreRecognition';
+import { getSyncedAiSettings } from '../lib/ai/aiSettings';
+import { applyScoreToSong, recognizeScoreBatch, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
+import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -196,6 +197,24 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   }, [songs, saveToLibrary]);
 
   /**
+   * Drop a song whose recognized title is on the administrator-managed
+   * exclusion list (공동체 고백송, 예배 전 준비 찬양 등). Returns true when
+   * the song was removed, so callers stop processing it.
+   */
+  const excludeRecognizedSong = useCallback((song: Song, title: string, excludedTitles: string[]) => {
+    if (!isExcludedTitle(title, excludedTitles)) return false;
+    scanCancelledRef.current.add(song.id);
+    autoAttemptedRef.current.add(song.id);
+    setSongs((list) => list.filter((s) => s.id !== song.id));
+    setRecog((r) => {
+      const { [song.id]: _dropped, ...rest } = r;
+      return rest;
+    });
+    showToast(`'${title}'은(는) 제외 목록에 있어 찬양 편집에서 제외했습니다.`);
+    return true;
+  }, []);
+
+  /**
    * Fill a lyric-less song from the library when its title is already known
    * there, and stop any scan that is still running for it — the saved lyrics
    * are authoritative, so scanning the score would be wasted work.
@@ -292,7 +311,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             return url;
           }),
         );
-        const settings = getAiSettings();
+        // Shared settings: administrator-configured model priority and the
+        // excluded-title list, synced across every device via the proxy.
+        const settings = await getSyncedAiSettings();
 
         // Quick title pass. Best-effort: on failure the full pass still runs,
         // it just can't resolve library songs early.
@@ -315,6 +336,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
           const identity = titleScores[index] ?? { order: [], sections: [] };
+          const recognizedTitle = identity.title?.trim();
+          if (recognizedTitle && excludeRecognizedSong(song, recognizedTitle, settings.excludedTitles)) {
+            resolvedIds.add(song.id);
+            return;
+          }
           const hit = titlePlan.libraryMatches[index];
           if (hit) {
             resolvedIds.add(song.id);
@@ -377,11 +403,17 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         });
 
         // A full response can occasionally identify a title that the quick
-        // title pass missed. Prefer the saved library copy in that case too.
+        // title pass missed. Apply the exclusion list first, then prefer the
+        // saved library copy.
         for (const { song } of remaining) {
           const score = scoreById.get(song.id);
           if (!score || isCancelled(song.id)) continue;
           const recognizedTitle = score.title?.trim() || song.title;
+          if (recognizedTitle && excludeRecognizedSong(song, recognizedTitle, settings.excludedTitles)) {
+            scoreById.delete(song.id);
+            resolvedIds.add(song.id);
+            continue;
+          }
           const hit = recognizedTitle ? findEntry(libraryRef.current, recognizedTitle) : undefined;
           if (hit) {
             scoreById.delete(song.id);
@@ -423,7 +455,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
               const rescueImage = await doc
                 .renderPage(song.pageIndex as number, RESCUE_RENDER_WIDTH, 'png')
                 .catch(() => image);
-              const single = await recognizeScore(rescueImage, settings);
+              // Hard page: race several models at once and take the first
+              // non-empty answer instead of walking the ladder serially.
+              const single = await recognizeScoreRaced(rescueImage, settings);
               if (isCancelled(song.id)) return;
               const known = scoreById.get(song.id);
               const merged: ParsedScore = {
@@ -431,7 +465,12 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
                 title: single.score.title ?? known?.title ?? identity.title,
                 key: single.score.key ?? known?.key ?? identity.key,
               };
-              const hit = merged.title?.trim() ? findEntry(libraryRef.current, merged.title) : undefined;
+              const mergedTitle = merged.title?.trim();
+              if (mergedTitle && excludeRecognizedSong(song, mergedTitle, settings.excludedTitles)) {
+                resolvedIds.add(song.id);
+                return;
+              }
+              const hit = mergedTitle ? findEntry(libraryRef.current, mergedTitle) : undefined;
               if (hit) {
                 resolvedIds.add(song.id);
                 fillFromLibrary(song, hit);
@@ -476,7 +515,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         window.clearInterval(ticker);
       }
     },
-    [fillFromLibrary],
+    [fillFromLibrary, excludeRecognizedSong],
   );
 
   const handleRecognizeClick = useCallback(
@@ -625,8 +664,21 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         }
       }
 
+      // Cover-listed songs on the administrator exclusion list (공동체
+      // 고백송, 예배 전 준비 찬양 등) never become cards in the first place.
+      const shared = await getSyncedAiSettings();
+      const excludedSongs = next.filter(
+        (song) => song.title.trim() && isExcludedTitle(song.title, shared.excludedTitles),
+      );
+      const kept = next.filter((song) => !excludedSongs.includes(song));
+      if (excludedSongs.length > 0) {
+        showToast(
+          `${excludedSongs.map((song) => `'${song.title}'`).join(', ')}은(는) 제외 목록에 있어 찬양 편집에서 제외했습니다.`,
+        );
+      }
+
       setInfo(hasCover ? parsed.info : null);
-      setSongs(next);
+      setSongs(kept);
       setEdited(false);
       setPageImages({});
       setRecog({});

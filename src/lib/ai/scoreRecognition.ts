@@ -3,7 +3,7 @@
 // anything the user has already typed.
 import type { Song } from '../utils/types';
 import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
-import type { AiSettings, RecognitionEngine } from './aiSettings';
+import type { AiSettings, RecognitionAttempt, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
 import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
@@ -40,57 +40,45 @@ async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
 }
 
 /**
- * One recognition try: an engine, and for Gemini the specific model. The
- * lyric passes expand Gemini into its model ladder (Pro → Flash) so the
- * strongest available model answers before recognition leaves Gemini.
+ * Plan which engine+model attempts to run, in order. Lyric passes follow the
+ * administrator-configured attempt list exactly (every catalog model in the
+ * shared priority order). The quick title pass instead visits each engine
+ * once — Gemini on its fast default model — because title identification
+ * doesn't need the expensive models.
  */
-interface EngineAttempt {
-  engine: RecognitionEngine;
-  geminiModel?: string;
-}
-
-function planAttempts(settings: AiSettings, lyricPass: boolean): EngineAttempt[] {
-  const engines = [settings.engine, ...settings.fallbackEngines].filter((e) => e !== 'off');
-  const attempts: EngineAttempt[] = [];
-  for (const engine of engines) {
-    if (engine === 'gemini') {
-      const ladder =
-        lyricPass && settings.geminiLyricsModels.length > 0
-          ? settings.geminiLyricsModels
-          : [settings.geminiModel];
-      for (const geminiModel of ladder) attempts.push({ engine, geminiModel });
-    } else {
-      attempts.push({ engine });
-    }
+function planAttempts(settings: AiSettings, lyricPass: boolean): RecognitionAttempt[] {
+  if (lyricPass) return settings.attempts;
+  const seen = new Set<string>();
+  const attempts: RecognitionAttempt[] = [];
+  for (const attempt of settings.attempts) {
+    if (seen.has(attempt.engine)) continue;
+    seen.add(attempt.engine);
+    attempts.push(
+      attempt.engine === 'gemini' ? { engine: 'gemini', model: settings.geminiModel } : attempt,
+    );
   }
   return attempts;
 }
 
 async function recognizeWithEngine(
-  attempt: EngineAttempt,
+  attempt: RecognitionAttempt,
   dataUrl: string,
   settings: AiSettings,
 ): Promise<ParsedScore> {
   if (attempt.engine === 'gemini') {
     const key = settings.geminiApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
-    return recognizeWithGemini(
-      dataUrl,
-      key,
-      attempt.geminiModel ?? settings.geminiModel,
-      settings.geminiUseSearch,
-      PROXY_URL,
-    );
+    return recognizeWithGemini(dataUrl, key, attempt.model, settings.geminiUseSearch, PROXY_URL);
   }
   if (attempt.engine === 'nvidia') {
     const key = settings.nvidiaApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
-    return recognizeWithNvidia(dataUrl, key, undefined, PROXY_URL);
+    return recognizeWithNvidia(dataUrl, key, attempt.model, PROXY_URL);
   }
   if (attempt.engine === 'huggingface') {
     const key = settings.huggingfaceApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
-    return recognizeWithHuggingFace(dataUrl, key, undefined, PROXY_URL);
+    return recognizeWithHuggingFace(dataUrl, key, attempt.model, PROXY_URL);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -108,7 +96,7 @@ export interface BatchRecognitionResult {
 }
 
 async function recognizeBatchWithEngine(
-  attempt: EngineAttempt,
+  attempt: RecognitionAttempt,
   dataUrls: string[],
   settings: AiSettings,
   mode: BatchRecognitionMode,
@@ -120,7 +108,7 @@ async function recognizeBatchWithEngine(
     return recognizeBatchWithGemini(
       dataUrls,
       key,
-      attempt.geminiModel ?? settings.geminiModel,
+      attempt.model,
       mode,
       mode === 'full' && settings.geminiUseSearch,
       PROXY_URL,
@@ -130,12 +118,12 @@ async function recognizeBatchWithEngine(
   if (attempt.engine === 'nvidia') {
     const key = settings.nvidiaApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
-    return recognizeBatchWithNvidia(dataUrls, key, mode, undefined, PROXY_URL, hints);
+    return recognizeBatchWithNvidia(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
   }
   if (attempt.engine === 'huggingface') {
     const key = settings.huggingfaceApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('Hugging Face API 키가 설정되지 않았습니다.');
-    return recognizeBatchWithHuggingFace(dataUrls, key, mode, undefined, PROXY_URL, hints);
+    return recognizeBatchWithHuggingFace(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -160,7 +148,7 @@ export async function recognizeScoreBatch(
   /** Optional per-image title hints (e.g. from the conti cover), advisory only. */
   hints?: (string | undefined)[],
 ): Promise<BatchRecognitionResult> {
-  if (dataUrls.length === 0) return { scores: [], engine: settings.engine };
+  if (dataUrls.length === 0) return { scores: [], engine: settings.attempts[0]?.engine ?? 'off' };
   const attempts = planAttempts(settings, mode === 'full');
   if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
 
@@ -176,20 +164,16 @@ export async function recognizeScoreBatch(
       return { scores, engine: attempt.engine };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(
-        `${attempt.engine}${attempt.geminiModel ? ` (${attempt.geminiModel})` : ''} 일괄 인식 실패, 다음 시도:`,
-        lastError.message,
-      );
+      console.warn(`${attempt.engine} (${attempt.model}) 일괄 인식 실패, 다음 시도:`, lastError.message);
     }
   }
   throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
 }
 
 /**
- * Run recognition on one score image in priority order — Gemini until its
- * tokens/quota run out or it otherwise fails, then the NVIDIA-hosted vision
- * model, then Hugging Face (per DEFAULT_AI_SETTINGS). An empty answer also
- * moves on to the next engine.
+ * Run recognition on one score image, walking the administrator-configured
+ * attempt list (engine+model pairs) top to bottom until one produces a
+ * non-empty result. An empty answer also moves on to the next attempt.
  */
 export async function recognizeScore(dataUrl: string, settings: AiSettings): Promise<RecognitionResult> {
   const attempts = planAttempts(settings, true);
@@ -205,13 +189,48 @@ export async function recognizeScore(dataUrl: string, settings: AiSettings): Pro
       return { score, engine: attempt.engine };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(
-        `${attempt.engine}${attempt.geminiModel ? ` (${attempt.geminiModel})` : ''} 인식 실패, 다음 시도:`,
-        lastError.message,
-      );
+      console.warn(`${attempt.engine} (${attempt.model}) 인식 실패, 다음 시도:`, lastError.message);
     }
   }
 
+  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+}
+
+/**
+ * Recognize one score image by running several models AT ONCE. Used for
+ * pages that already failed the batch pass ("if needed"): attempts run in
+ * parallel groups of `groupSize` in priority order, and the first non-empty
+ * answer wins — a hard page gets multiple strong readers immediately
+ * instead of waiting out the ladder one model at a time.
+ */
+export async function recognizeScoreRaced(
+  dataUrl: string,
+  settings: AiSettings,
+  groupSize = 3,
+): Promise<RecognitionResult> {
+  const attempts = planAttempts(settings, true);
+  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
+
+  let lastError: Error | null = null;
+  for (let start = 0; start < attempts.length; start += groupSize) {
+    const group = attempts.slice(start, start + groupSize);
+    try {
+      return await Promise.any(
+        group.map(async (attempt) => {
+          const score = await withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings));
+          if (isEmptyScore(score)) throw new Error('인식 결과가 비어 있습니다.');
+          return { score, engine: attempt.engine };
+        }),
+      );
+    } catch (error) {
+      const causes = error instanceof AggregateError ? error.errors : [error];
+      lastError = causes[0] instanceof Error ? causes[0] : new Error(String(causes[0]));
+      console.warn(
+        `동시 인식 실패 (${group.map((attempt) => attempt.model).join(', ')}), 다음 그룹 시도:`,
+        causes.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join(' / '),
+      );
+    }
+  }
   throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
 }
 

@@ -323,6 +323,39 @@ body {
   background: rgba(118, 185, 0, 0.16);
   color: #4d7c0f;
 }
+.admin-sync {
+  margin: 6px 0 2px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.admin-sync-synced {
+  color: #15803d;
+}
+.admin-sync-saving,
+.admin-sync-loading {
+  color: var(--ink-muted);
+}
+.admin-sync-local,
+.admin-sync-error {
+  color: #b45309;
+}
+.admin-engine-note {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 400;
+}
+.admin-excluded-input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
 .admin-estimate-badge {
   background: var(--surface);
   color: var(--ink-faint);
