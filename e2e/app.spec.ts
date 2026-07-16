@@ -127,21 +127,21 @@ test('admin panel reorders the recognition model priority and persists it', asyn
   await page.getByTestId('admin-unlock').click();
 
   const rows = page.getByTestId('admin-recognition-order').locator('.admin-engine');
-  // Full model catalog listed, strongest first.
-  await expect(rows.first()).toContainText('Gemini 2.5 Pro');
+  // Full model catalog listed, benchmark-validated default first.
+  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
   expect(await rows.count()).toBeGreaterThan(3);
 
   // Push the top model down one; the order persists across a reload.
   await page.getByTestId('admin-attempt-down-0').click();
-  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
-  await expect(rows.nth(1)).toContainText('Gemini 2.5 Pro');
+  await expect(rows.first()).toContainText('Gemini 2.0 Flash');
+  await expect(rows.nth(1)).toContainText('Gemini 2.5 Flash');
 
   await page.reload();
   await page.getByTestId('admin-open').click();
-  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
+  await expect(rows.first()).toContainText('Gemini 2.0 Flash');
 
   await page.getByTestId('admin-attempt-reset').click();
-  await expect(rows.first()).toContainText('Gemini 2.5 Pro');
+  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
 });
 
 test('admin panel edits the excluded-title list and persists it', async ({ page }) => {
