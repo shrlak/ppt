@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import LyricsGenerator, { type LyricsGeneratorHandle } from './components/LyricsGenerator';
+import { useCallback, useEffect, useState } from 'react';
+import LyricsGenerator from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
 import AnnouncementSection from './components/AnnouncementSection';
-import UnifiedUploadPanel, { type UnifiedUploadHandlers } from './components/UnifiedUploadPanel';
+import SlideOverviewList from './components/SlideOverviewList';
+import PptLibraryPanel from './components/PptLibraryPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
+import { buildDeckOverview } from './lib/utils/deckOverview';
 import { planAllSlides, unmatchedTokens } from './lib/utils/slidePlanner';
 import { buildPptx, suggestFileName } from './lib/pptx/pptxBuilder';
 import { extractSlideSubset } from './lib/pptx/pptxSlices';
@@ -18,7 +20,8 @@ import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
 import UsagePanel from './components/UsagePanel';
-import { getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
+import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
+import { inspectDeckBytes, saveDeckToLibrary } from './lib/storage/pptLibrary';
 import { showToast } from './lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -80,6 +83,7 @@ function WizardNavigation({ step, onMove }: WizardNavigationProps) {
 
 export default function App() {
   const [activeStep, setActiveStep] = useState(0);
+  const [viewMode, setViewMode] = useState<'wizard' | 'editor'>('wizard');
   const [scrolled, setScrolled] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   const [contiDate, setContiDate] = useState<string | undefined>();
@@ -91,10 +95,13 @@ export default function App() {
     customTemplate: null,
   });
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
+  const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [customDecks, setCustomDecks] = useState<Record<DeckSlot, StoredDeck | null>>({
     front: null,
     back: null,
@@ -104,11 +111,6 @@ export default function App() {
     verseInput: '',
     sermonTitle: '',
   });
-  const [bibleTemplateSeed, setBibleTemplateSeed] = useState<{
-    version: number;
-    template: { name: string; data: ArrayBuffer } | null;
-  }>({ version: 0, template: null });
-  const lyricsRef = useRef<LyricsGeneratorHandle>(null);
 
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
   const handleDateDetected = useCallback((date: string | undefined) => setContiDate(date), []);
@@ -142,42 +144,122 @@ export default function App() {
     setCustomDecks((previous) => ({ ...previous, [slot]: deck }));
   }, []);
 
-  const applyTemplateDeck = useCallback(
-    async (slot: DeckSlot, file: File) => {
-      try {
-        const deck = await setCustomDeck(slot, file.name, await file.arrayBuffer());
-        handleDeckChange(slot, deck);
-        showToast(`${slot === 'front' ? 'Front' : 'Back'} 템플릿을 '${file.name}' (${deck.slideCount}장)으로 교체했습니다.`);
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), 'error');
-      }
-    },
-    [handleDeckChange],
-  );
-
-  // Routes each file the unified upload panel classifies to the same state
-  // (and storage) individual per-step uploaders already write to, so a
-  // batch drop behaves exactly like uploading each file one at a time.
-  const unifiedUploadHandlers: UnifiedUploadHandlers = {
-    onConti: (file) => lyricsRef.current?.loadContiFile(file),
-    onSermon: (file) => {
-      void file.arrayBuffer().then((data) => setSermonFile({ name: file.name, data }));
-    },
-    onFrontTemplate: (file) => void applyTemplateDeck('front', file),
-    onBackTemplate: (file) => void applyTemplateDeck('back', file),
-    onBibleTemplate: (file) => {
-      void file.arrayBuffer().then((data) =>
-        setBibleTemplateSeed((previous) => ({ version: previous.version + 1, template: { name: file.name, data } })),
-      );
-    },
-  };
-
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
   const fileName = suggestFileName(contiDate);
 
+  // 편집기 view: 찬양 가사 and 광고 stay the SAME mounted LyricsGenerator/
+  // AnnouncementSection instances used by the wizard steps (just made
+  // simultaneously visible instead of one-at-a-time) — never a second copy,
+  // so there is nothing to keep in sync.
+  const isPanelActive = useCallback(
+    (stepId: (typeof WIZARD_STEPS)[number]['id']) =>
+      viewMode === 'editor' ? stepId === 'lyrics' || stepId === 'announcement' : WIZARD_STEPS[activeStep].id === stepId,
+    [viewMode, activeStep],
+  );
+  const deckOverview = buildDeckOverview({
+    songs,
+    frontSlideCount: customDecks.front?.slideCount ?? FRONT_SLIDE_COUNT,
+    backSlideCount: customDecks.back?.slideCount ?? BACK_SLIDE_COUNT,
+    bibleVerseCount: bibleRefs.length,
+    sermonFileName: sermonFile?.name,
+    announcementItems,
+  });
+  function scrollToSong(songId: string) {
+    document.getElementById(`song-editor-${songId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function scrollToAnnouncement() {
+    const el = document.querySelector<HTMLTextAreaElement>('[data-testid="announcement-input"]');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el?.focus();
+  }
+
   const lyricsSlideCount = planAllSlides(songs).length;
   const hasAnyContent = songs.length > 0 || bibleRefs.length > 0 || sermonFile !== null || announcementItems.length > 0;
+
+  /** Build the complete merged deck. Shared by the download button and the 라이브러리 save action. */
+  async function buildMergedDeck(): Promise<Uint8Array> {
+    const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
+      fetch(`${BASE}service-template.pptx`).then((r) => {
+        if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
+        return r.arrayBuffer();
+      }),
+      // Administrator-replaced decks (관리자 설정) take precedence over the bundled files.
+      customDecks.front
+        ? Promise.resolve(customDecks.front.data)
+        : fetch(`${BASE}front-slides.pptx`).then((r) => {
+            if (!r.ok) throw new Error('Front slides 파일을 불러오지 못했습니다.');
+            return r.arrayBuffer();
+          }),
+      customDecks.back
+        ? Promise.resolve(customDecks.back.data)
+        : fetch(`${BASE}back-slides.pptx`).then((r) => {
+            if (!r.ok) throw new Error('Back slides 파일을 불러오지 못했습니다.');
+            return r.arrayBuffer();
+          }),
+    ]);
+
+    let merged: Uint8Array = new Uint8Array(frontSlides);
+
+    if (songs.length > 0) {
+      const lyricsTemplate = await fetch(`${BASE}template.pptx`).then((r) => {
+        if (!r.ok) throw new Error('찬양 템플릿 파일을 불러오지 못했습니다.');
+        return r.arrayBuffer();
+      });
+      merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs), 'STORE');
+    }
+
+    merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1), 'STORE');
+
+    if (bibleRefs.length > 0) {
+      const bibles = new Map();
+      for (const id of bibleState.translations) {
+        bibles.set(id, await loadTranslation(BASE, id));
+      }
+      const plan = buildVerseSlidePlan(bibleRefs, bibleState.translations, bibles, bibleState.sermonTitle, bibleState.versesPerSlide);
+      const bibleTemplate = bibleState.customTemplate
+        ? bibleState.customTemplate.data
+        : await fetch(`${BASE}bible-template.pptx`).then((r) => {
+            if (!r.ok) throw new Error('성경 템플릿 파일을 불러오지 못했습니다.');
+            return r.arrayBuffer();
+          });
+      merged = await mergePptxDecks(merged, await buildBiblePptx(bibleTemplate, plan), 'STORE');
+    }
+
+    if (sermonFile) {
+      merged = await mergePptxDecks(merged, sermonFile.data, 'STORE');
+    }
+
+    merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
+
+    if (announcementItems.length > 0) {
+      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle), 'STORE');
+      merged = await mergePptxDecks(
+        merged,
+        await buildAnnouncementDeck(serviceTemplate, SERVICE_SLIDES.announcementItemTemplate, announcementItems),
+        'STORE',
+      );
+    }
+
+    // The full closing deck is mandatory and always follows announcements.
+    merged = await mergePptxDecks(merged, backSlides);
+    await assertPptxIntegrity(merged);
+    return merged;
+  }
+
+  function downloadDeck(merged: Uint8Array) {
+    const blob = new Blob([merged.buffer as ArrayBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
   async function generate() {
     if (!hasAnyContent) {
@@ -186,87 +268,37 @@ export default function App() {
     }
     setGenerating(true);
     try {
-      const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
-        fetch(`${BASE}service-template.pptx`).then((r) => {
-          if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
-          return r.arrayBuffer();
-        }),
-        // Administrator-replaced decks (관리자 설정) take precedence over the bundled files.
-        customDecks.front
-          ? Promise.resolve(customDecks.front.data)
-          : fetch(`${BASE}front-slides.pptx`).then((r) => {
-              if (!r.ok) throw new Error('Front slides 파일을 불러오지 못했습니다.');
-              return r.arrayBuffer();
-            }),
-        customDecks.back
-          ? Promise.resolve(customDecks.back.data)
-          : fetch(`${BASE}back-slides.pptx`).then((r) => {
-              if (!r.ok) throw new Error('Back slides 파일을 불러오지 못했습니다.');
-              return r.arrayBuffer();
-            }),
-      ]);
-
-      let merged: Uint8Array = new Uint8Array(frontSlides);
-
-      if (songs.length > 0) {
-        const lyricsTemplate = await fetch(`${BASE}template.pptx`).then((r) => {
-          if (!r.ok) throw new Error('찬양 템플릿 파일을 불러오지 못했습니다.');
-          return r.arrayBuffer();
-        });
-        merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs), 'STORE');
-      }
-
-      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1), 'STORE');
-
-      if (bibleRefs.length > 0) {
-        const bibles = new Map();
-        for (const id of bibleState.translations) {
-          bibles.set(id, await loadTranslation(BASE, id));
-        }
-        const plan = buildVerseSlidePlan(bibleRefs, bibleState.translations, bibles, bibleState.sermonTitle, bibleState.versesPerSlide);
-        const bibleTemplate = bibleState.customTemplate
-          ? bibleState.customTemplate.data
-          : await fetch(`${BASE}bible-template.pptx`).then((r) => {
-              if (!r.ok) throw new Error('성경 템플릿 파일을 불러오지 못했습니다.');
-              return r.arrayBuffer();
-            });
-        merged = await mergePptxDecks(merged, await buildBiblePptx(bibleTemplate, plan), 'STORE');
-      }
-
-      if (sermonFile) {
-        merged = await mergePptxDecks(merged, sermonFile.data, 'STORE');
-      }
-
-      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
-
-      if (announcementItems.length > 0) {
-        merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle), 'STORE');
-        merged = await mergePptxDecks(
-          merged,
-          await buildAnnouncementDeck(serviceTemplate, SERVICE_SLIDES.announcementItemTemplate, announcementItems),
-          'STORE',
-        );
-      }
-
-      // The full closing deck is mandatory and always follows announcements.
-      merged = await mergePptxDecks(merged, backSlides);
-      await assertPptxIntegrity(merged);
-
-      const blob = new Blob([merged.buffer as ArrayBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      downloadDeck(await buildMergedDeck());
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function saveCurrentToLibrary() {
+    if (!hasAnyContent) {
+      showToast('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.', 'error');
+      return;
+    }
+    setSavingToLibrary(true);
+    try {
+      const merged = await buildMergedDeck();
+      const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
+      const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
+      await saveDeckToLibrary({
+        name: savedName,
+        pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
+        contiPdf: contiFile,
+        sermonPptx: sermonFile ? { name: sermonFile.name, data: sermonFile.data } : null,
+        slideCount,
+        songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
+      });
+      showToast(`'${savedName}'을(를) 라이브러리에 저장했습니다.`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), 'error');
+    } finally {
+      setSavingToLibrary(false);
     }
   }
 
@@ -308,6 +340,24 @@ export default function App() {
           <div className="header-actions">
             <button
               type="button"
+              className="btn"
+              data-testid="view-mode-toggle"
+              title={viewMode === 'wizard' ? '편집기 보기' : '단계별 보기'}
+              onClick={() => setViewMode((mode) => (mode === 'wizard' ? 'editor' : 'wizard'))}
+            >
+              {viewMode === 'wizard' ? '🖥 편집기 보기' : '📝 단계별 보기'}
+            </button>
+            <button
+              type="button"
+              className="btn library-open"
+              data-testid="library-open"
+              title="PPT 라이브러리"
+              onClick={() => setLibraryOpen(true)}
+            >
+              📚 라이브러리
+            </button>
+            <button
+              type="button"
               className="btn usage-open"
               data-testid="usage-open"
               title="AI 사용량"
@@ -330,147 +380,164 @@ export default function App() {
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} onDeckChange={handleDeckChange} />}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
+      {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} />}
 
-      <div className="app">
-        <UnifiedUploadPanel handlers={unifiedUploadHandlers} />
-        <ol
-          className="wizard-progress"
-          aria-label="PPT 생성 단계"
-          style={{ '--active-index': activeStep } as React.CSSProperties}
-        >
-          {WIZARD_STEPS.map((step, index) => (
-            <li
-              key={step.id}
-              className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
-            >
-              <button
-                type="button"
-                className="wizard-step-button"
-                data-testid={`wizard-tab-${step.id}`}
-                aria-current={index === activeStep ? 'step' : undefined}
-                onClick={() => moveToStep(index)}
+      <div className={`app${viewMode === 'editor' ? ' app-editor-mode' : ''}`}>
+        {viewMode === 'wizard' && (
+          <ol
+            className="wizard-progress"
+            aria-label="PPT 생성 단계"
+            style={{ '--active-index': activeStep } as React.CSSProperties}
+          >
+            {WIZARD_STEPS.map((step, index) => (
+              <li
+                key={step.id}
+                className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
               >
-                <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
-                <span className="wizard-step-label">{step.label}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
-
-        <main>
-          <section
-            className={`wizard-panel${activeStep === 0 ? ' active' : ''}`}
-            aria-hidden={activeStep !== 0}
-            data-testid="wizard-panel-lyrics"
-          >
-            <div className="wizard-page-header">
-              <p className="wizard-kicker">1 / 5</p>
-              <h2>찬양</h2>
-              <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
-            </div>
-            <LyricsGenerator
-              ref={lyricsRef}
-              onSongsChange={handleSongsChange}
-              onDateDetected={handleDateDetected}
-              onContiInfoDetected={handleContiInfoDetected}
-            />
-            <WizardNavigation step={0} onMove={moveToStep} />
-          </section>
-
-          <section
-            className={`wizard-panel${activeStep === 1 ? ' active' : ''}`}
-            aria-hidden={activeStep !== 1}
-            data-testid="wizard-panel-bible"
-          >
-            <div className="wizard-page-header">
-              <p className="wizard-kicker">2 / 5</p>
-              <h2>성경 말씀</h2>
-              <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
-            </div>
-            <BibleSlideGenerator
-              onStateChange={handleBibleStateChange}
-              autoFillVersion={contiBibleAutoFill.version}
-              autoVerseInput={contiBibleAutoFill.verseInput}
-              autoSermonTitle={contiBibleAutoFill.sermonTitle}
-              externalTemplateVersion={bibleTemplateSeed.version}
-              externalTemplate={bibleTemplateSeed.template}
-            />
-            <WizardNavigation step={1} onMove={moveToStep} />
-          </section>
-
-          <section
-            className={`wizard-panel${activeStep === 2 ? ' active' : ''}`}
-            aria-hidden={activeStep !== 2}
-            data-testid="wizard-panel-sermon"
-          >
-            <div className="wizard-page-header">
-              <p className="wizard-kicker">3 / 5</p>
-              <h2>설교</h2>
-              <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
-            </div>
-            <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
-            <WizardNavigation step={2} onMove={moveToStep} />
-          </section>
-
-          <section
-            className={`wizard-panel${activeStep === 3 ? ' active' : ''}`}
-            aria-hidden={activeStep !== 3}
-            data-testid="wizard-panel-announcement"
-          >
-            <div className="wizard-page-header">
-              <p className="wizard-kicker">4 / 5</p>
-              <h2>광고</h2>
-              <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
-            </div>
-            <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
-            <WizardNavigation step={3} onMove={moveToStep} />
-          </section>
-
-          <section
-            className={`wizard-panel${activeStep === 4 ? ' active' : ''}`}
-            aria-hidden={activeStep !== 4}
-            data-testid="wizard-panel-download"
-          >
-            <div className="wizard-page-header">
-              <p className="wizard-kicker">5 / 5</p>
-              <h2>확인 및 다운로드</h2>
-              <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
-            </div>
-            <section className="card download-card">
-              {allWarnings.length > 0 && (
-                <div className="banner banner-warn">
-                  일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-                  {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
-                </div>
-              )}
-              <p className="deck-order">
-                Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
-              </p>
-              <div className="generate-row">
-                <label htmlFor="filename-input">
-                  자동 파일명
-                  <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
-                  <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
-                </label>
-                <div className="slide-count" data-testid="slide-count">
-                  총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
-                  {bibleRefs.length}구절
-                  {sermonFile ? ' · 설교 첨부' : ''}
-                  {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
-                </div>
                 <button
-                  className="btn btn-primary btn-download"
-                  data-testid="generate-pptx"
-                  disabled={generating}
-                  onClick={() => void generate()}
+                  type="button"
+                  className="wizard-step-button"
+                  data-testid={`wizard-tab-${step.id}`}
+                  aria-current={index === activeStep ? 'step' : undefined}
+                  onClick={() => moveToStep(index)}
                 >
-                  {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+                  <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
+                  <span className="wizard-step-label">{step.label}</span>
                 </button>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <div className="app-body">
+          {viewMode === 'editor' && (
+            <SlideOverviewList
+              items={deckOverview}
+              onSelectSong={scrollToSong}
+              onSelectAnnouncement={scrollToAnnouncement}
+            />
+          )}
+          <main>
+            <section
+              className={`wizard-panel${isPanelActive('lyrics') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('lyrics')}
+              data-testid="wizard-panel-lyrics"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">1 / 5</p>
+                <h2>찬양</h2>
+                <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
               </div>
+              <LyricsGenerator
+                onSongsChange={handleSongsChange}
+                onDateDetected={handleDateDetected}
+                onContiInfoDetected={handleContiInfoDetected}
+                onContiFileLoaded={setContiFile}
+              />
+              {viewMode === 'wizard' && <WizardNavigation step={0} onMove={moveToStep} />}
             </section>
-            <WizardNavigation step={4} onMove={moveToStep} />
-          </section>
-        </main>
+
+            <section
+              className={`wizard-panel${isPanelActive('bible') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('bible')}
+              data-testid="wizard-panel-bible"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">2 / 5</p>
+                <h2>성경 말씀</h2>
+                <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
+              </div>
+              <BibleSlideGenerator
+                onStateChange={handleBibleStateChange}
+                autoFillVersion={contiBibleAutoFill.version}
+                autoVerseInput={contiBibleAutoFill.verseInput}
+                autoSermonTitle={contiBibleAutoFill.sermonTitle}
+              />
+              {viewMode === 'wizard' && <WizardNavigation step={1} onMove={moveToStep} />}
+            </section>
+
+            <section
+              className={`wizard-panel${isPanelActive('sermon') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('sermon')}
+              data-testid="wizard-panel-sermon"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">3 / 5</p>
+                <h2>설교</h2>
+                <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
+              </div>
+              <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
+              {viewMode === 'wizard' && <WizardNavigation step={2} onMove={moveToStep} />}
+            </section>
+
+            <section
+              className={`wizard-panel${isPanelActive('announcement') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('announcement')}
+              data-testid="wizard-panel-announcement"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">4 / 5</p>
+                <h2>광고</h2>
+                <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
+              </div>
+              <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
+              {viewMode === 'wizard' && <WizardNavigation step={3} onMove={moveToStep} />}
+            </section>
+
+            <section
+              className={`wizard-panel${isPanelActive('download') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('download')}
+              data-testid="wizard-panel-download"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">5 / 5</p>
+                <h2>확인 및 다운로드</h2>
+                <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
+              </div>
+              <section className="card download-card">
+                {allWarnings.length > 0 && (
+                  <div className="banner banner-warn">
+                    일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
+                    {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
+                  </div>
+                )}
+                <p className="deck-order">
+                  Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
+                </p>
+                <div className="generate-row">
+                  <label htmlFor="filename-input">
+                    자동 파일명
+                    <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
+                    <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
+                  </label>
+                  <div className="slide-count" data-testid="slide-count">
+                    총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
+                    {bibleRefs.length}구절
+                    {sermonFile ? ' · 설교 첨부' : ''}
+                    {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
+                  </div>
+                  <button
+                    className="btn btn-primary btn-download"
+                    data-testid="generate-pptx"
+                    disabled={generating}
+                    onClick={() => void generate()}
+                  >
+                    {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+                  </button>
+                  <button
+                    className="btn"
+                    data-testid="save-to-library"
+                    disabled={savingToLibrary}
+                    onClick={() => void saveCurrentToLibrary()}
+                  >
+                    {savingToLibrary ? '저장 중…' : '📚 라이브러리에 저장'}
+                  </button>
+                </div>
+              </section>
+              <WizardNavigation step={4} onMove={moveToStep} />
+            </section>
+          </main>
+        </div>
 
         <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
         <ToastHost />

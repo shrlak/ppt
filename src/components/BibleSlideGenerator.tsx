@@ -20,9 +20,6 @@ interface Props {
   autoFillVersion?: number;
   autoVerseInput?: string;
   autoSermonTitle?: string;
-  /** Bump to apply a template dropped in the unified upload panel. */
-  externalTemplateVersion?: number;
-  externalTemplate?: { name: string; data: ArrayBuffer } | null;
 }
 
 export default function BibleSlideGenerator({
@@ -30,8 +27,6 @@ export default function BibleSlideGenerator({
   autoFillVersion = 0,
   autoVerseInput = '',
   autoSermonTitle = '',
-  externalTemplateVersion = 0,
-  externalTemplate = null,
 }: Props) {
   const [verseInput, setVerseInput] = useState('');
   const [sermonTitle, setSermonTitle] = useState('');
@@ -51,12 +46,6 @@ export default function BibleSlideGenerator({
     setSermonTitle(autoSermonTitle);
     showToast('찬양 콘티의 본문과 설교 제목을 자동으로 채웠습니다.');
   }, [autoFillVersion, autoVerseInput, autoSermonTitle]);
-
-  useEffect(() => {
-    if (externalTemplateVersion === 0) return;
-    setCustomTemplate(externalTemplate);
-    if (externalTemplate) showToast(`'${externalTemplate.name}' 템플릿을 이번 세션에서 사용합니다.`);
-  }, [externalTemplateVersion, externalTemplate]);
 
   useEffect(() => {
     onStateChange({ verseInput, sermonTitle, translations, versesPerSlide, customTemplate });

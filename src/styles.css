@@ -121,6 +121,104 @@ body {
   margin: 0 auto;
   padding: 0 24px 56px;
 }
+.app.app-editor-mode {
+  max-width: 1400px;
+}
+.app-editor-mode .app-body {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.app-editor-mode .wizard-nav {
+  display: none;
+}
+
+.slide-overview {
+  position: sticky;
+  top: 88px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
+}
+.slide-overview-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 650;
+}
+.slide-overview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.slide-overview-row button,
+.slide-overview-static {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: left;
+  font-family: inherit;
+  cursor: default;
+}
+.slide-overview-row.clickable button {
+  cursor: pointer;
+}
+.slide-overview-row.clickable button:hover {
+  background: var(--surface-hover);
+}
+.slide-overview-number {
+  flex: none;
+  width: 20px;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  padding-top: 2px;
+  text-align: right;
+}
+.slide-overview-icon {
+  flex: none;
+  font-size: 0.95rem;
+}
+.slide-overview-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.slide-overview-label {
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slide-overview-subtitle {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .app-editor-mode .app-body {
+    grid-template-columns: 1fr;
+  }
+  .slide-overview {
+    position: static;
+    max-height: 240px;
+  }
+}
 
 .header {
   position: sticky;
@@ -215,6 +313,39 @@ body {
   display: flex;
   flex: none;
   flex-direction: column;
+  gap: 8px;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.library-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 0;
+  border-top: 1px solid var(--hairline);
+}
+.library-entry-info {
+  min-width: 0;
+}
+.library-entry-name {
+  display: block;
+  font-size: 0.95rem;
+}
+.library-entry-meta {
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+.library-entry-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .admin-lock {
@@ -938,10 +1069,6 @@ body {
   background: var(--danger-bg);
   color: var(--danger-ink);
 }
-.chip-warn {
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-}
 .chip-radio {
   cursor: pointer;
   border: 1px solid var(--hairline);
@@ -1445,62 +1572,6 @@ body {
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 18px;
-}
-
-.unified-upload {
-  margin-top: 0;
-}
-.unified-upload-collapsed {
-  padding: 14px 20px;
-}
-.unified-upload-summary-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.unified-upload-summary-text {
-  margin: 0;
-  font-size: 0.88rem;
-  color: var(--ink-muted);
-}
-.unified-upload-list {
-  list-style: none;
-  margin: 16px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.unified-upload-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  border: 1px solid var(--hairline);
-  border-radius: 9px;
-  padding: 8px 14px;
-}
-.unified-upload-name {
-  font-size: 0.88rem;
-  font-weight: 550;
-  word-break: break-all;
-}
-.unified-upload-role {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.unified-upload-role select {
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 5px 12px;
-  font-family: inherit;
-  font-size: 0.83rem;
-  background: var(--surface);
-  color: var(--ink);
 }
 
 .btn {

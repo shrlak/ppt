@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
@@ -89,18 +89,16 @@ interface Props {
   onDateDetected?: (date: string | undefined) => void;
   /** Supplies the sermon title/scripture to the Bible section for automatic filling. */
   onContiInfoDetected?: (info: ContiInfo) => void;
+  /** Fired with the raw uploaded conti PDF, so it can be archived alongside a saved deck. */
+  onContiFileLoaded?: (file: { name: string; data: ArrayBuffer }) => void;
 }
 
-/** Lets the unified upload panel feed a conti PDF in from outside, using the
- * exact same parsing path as the dropzone on this card. */
-export interface LyricsGeneratorHandle {
-  loadContiFile: (file: File) => void;
-}
-
-const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function LyricsGenerator(
-  { onSongsChange, onDateDetected, onContiInfoDetected },
-  ref,
-) {
+export default function LyricsGenerator({
+  onSongsChange,
+  onDateDetected,
+  onContiInfoDetected,
+  onContiFileLoaded,
+}: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const infoRef = useRef<ContiInfo | null>(null);
@@ -697,6 +695,7 @@ const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function Lyrics
       const doc = await loadConti(data);
       docRef.current = doc;
       const parsed = doc.parsed;
+      onContiFileLoaded?.({ name: file.name, data });
 
       // Wait for the song library before matching titles, so a conti uploaded
       // right after page load still pulls saved lyrics instead of scanning.
@@ -807,8 +806,6 @@ const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function Lyrics
       setParsing(false);
     }
   }
-
-  useImperativeHandle(ref, () => ({ loadContiFile: (file: File) => void handleFile(file) }));
 
   function updateSong(next: Song) {
     setEdited(true);
@@ -925,28 +922,29 @@ const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function Lyrics
           </p>
         )}
         {songs.map((song, idx) => (
-          <SongCard
-            key={song.id}
-            song={song}
-            index={idx}
-            total={songs.length}
-            pageImage={song.pageIndex != null ? pageImages[song.pageIndex] : undefined}
-            recog={recog[song.id]}
-            onRecognize={song.pageIndex != null ? () => handleRecognizeClick(song) : undefined}
-            onCancelRecognize={() => cancelRecognition(song)}
-            onChange={updateSong}
-            onMove={moveSong}
-            onRemove={removeSong}
-            onSaveToLibrary={handleSaveToLibrary}
-            onZoom={() => setZoomSongId(song.id)}
-            onTitleBlur={(title) => {
-              const hit = findEntry(library, title);
-              if (hit && !songHasLyrics(song)) {
-                setEdited(true);
-                fillFromLibrary(song, hit);
-              }
-            }}
-          />
+          <div key={song.id} id={`song-editor-${song.id}`}>
+            <SongCard
+              song={song}
+              index={idx}
+              total={songs.length}
+              pageImage={song.pageIndex != null ? pageImages[song.pageIndex] : undefined}
+              recog={recog[song.id]}
+              onRecognize={song.pageIndex != null ? () => handleRecognizeClick(song) : undefined}
+              onCancelRecognize={() => cancelRecognition(song)}
+              onChange={updateSong}
+              onMove={moveSong}
+              onRemove={removeSong}
+              onSaveToLibrary={handleSaveToLibrary}
+              onZoom={() => setZoomSongId(song.id)}
+              onTitleBlur={(title) => {
+                const hit = findEntry(library, title);
+                if (hit && !songHasLyrics(song)) {
+                  setEdited(true);
+                  fillFromLibrary(song, hit);
+                }
+              }}
+            />
+          </div>
         ))}
         <div className="add-row">
           <button className="btn" data-testid="add-song" onClick={() => setSongs((l) => [...l, blankSong()])}>
@@ -1031,6 +1029,4 @@ const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function Lyrics
       )}
     </div>
   );
-});
-
-export default LyricsGenerator;
+}
