@@ -938,6 +938,10 @@ body {
   background: var(--danger-bg);
   color: var(--danger-ink);
 }
+.chip-warn {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
 .chip-radio {
   cursor: pointer;
   border: 1px solid var(--hairline);
@@ -1441,6 +1445,62 @@ body {
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 18px;
+}
+
+.unified-upload {
+  margin-top: 0;
+}
+.unified-upload-collapsed {
+  padding: 14px 20px;
+}
+.unified-upload-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.unified-upload-summary-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-muted);
+}
+.unified-upload-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.unified-upload-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 8px 14px;
+}
+.unified-upload-name {
+  font-size: 0.88rem;
+  font-weight: 550;
+  word-break: break-all;
+}
+.unified-upload-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.unified-upload-role select {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 0.83rem;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .btn {

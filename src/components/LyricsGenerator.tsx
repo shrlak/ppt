@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
@@ -91,7 +91,16 @@ interface Props {
   onContiInfoDetected?: (info: ContiInfo) => void;
 }
 
-export default function LyricsGenerator({ onSongsChange, onDateDetected, onContiInfoDetected }: Props) {
+/** Lets the unified upload panel feed a conti PDF in from outside, using the
+ * exact same parsing path as the dropzone on this card. */
+export interface LyricsGeneratorHandle {
+  loadContiFile: (file: File) => void;
+}
+
+const LyricsGenerator = forwardRef<LyricsGeneratorHandle, Props>(function LyricsGenerator(
+  { onSongsChange, onDateDetected, onContiInfoDetected },
+  ref,
+) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const infoRef = useRef<ContiInfo | null>(null);
@@ -799,6 +808,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     }
   }
 
+  useImperativeHandle(ref, () => ({ loadContiFile: (file: File) => void handleFile(file) }));
+
   function updateSong(next: Song) {
     setEdited(true);
     setSongs((list) => list.map((s) => (s.id === next.id ? next : s)));
@@ -1020,4 +1031,6 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
       )}
     </div>
   );
-}
+});
+
+export default LyricsGenerator;

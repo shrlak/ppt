@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import LyricsGenerator from './components/LyricsGenerator';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import LyricsGenerator, { type LyricsGeneratorHandle } from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
 import AnnouncementSection from './components/AnnouncementSection';
+import UnifiedUploadPanel, { type UnifiedUploadHandlers } from './components/UnifiedUploadPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
 import { planAllSlides, unmatchedTokens } from './lib/utils/slidePlanner';
 import { buildPptx, suggestFileName } from './lib/pptx/pptxBuilder';
@@ -17,7 +18,7 @@ import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
 import UsagePanel from './components/UsagePanel';
-import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
+import { getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
 import { showToast } from './lib/utils/toast';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -103,6 +104,11 @@ export default function App() {
     verseInput: '',
     sermonTitle: '',
   });
+  const [bibleTemplateSeed, setBibleTemplateSeed] = useState<{
+    version: number;
+    template: { name: string; data: ArrayBuffer } | null;
+  }>({ version: 0, template: null });
+  const lyricsRef = useRef<LyricsGeneratorHandle>(null);
 
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
   const handleDateDetected = useCallback((date: string | undefined) => setContiDate(date), []);
@@ -135,6 +141,36 @@ export default function App() {
   const handleDeckChange = useCallback((slot: DeckSlot, deck: StoredDeck | null) => {
     setCustomDecks((previous) => ({ ...previous, [slot]: deck }));
   }, []);
+
+  const applyTemplateDeck = useCallback(
+    async (slot: DeckSlot, file: File) => {
+      try {
+        const deck = await setCustomDeck(slot, file.name, await file.arrayBuffer());
+        handleDeckChange(slot, deck);
+        showToast(`${slot === 'front' ? 'Front' : 'Back'} 템플릿을 '${file.name}' (${deck.slideCount}장)으로 교체했습니다.`);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), 'error');
+      }
+    },
+    [handleDeckChange],
+  );
+
+  // Routes each file the unified upload panel classifies to the same state
+  // (and storage) individual per-step uploaders already write to, so a
+  // batch drop behaves exactly like uploading each file one at a time.
+  const unifiedUploadHandlers: UnifiedUploadHandlers = {
+    onConti: (file) => lyricsRef.current?.loadContiFile(file),
+    onSermon: (file) => {
+      void file.arrayBuffer().then((data) => setSermonFile({ name: file.name, data }));
+    },
+    onFrontTemplate: (file) => void applyTemplateDeck('front', file),
+    onBackTemplate: (file) => void applyTemplateDeck('back', file),
+    onBibleTemplate: (file) => {
+      void file.arrayBuffer().then((data) =>
+        setBibleTemplateSeed((previous) => ({ version: previous.version + 1, template: { name: file.name, data } })),
+      );
+    },
+  };
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
@@ -296,6 +332,7 @@ export default function App() {
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
 
       <div className="app">
+        <UnifiedUploadPanel handlers={unifiedUploadHandlers} />
         <ol
           className="wizard-progress"
           aria-label="PPT 생성 단계"
@@ -332,6 +369,7 @@ export default function App() {
               <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
             </div>
             <LyricsGenerator
+              ref={lyricsRef}
               onSongsChange={handleSongsChange}
               onDateDetected={handleDateDetected}
               onContiInfoDetected={handleContiInfoDetected}
@@ -354,6 +392,8 @@ export default function App() {
               autoFillVersion={contiBibleAutoFill.version}
               autoVerseInput={contiBibleAutoFill.verseInput}
               autoSermonTitle={contiBibleAutoFill.sermonTitle}
+              externalTemplateVersion={bibleTemplateSeed.version}
+              externalTemplate={bibleTemplateSeed.template}
             />
             <WizardNavigation step={1} onMove={moveToStep} />
           </section>

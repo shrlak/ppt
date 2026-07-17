@@ -9,6 +9,13 @@ const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
+// Filenames (not content) drive the unified upload panel's role routing, so
+// these fixtures are plain copies of a small valid .pptx named for the role
+// they should be classified into.
+const SERMON_SAMPLE_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'sermon-sample.pptx');
+const FRONT_TEMPLATE_SAMPLE_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'front-template-sample.pptx');
+const BACK_TEMPLATE_SAMPLE_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'back-template-sample.pptx');
+const UNTITLED_DECK_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'untitled-deck.pptx');
 
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
@@ -118,6 +125,53 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
 
   await page.getByTestId('admin-deck-front').getByRole('button', { name: '기본값 복원' }).click();
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
+});
+
+test('unified upload panel routes a conti + sermon + front + back drop in one action', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.getByTestId('unified-upload-panel')).toBeVisible();
+
+  // One multi-file drop covers everything a week's PPT needs: the conti,
+  // the sermon deck, and both custom slide templates.
+  await page.getByTestId('unified-upload-input').setInputFiles([
+    SAMPLE_PDF,
+    SERMON_SAMPLE_PPTX,
+    FRONT_TEMPLATE_SAMPLE_PPTX,
+    BACK_TEMPLATE_SAMPLE_PPTX,
+  ]);
+
+  // The conti PDF is parsed exactly like the dedicated dropzone.
+  await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+  // The panel collapses into a summary confirming every role it routed.
+  const summary = page.getByTestId('unified-upload-summary');
+  await expect(summary).toContainText('찬양 콘티');
+  await expect(summary).toContainText('설교 PPT');
+  await expect(summary).toContainText('Front 템플릿');
+  await expect(summary).toContainText('Back 템플릿');
+
+  // The sermon file landed in the same state the dedicated uploader writes to.
+  await page.getByTestId('wizard-tab-sermon').click();
+  await expect(page.getByText('업로드됨: sermon-sample.pptx')).toBeVisible();
+
+  // The front/back templates landed in the same IndexedDB-backed deck slots
+  // the 관리자 설정 modal manages.
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('front-template-sample.pptx');
+  await expect(page.getByTestId('admin-deck-status-back')).toContainText('back-template-sample.pptx');
+});
+
+test('unified upload panel lets an unrecognized template name be reassigned', async ({ page }) => {
+  await page.goto('./');
+  // No role keyword in this filename — the panel must not guess silently.
+  await page.getByTestId('unified-upload-input').setInputFiles(UNTITLED_DECK_PPTX);
+  await expect(page.getByTestId('unified-upload-list')).toBeVisible();
+  await expect(page.locator('.chip-warn')).toContainText('확인 필요');
+
+  // Reassign it to 성경 말씀 템플릿 and confirm the reassignment actually applied.
+  await page.getByTestId('unified-upload-role-0').selectOption('bible');
+  await expect(page.getByText(/성경 말씀 템플릿\(으\)로 다시 지정했습니다\./)).toBeVisible();
 });
 
 test('admin panel lists the complete concurrent recognition model pool', async ({ page }) => {
