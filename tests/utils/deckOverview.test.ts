@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeckOverview } from '../../src/lib/utils/deckOverview';
+import { expandDeckSegment, songOverviewItems } from '../../src/lib/utils/deckOverview';
 import type { Song } from '../../src/lib/utils/types';
 
 const song: Song = {
@@ -13,84 +13,50 @@ const song: Song = {
   linesPerSlide: 4,
 };
 
-describe('buildDeckOverview', () => {
-  it('lists slides in the exact generate() sequence: front, 찬양, 기도, 성경말씀, 설교, 기도, 광고, back', () => {
-    const items = buildDeckOverview({
-      songs: [song],
-      frontSlideCount: 4,
-      backSlideCount: 21,
-      bibleVerseCount: 3,
-      sermonFileName: '설교.pptx',
-      announcementItems: [{ title: '새가족 환영', bodyLines: ['환영합니다'] }],
-    });
-
-    expect(items.map((i) => i.kind)).toEqual([
-      'front',
-      'lyrics-title',
-      'lyrics', // V1 (its own section, its own slide)
-      'lyrics', // C (a separate section never shares a slide with V1)
-      'prayer',
-      'bible',
-      'sermon',
-      'prayer',
-      'announcement',
-      'back',
-    ]);
-    expect(items[0].subtitle).toBe('4장');
-    expect(items[1].label).toBe('주님의 사랑');
-    expect(items[5].subtitle).toBe('3구절');
-    expect(items[6].subtitle).toBe('설교.pptx');
-    expect(items[8].label).toBe('새가족 환영');
-    expect(items[9].subtitle).toBe('21장');
-  });
-
-  it('omits the 성경 말씀 and 설교 rows entirely when there is no content for them', () => {
-    const items = buildDeckOverview({
-      songs: [],
-      frontSlideCount: 4,
-      backSlideCount: 21,
-      bibleVerseCount: 0,
-      sermonFileName: undefined,
-      announcementItems: [],
-    });
-    expect(items.map((i) => i.kind)).toEqual(['front', 'prayer', 'prayer', 'back']);
-  });
-
-  it('gives every song its own title row followed by its lyric-slide rows', () => {
-    const second: Song = { ...song, id: 's2', title: '두번째 곡' };
-    const items = buildDeckOverview({
-      songs: [song, second],
-      frontSlideCount: 4,
-      backSlideCount: 21,
-      bibleVerseCount: 0,
-      announcementItems: [],
-    });
-    const titles = items.filter((i) => i.kind === 'lyrics-title').map((i) => i.label);
-    expect(titles).toEqual(['주님의 사랑', '두번째 곡']);
-    expect(items.filter((i) => i.songId === 's1')).toHaveLength(3); // 1 title + V1 slide + C slide
+describe('songOverviewItems', () => {
+  it('gives a title row followed by one row per real planSlides() slide, so it never drifts from the generator', () => {
+    const items = songOverviewItems(song);
+    expect(items.map((i) => i.kind)).toEqual(['lyrics-title', 'lyrics', 'lyrics']);
+    expect(items.every((i) => i.songId === 's1')).toBe(true);
+    expect(items.every((i) => i.label === '주님의 사랑')).toBe(true);
+    expect(items[1].subtitle).toBe('첫째 줄 / 둘째 줄');
+    expect(items[2].subtitle).toBe('후렴 줄');
   });
 
   it('falls back to a placeholder label for a song with a blank title', () => {
     const blank: Song = { ...song, title: '   ' };
-    const items = buildDeckOverview({
-      songs: [blank],
-      frontSlideCount: 4,
-      backSlideCount: 21,
-      bibleVerseCount: 0,
-      announcementItems: [],
-    });
-    expect(items[1].label).toBe('(제목 없음)');
+    expect(songOverviewItems(blank)[0].label).toBe('(제목 없음)');
   });
 
-  it('numbers unnamed announcements positionally', () => {
-    const items = buildDeckOverview({
-      songs: [],
-      frontSlideCount: 4,
-      backSlideCount: 21,
-      bibleVerseCount: 0,
-      announcementItems: [{ title: '', bodyLines: [] }],
+  it('scopes each row id to its own song, so two songs never collide', () => {
+    const second: Song = { ...song, id: 's2', title: '두번째 곡' };
+    expect(songOverviewItems(song).every((i) => i.id.startsWith('song-s1-'))).toBe(true);
+    expect(songOverviewItems(second).every((i) => i.id.startsWith('song-s2-'))).toBe(true);
+  });
+});
+
+describe('expandDeckSegment', () => {
+  it('expands a uniform segment into exactly one row per real slide count', () => {
+    const items = expandDeckSegment({
+      kind: 'front',
+      count: 4,
+      labelAt: (i, count) => `Front ${i + 1}/${count}`,
     });
-    const announcement = items.find((i) => i.kind === 'announcement');
-    expect(announcement?.label).toBe('광고 1');
+    expect(items.map((i) => i.label)).toEqual(['Front 1/4', 'Front 2/4', 'Front 3/4', 'Front 4/4']);
+    expect(items.every((i) => i.kind === 'front')).toBe(true);
+  });
+
+  it('produces no rows for a zero-count segment', () => {
+    expect(expandDeckSegment({ kind: 'bible', count: 0, labelAt: () => '' })).toEqual([]);
+  });
+
+  it('includes a per-row subtitle when subtitleAt is given', () => {
+    const items = expandDeckSegment({
+      kind: 'sermon',
+      count: 2,
+      labelAt: (i, count) => `설교 ${i + 1}/${count}`,
+      subtitleAt: () => '설교.pptx',
+    });
+    expect(items.map((i) => i.subtitle)).toEqual(['설교.pptx', '설교.pptx']);
   });
 });

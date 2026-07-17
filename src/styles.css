@@ -126,7 +126,7 @@ body {
 }
 .app-editor-mode .app-body {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 312px 1fr;
   gap: 28px;
   align-items: start;
 }
@@ -161,13 +161,13 @@ body {
 .slide-overview-row button,
 .slide-overview-static {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   width: 100%;
   border: none;
   background: none;
   border-radius: 8px;
-  padding: 7px 8px;
+  padding: 8px;
   text-align: left;
   font-family: inherit;
   cursor: default;
@@ -178,22 +178,60 @@ body {
 .slide-overview-row.clickable button:hover {
   background: var(--surface-hover);
 }
-.slide-overview-number {
-  flex: none;
-  width: 20px;
-  font-size: 0.72rem;
-  color: var(--ink-faint);
-  padding-top: 2px;
-  text-align: right;
+.slide-overview-row.clickable button:hover .slide-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
-.slide-overview-icon {
+.slide-thumb {
+  position: relative;
   flex: none;
-  font-size: 0.95rem;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: #ffffff;
+}
+.slide-thumb-empty {
+  background: var(--surface-hover);
+}
+.slide-thumb-text {
+  position: absolute;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.slide-thumb-paragraph {
+  margin: 0;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+}
+.slide-thumb-run {
+  white-space: pre-wrap;
+}
+.slide-thumb-picture {
+  position: absolute;
+  object-fit: fill;
 }
 .slide-overview-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
+}
+.slide-overview-text-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.slide-overview-number {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+.slide-overview-icon {
+  flex: none;
+  font-size: 0.9rem;
 }
 .slide-overview-label {
   font-size: 0.85rem;
@@ -202,6 +240,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .slide-overview-subtitle {
   font-size: 0.75rem;
@@ -209,6 +248,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.slide-overview-loading {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  text-align: center;
+  padding: 8px 0;
+}
+.slide-overview-error {
+  margin: 0 0 12px;
 }
 @media (max-width: 900px) {
   .app-editor-mode .app-body {

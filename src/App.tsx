@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import LyricsGenerator from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
@@ -6,7 +6,7 @@ import AnnouncementSection from './components/AnnouncementSection';
 import SlideOverviewList from './components/SlideOverviewList';
 import PptLibraryPanel from './components/PptLibraryPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
-import { buildDeckOverview } from './lib/utils/deckOverview';
+import { expandDeckSegment, songOverviewItems, type DeckOverviewItem } from './lib/utils/deckOverview';
 import { planAllSlides, unmatchedTokens } from './lib/utils/slidePlanner';
 import { buildPptx, suggestFileName } from './lib/pptx/pptxBuilder';
 import { extractSlideSubset } from './lib/pptx/pptxSlices';
@@ -17,12 +17,18 @@ import { normalizeContiScripture, parseVerseInput } from './bible/refParser';
 import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
+import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from './lib/pptx/pptxRenderer';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
 import UsagePanel from './components/UsagePanel';
 import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
 import { inspectDeckBytes, saveDeckToLibrary } from './lib/storage/pptLibrary';
 import { showToast } from './lib/utils/toast';
+
+// Debounce before the 편집기 view regenerates the whole deck + re-renders
+// thumbnails after an edit — regeneration re-zips several .pptx pieces, so
+// this avoids redoing that work on every keystroke.
+const EDITOR_REGEN_DEBOUNCE_MS = 800;
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 
@@ -111,6 +117,10 @@ export default function App() {
     verseInput: '',
     sermonTitle: '',
   });
+  const [editorDeck, setEditorDeck] = useState<{ overview: DeckOverviewItem[]; slides: RenderedSlide[] } | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const editorSlidesRef = useRef<RenderedSlide[]>([]);
 
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
   const handleDateDetected = useCallback((date: string | undefined) => setContiDate(date), []);
@@ -157,14 +167,6 @@ export default function App() {
       viewMode === 'editor' ? stepId === 'lyrics' || stepId === 'announcement' : WIZARD_STEPS[activeStep].id === stepId,
     [viewMode, activeStep],
   );
-  const deckOverview = buildDeckOverview({
-    songs,
-    frontSlideCount: customDecks.front?.slideCount ?? FRONT_SLIDE_COUNT,
-    backSlideCount: customDecks.back?.slideCount ?? BACK_SLIDE_COUNT,
-    bibleVerseCount: bibleRefs.length,
-    sermonFileName: sermonFile?.name,
-    announcementItems,
-  });
   function scrollToSong(songId: string) {
     document.getElementById(`song-editor-${songId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -177,8 +179,14 @@ export default function App() {
   const lyricsSlideCount = planAllSlides(songs).length;
   const hasAnyContent = songs.length > 0 || bibleRefs.length > 0 || sermonFile !== null || announcementItems.length > 0;
 
-  /** Build the complete merged deck. Shared by the download button and the 라이브러리 save action. */
-  async function buildMergedDeck(): Promise<Uint8Array> {
+  /**
+   * Build the complete merged deck, plus its real per-slide overview (in the
+   * exact same order the pieces are merged, using the real slide count of
+   * each piece via inspectDeckBytes — never an estimate) so the 편집기 view's
+   * left panel stays aligned 1:1 with what renderPptxSlides() will show.
+   * Shared by the download button, the 라이브러리 save action, and 편집기 view.
+   */
+  async function buildMergedDeck(): Promise<{ merged: Uint8Array; overview: DeckOverviewItem[] }> {
     const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
       fetch(`${BASE}service-template.pptx`).then((r) => {
         if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
@@ -199,7 +207,12 @@ export default function App() {
           }),
     ]);
 
+    const overview: DeckOverviewItem[] = [];
     let merged: Uint8Array = new Uint8Array(frontSlides);
+    const frontCount = (await inspectDeckBytes(frontSlides)).slideCount;
+    overview.push(
+      ...expandDeckSegment({ kind: 'front', count: frontCount, labelAt: (i, count) => `Front ${i + 1}/${count}` }),
+    );
 
     if (songs.length > 0) {
       const lyricsTemplate = await fetch(`${BASE}template.pptx`).then((r) => {
@@ -207,9 +220,11 @@ export default function App() {
         return r.arrayBuffer();
       });
       merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs), 'STORE');
+      overview.push(...songs.flatMap((s) => songOverviewItems(s)));
     }
 
     merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1), 'STORE');
+    overview.push(...expandDeckSegment({ kind: 'prayer', count: SERVICE_SLIDES.prayer1.length, labelAt: () => '기도' }));
 
     if (bibleRefs.length > 0) {
       const bibles = new Map();
@@ -223,28 +238,57 @@ export default function App() {
             if (!r.ok) throw new Error('성경 템플릿 파일을 불러오지 못했습니다.');
             return r.arrayBuffer();
           });
-      merged = await mergePptxDecks(merged, await buildBiblePptx(bibleTemplate, plan), 'STORE');
+      const bibleDeck = await buildBiblePptx(bibleTemplate, plan);
+      merged = await mergePptxDecks(merged, bibleDeck, 'STORE');
+      const bibleCount = (await inspectDeckBytes(bibleDeck.buffer as ArrayBuffer)).slideCount;
+      overview.push(
+        ...expandDeckSegment({ kind: 'bible', count: bibleCount, labelAt: (i, count) => `말씀 ${i + 1}/${count}` }),
+      );
     }
 
     if (sermonFile) {
       merged = await mergePptxDecks(merged, sermonFile.data, 'STORE');
+      const sermonCount = (await inspectDeckBytes(sermonFile.data)).slideCount;
+      overview.push(
+        ...expandDeckSegment({
+          kind: 'sermon',
+          count: sermonCount,
+          labelAt: (i, count) => `설교 ${i + 1}/${count}`,
+          subtitleAt: () => sermonFile.name,
+        }),
+      );
     }
 
     merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
+    overview.push(...expandDeckSegment({ kind: 'prayer', count: SERVICE_SLIDES.prayer2.length, labelAt: () => '기도' }));
 
     if (announcementItems.length > 0) {
       merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle), 'STORE');
+      overview.push(
+        ...expandDeckSegment({ kind: 'divider', count: SERVICE_SLIDES.announcementTitle.length, labelAt: () => '광고' }),
+      );
       merged = await mergePptxDecks(
         merged,
         await buildAnnouncementDeck(serviceTemplate, SERVICE_SLIDES.announcementItemTemplate, announcementItems),
         'STORE',
       );
+      overview.push(
+        ...announcementItems.map((item, i) => ({
+          id: `announcement-${i}`,
+          kind: 'announcement' as const,
+          label: item.title.trim() || `광고 ${i + 1}`,
+          subtitle: item.bodyLines[0],
+        })),
+      );
     }
 
     // The full closing deck is mandatory and always follows announcements.
     merged = await mergePptxDecks(merged, backSlides);
+    const backCount = (await inspectDeckBytes(backSlides)).slideCount;
+    overview.push(...expandDeckSegment({ kind: 'back', count: backCount, labelAt: (i, count) => `Back ${i + 1}/${count}` }));
+
     await assertPptxIntegrity(merged);
-    return merged;
+    return { merged, overview };
   }
 
   function downloadDeck(merged: Uint8Array) {
@@ -268,7 +312,8 @@ export default function App() {
     }
     setGenerating(true);
     try {
-      downloadDeck(await buildMergedDeck());
+      const { merged } = await buildMergedDeck();
+      downloadDeck(merged);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
@@ -283,7 +328,7 @@ export default function App() {
     }
     setSavingToLibrary(true);
     try {
-      const merged = await buildMergedDeck();
+      const { merged } = await buildMergedDeck();
       const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
       const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
       await saveDeckToLibrary({
@@ -301,6 +346,55 @@ export default function App() {
       setSavingToLibrary(false);
     }
   }
+
+  // 편집기 view: regenerate the full deck and re-render real slide thumbnails
+  // after edits settle, so the left panel always shows exactly what the
+  // download will contain (never a text approximation of it).
+  useEffect(() => {
+    if (viewMode !== 'editor') return;
+    if (!hasAnyContent) {
+      setEditorDeck((previous) => {
+        if (previous) revokeRenderedSlides(previous.slides);
+        return null;
+      });
+      editorSlidesRef.current = [];
+      setEditorError(null);
+      setEditorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEditorLoading(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { merged, overview } = await buildMergedDeck();
+          const slides = await renderPptxSlides(merged);
+          if (cancelled) {
+            revokeRenderedSlides(slides);
+            return;
+          }
+          setEditorDeck((previous) => {
+            if (previous) revokeRenderedSlides(previous.slides);
+            return { overview, slides };
+          });
+          editorSlidesRef.current = slides;
+          setEditorError(null);
+        } catch (e) {
+          if (!cancelled) setEditorError(e instanceof Error ? e.message : String(e));
+        } finally {
+          if (!cancelled) setEditorLoading(false);
+        }
+      })();
+    }, EDITOR_REGEN_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, songs, bibleState, sermonFile, announcementText, customDecks, hasAnyContent]);
+
+  // Release any still-live thumbnail object URLs when the app itself unmounts.
+  useEffect(() => () => revokeRenderedSlides(editorSlidesRef.current), []);
 
   const allWarnings = songs
     .map((s) => ({ title: s.title, tokens: unmatchedTokens(s) }))
@@ -412,7 +506,10 @@ export default function App() {
         <div className="app-body">
           {viewMode === 'editor' && (
             <SlideOverviewList
-              items={deckOverview}
+              overview={editorDeck?.overview ?? []}
+              slides={editorDeck?.slides ?? null}
+              loading={editorLoading}
+              error={editorError}
               onSelectSong={scrollToSong}
               onSelectAnnouncement={scrollToAnnouncement}
             />

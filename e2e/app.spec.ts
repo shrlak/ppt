@@ -88,6 +88,10 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   // The step tabs and per-step next/back navigation make no sense in this view.
   await expect(page.getByTestId('wizard-tab-lyrics')).toHaveCount(0);
 
+  // The left panel debounces, then rebuilds the full deck and renders the
+  // real production slides (not a text summary) — wait for that to settle.
+  await expect(page.getByTestId('slide-overview-loading')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+
   // 찬양 가사 AND 광고 are both reachable in the same right-hand column —
   // the SAME LyricsGenerator/AnnouncementSection instances the wizard uses,
   // not a duplicate, so nothing the user already typed is lost.
@@ -99,9 +103,12 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   // Uploaded/typed content survives the switch (no remount, no data loss).
   await expect(page.getByTestId('conti-info')).toBeVisible();
 
-  // The left slide list mirrors the real deck order, including the front
-  // slides and the 광고 item just typed.
-  await expect(page.getByTestId('slide-overview-row-front')).toBeVisible();
+  // The left slide list mirrors the real deck order, one row per actual
+  // rendered slide (front slides now expand to one row each, not a summary),
+  // and each row shows the real slide's shapes/text — not a placeholder.
+  const firstFrontThumb = page.getByTestId('slide-overview-row-front').first().locator('.slide-thumb');
+  await expect(firstFrontThumb).toBeVisible();
+  await expect(firstFrontThumb.locator('.slide-thumb-text, .slide-thumb-picture').first()).toBeAttached();
   await expect(page.getByTestId('slide-overview-row-announcement')).toContainText('새가족 환영');
 
   // Clicking an announcement row focuses the shared textarea.
