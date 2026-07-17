@@ -158,17 +158,24 @@ export default function App() {
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
   const fileName = suggestFileName(contiDate);
 
-  // 편집기 view: 찬양 가사 and 광고 stay the SAME mounted LyricsGenerator/
-  // AnnouncementSection instances used by the wizard steps (just made
-  // simultaneously visible instead of one-at-a-time) — never a second copy,
-  // so there is nothing to keep in sync.
+  // 편집기 view: 찬양 가사, 성경 말씀(설교 제목·본문), and 광고 all stay the SAME
+  // mounted LyricsGenerator/BibleSlideGenerator/AnnouncementSection instances
+  // used by the wizard steps (just made simultaneously visible instead of
+  // one-at-a-time) — never a second copy, so there is nothing to keep in sync.
   const isPanelActive = useCallback(
     (stepId: (typeof WIZARD_STEPS)[number]['id']) =>
-      viewMode === 'editor' ? stepId === 'lyrics' || stepId === 'announcement' : WIZARD_STEPS[activeStep].id === stepId,
+      viewMode === 'editor'
+        ? stepId === 'lyrics' || stepId === 'bible' || stepId === 'announcement'
+        : WIZARD_STEPS[activeStep].id === stepId,
     [viewMode, activeStep],
   );
   function scrollToSong(songId: string) {
     document.getElementById(`song-editor-${songId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function scrollToBible() {
+    const el = document.querySelector<HTMLInputElement>('[data-testid="bible-verse-input"]');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el?.focus();
   }
   function scrollToAnnouncement() {
     const el = document.querySelector<HTMLTextAreaElement>('[data-testid="announcement-input"]');
@@ -511,7 +518,12 @@ export default function App() {
               loading={editorLoading}
               error={editorError}
               onSelectSong={scrollToSong}
+              onSelectBible={scrollToBible}
               onSelectAnnouncement={scrollToAnnouncement}
+              onDownload={() => void generate()}
+              onSaveToLibrary={() => void saveCurrentToLibrary()}
+              downloading={generating}
+              savingToLibrary={savingToLibrary}
             />
           )}
           <main>

@@ -86,6 +86,34 @@ function parseXml(text: string): Document {
   return new DOMParser().parseFromString(text, 'application/xml');
 }
 
+/** A part's own Target is relative to its parent directory; every part this
+ * reader visits (slides, slideLayouts, slideMasters, media) lives exactly
+ * one directory below `ppt/`, so a single `../` strip always resolves it. */
+function resolvePartTarget(target: string): string {
+  return target.startsWith('/') ? target.slice(1) : `ppt/${target.replace(/^\.\.\//, '')}`;
+}
+
+function relsPathFor(partPath: string): string {
+  const slash = partPath.lastIndexOf('/');
+  return `${partPath.slice(0, slash)}/_rels/${partPath.slice(slash + 1)}.rels`;
+}
+
+/** Find the Target of the first relationship whose Type ends with `typeSuffix` (e.g. "/slideLayout"). */
+function findRelTarget(relsXml: string, typeSuffix: string): string | null {
+  const doc = parseXml(relsXml);
+  for (const rel of allEls(doc.documentElement, 'Relationship')) {
+    if (rel.getAttribute('Type')?.endsWith(typeSuffix)) {
+      return rel.getAttribute('Target');
+    }
+  }
+  return null;
+}
+
+/** A shape only counts as slide-specific content if it fills a layout/master placeholder. */
+function isPlaceholder(shapeEl: Element): boolean {
+  return shapeEl.getElementsByTagName('p:ph').length > 0;
+}
+
 /** Read a shape's <a:solidFill> as a CSS color, from srgbClr or (approximately) schemeClr. */
 function readSolidFill(container: Element | null): string | undefined {
   const fill = container && firstEl(container, 'a:solidFill');
@@ -175,7 +203,7 @@ async function readPictureShape(
   if (!rEmbed) return null;
   const target = relTargets.get(rEmbed);
   if (!target) return null;
-  const mediaPath = target.startsWith('/') ? target.slice(1) : `ppt/${target.replace(/^\.\.\//, '')}`;
+  const mediaPath = resolvePartTarget(target);
   let url = urlCache.get(mediaPath);
   if (!url) {
     const file = zip.file(mediaPath);
@@ -185,6 +213,95 @@ async function readPictureShape(
     urlCache.set(mediaPath, url);
   }
   return { kind: 'picture', ...box, imageUrl: url };
+}
+
+/** Read every `p:sp`/`p:pic` child of a `p:spTree` into shapes, in document order. */
+async function readSpTreeShapes(
+  spTree: Element,
+  zip: JSZip,
+  relTargets: Map<string, string>,
+  urlCache: Map<string, string>,
+  skipPlaceholders: boolean,
+): Promise<RenderedShape[]> {
+  const shapes: RenderedShape[] = [];
+  for (const child of Array.from(spTree.children)) {
+    if (skipPlaceholders && isPlaceholder(child)) continue;
+    const box = readXfrm(firstEl(child, 'p:spPr'));
+    if (!box) continue;
+    if (child.tagName === 'p:sp') {
+      const shape = readTextShape(child, box);
+      if (shape) shapes.push(shape);
+    } else if (child.tagName === 'p:pic') {
+      const shape = await readPictureShape(child, box, zip, relTargets, urlCache);
+      if (shape) shapes.push(shape);
+    }
+  }
+  return shapes;
+}
+
+interface StaticLayer {
+  background?: string;
+  shapes: RenderedShape[];
+}
+
+/**
+ * Read a slideLayout or slideMaster part for the static art every slide
+ * using it inherits: its background (when the slide doesn't set its own)
+ * and any non-placeholder shapes/pictures (logos, watermarks) — matching
+ * how PowerPoint actually composites a slide over its layout over its
+ * master. Placeholders are skipped: their real content lives on the slide
+ * itself (or is absent), not here.
+ */
+async function readStaticLayer(zip: JSZip, partPath: string, urlCache: Map<string, string>): Promise<StaticLayer> {
+  const file = zip.file(partPath);
+  if (!file) return { shapes: [] };
+  const xml = await file.async('string');
+  const doc = parseXml(xml);
+  const cSld = firstEl(doc.documentElement, 'p:cSld');
+  const bg = cSld && firstEl(cSld, 'p:bg');
+  const background = bg ? readSolidFill(firstEl(bg, 'p:bgPr')) : undefined;
+
+  const relsFile = zip.file(relsPathFor(partPath));
+  const relsXml = relsFile ? await relsFile.async('string') : null;
+  const relTargets = readSlideRelTargets(relsXml);
+
+  const spTree = cSld && firstEl(cSld, 'p:spTree');
+  const shapes = spTree ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, true) : [];
+  return { background, shapes };
+}
+
+/** Resolve the slideLayout, then slideMaster, a slide/layout part inherits from — cached by path since many slides share one layout. */
+async function readInheritedLayers(
+  zip: JSZip,
+  ownRelsXml: string | null,
+  urlCache: Map<string, string>,
+  layerCache: Map<string, Promise<StaticLayer>>,
+): Promise<StaticLayer[]> {
+  const layers: StaticLayer[] = [];
+  const layoutTarget = ownRelsXml ? findRelTarget(ownRelsXml, '/slideLayout') : null;
+  if (!layoutTarget) return layers;
+  const layoutPath = resolvePartTarget(layoutTarget);
+  let layoutLayer = layerCache.get(layoutPath);
+  if (!layoutLayer) {
+    layoutLayer = readStaticLayer(zip, layoutPath, urlCache);
+    layerCache.set(layoutPath, layoutLayer);
+  }
+  layers.push(await layoutLayer);
+
+  const layoutRelsFile = zip.file(relsPathFor(layoutPath));
+  const layoutRelsXml = layoutRelsFile ? await layoutRelsFile.async('string') : null;
+  const masterTarget = layoutRelsXml ? findRelTarget(layoutRelsXml, '/slideMaster') : null;
+  if (masterTarget) {
+    const masterPath = resolvePartTarget(masterTarget);
+    let masterLayer = layerCache.get(masterPath);
+    if (!masterLayer) {
+      masterLayer = readStaticLayer(zip, masterPath, urlCache);
+      layerCache.set(masterPath, masterLayer);
+    }
+    layers.push(await masterLayer);
+  }
+  // Master first, then layout, so the slide's own content ends up on top.
+  return layers.reverse();
 }
 
 /** Resolve a deck's slide part paths in presentation display order via sldIdLst + rels. */
@@ -227,6 +344,7 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
 
   const slidePaths = slideOrderPaths(presentationXml, presentationRels);
   const urlCache = new Map<string, string>();
+  const layerCache = new Map<string, Promise<StaticLayer>>();
 
   const slides: RenderedSlide[] = [];
   for (let index = 0; index < slidePaths.length; index++) {
@@ -237,31 +355,20 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
       continue;
     }
     const slideXml = await file.async('string');
-    const relsPath = `${path.slice(0, path.lastIndexOf('/'))}/_rels/${path.slice(path.lastIndexOf('/') + 1)}.rels`;
-    const relsFile = zip.file(relsPath);
+    const relsFile = zip.file(relsPathFor(path));
     const relsXml = relsFile ? await relsFile.async('string') : null;
     const relTargets = readSlideRelTargets(relsXml);
+    const inheritedLayers = await readInheritedLayers(zip, relsXml, urlCache, layerCache);
 
     const doc = parseXml(slideXml);
     const cSld = firstEl(doc.documentElement, 'p:cSld');
     const bg = cSld && firstEl(cSld, 'p:bg');
-    const background = bg ? readSolidFill(firstEl(bg, 'p:bgPr')) : undefined;
+    const ownBackground = bg ? readSolidFill(firstEl(bg, 'p:bgPr')) : undefined;
+    const background = ownBackground ?? inheritedLayers.find((l) => l.background)?.background;
 
     const spTree = cSld && firstEl(cSld, 'p:spTree');
-    const shapes: RenderedShape[] = [];
-    if (spTree) {
-      for (const child of Array.from(spTree.children)) {
-        const box = readXfrm(firstEl(child, 'p:spPr'));
-        if (!box) continue;
-        if (child.tagName === 'p:sp') {
-          const shape = readTextShape(child, box);
-          if (shape) shapes.push(shape);
-        } else if (child.tagName === 'p:pic') {
-          const shape = await readPictureShape(child, box, zip, relTargets, urlCache);
-          if (shape) shapes.push(shape);
-        }
-      }
-    }
+    const ownShapes = spTree ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, false) : [];
+    const shapes = [...inheritedLayers.flatMap((l) => l.shapes), ...ownShapes];
     slides.push({ index, widthEmu, heightEmu, background, shapes });
   }
   return slides;

@@ -97,6 +97,9 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   // not a duplicate, so nothing the user already typed is lost.
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
   await expect(page.getByTestId('song-card').first()).toBeVisible();
+  // 성경 말씀 (설교 제목 및 본문) is reachable too, auto-filled from the conti.
+  await expect(page.getByTestId('wizard-panel-bible')).toBeVisible();
+  await expect(page.getByTestId('bible-verse-input')).not.toHaveValue('');
   await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/새가족 환영/);
 
@@ -111,9 +114,34 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   await expect(firstFrontThumb.locator('.slide-thumb-text, .slide-thumb-picture').first()).toBeAttached();
   await expect(page.getByTestId('slide-overview-row-announcement')).toContainText('새가족 환영');
 
+  // Several of the bundled Back slides carry no picture/background of their
+  // own — only the slide layout does (a corner logo) — so every Back row's
+  // thumbnail must inherit it, not just the ones with an explicit picture.
+  const backRows = page.getByTestId('slide-overview-row-back');
+  const backRowCount = await backRows.count();
+  expect(backRowCount).toBeGreaterThan(0);
+  for (let i = 0; i < backRowCount; i++) {
+    await expect(backRows.nth(i).locator('.slide-thumb-picture').first()).toBeAttached();
+  }
+
   // Clicking an announcement row focuses the shared textarea.
   await page.getByTestId('slide-overview-row-announcement').getByRole('button').click();
   await expect(page.getByTestId('announcement-input')).toBeFocused();
+
+  // Clicking a 말씀 row focuses the 성경 구절 input in the same right-hand column.
+  await page.getByTestId('slide-overview-row-bible').first().getByRole('button').click();
+  await expect(page.getByTestId('bible-verse-input')).toBeFocused();
+
+  // The whole deck can be downloaded or saved to the 라이브러리 without leaving
+  // 편집기 — a toolbar next to the slide list, not just the wizard's last step.
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByTestId('editor-generate-pptx').click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/\.pptx$/);
+
+  await page.getByTestId('editor-save-to-library').click();
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible({ timeout: PARSE_TIMEOUT });
 
   // Switching back to 단계별 보기 restores the normal wizard (still the same
   // underlying state — the song list and announcement text are untouched).
