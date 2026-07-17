@@ -275,9 +275,9 @@ function RecognitionSettingsSection() {
         <div className="admin-deck-info">
           <h4>가사 인식 동시 실행 모델</h4>
           <p>
-            아래 모델을 매번 모두 동시에 실행합니다. 각 페이지는 가장 먼저 도착한 정상 결과를 쓰고,
-            먼저 끝난 모델이 놓친 페이지는 뒤이어 끝난 모델이 채웁니다. 모든 공급자의 무료 요청 한도가
-            인식할 때마다 함께 사용됩니다.
+            아래 모델을 매번 모두 동시에 실행하고, 결과를 함께 조합합니다. 각 페이지는 목록에서
+            가장 위에 있는(가장 정확한) 모델의 결과를 쓰고, 그 모델이 놓친 제목·조성·진행 순서·가사는
+            다른 모델의 결과로 채웁니다. 모든 공급자의 무료 요청 한도가 인식할 때마다 함께 사용됩니다.
           </p>
           <p className={`admin-sync admin-sync-${sync.state}`} data-testid="admin-settings-sync" role="status">
             {sync.message}

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  USAGE_HISTORY_DAYS,
+  USAGE_HISTORY_MONTHS,
   buildUsageSnapshot,
   mergeUsageRecord,
   pacificDateKey,
+  recentPeriodKeys,
   utcDateKey,
   utcMonthKey,
   usageStorageKey,
@@ -14,6 +17,21 @@ describe('AI proxy usage periods', () => {
     expect(pacificDateKey(instant)).toBe('2026-07-14');
     expect(utcDateKey(instant)).toBe('2026-07-15');
     expect(utcMonthKey(instant)).toBe('2026-07');
+  });
+
+  it('lists the recent daily periods oldest-first, ending today, across month boundaries', () => {
+    const keys = recentPeriodKeys('openrouter', new Date('2026-07-03T12:00:00.000Z'));
+    expect(keys).toHaveLength(USAGE_HISTORY_DAYS);
+    expect(keys[0]).toBe('2026-06-20');
+    expect(keys[keys.length - 1]).toBe('2026-07-03');
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('lists recent months for monthly providers, crossing the year boundary', () => {
+    const keys = recentPeriodKeys('huggingface', new Date('2026-02-10T12:00:00.000Z'));
+    expect(keys).toHaveLength(USAGE_HISTORY_MONTHS);
+    expect(keys[0]).toBe('2025-09');
+    expect(keys[keys.length - 1]).toBe('2026-02');
   });
 });
 
@@ -134,5 +152,47 @@ describe('AI proxy usage records', () => {
       providerMeasuredRequests: 1,
     });
     expect(huggingFaceUsage?.used).toBeCloseTo(0.0012);
+  });
+
+  it('carries an exact zero-filled history for the usage graph', () => {
+    const now = new Date('2026-07-15T16:00:00.000Z');
+    const today = mergeUsageRecord(undefined, {
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+      success: true,
+      timestamp: now,
+    });
+    const twoDaysAgo = mergeUsageRecord(
+      mergeUsageRecord(undefined, {
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+        success: true,
+        timestamp: '2026-07-13T10:00:00.000Z',
+        totalTokens: 300,
+      }),
+      {
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+        success: false,
+        timestamp: '2026-07-13T11:00:00.000Z',
+      },
+    );
+
+    const snapshot = buildUsageSnapshot([today, twoDaysAgo], {}, now);
+    const row = snapshot.models.find((model) => model.model === 'nvidia/nemotron-nano-12b-v2-vl:free');
+
+    expect(row?.history).toHaveLength(USAGE_HISTORY_DAYS);
+    // Oldest first; quiet days are explicit zeros, not gaps.
+    expect(row?.history[0]).toMatchObject({ periodKey: '2026-07-02', requests: 0 });
+    expect(row?.history[USAGE_HISTORY_DAYS - 1]).toMatchObject({ periodKey: '2026-07-15', requests: 1 });
+    expect(row?.history[USAGE_HISTORY_DAYS - 3]).toMatchObject({
+      periodKey: '2026-07-13',
+      requests: 2,
+      successfulRequests: 1,
+      failedRequests: 1,
+      totalTokens: 300,
+    });
+    // Only the CURRENT period feeds the limit bar; history stays separate.
+    expect(row?.used).toBe(1);
   });
 });

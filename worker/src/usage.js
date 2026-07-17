@@ -53,6 +53,29 @@ export function utcDateKey(value = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
+/** How much history the usage graph shows per provider period type. */
+export const USAGE_HISTORY_DAYS = 14;
+export const USAGE_HISTORY_MONTHS = 6;
+
+/**
+ * The provider's most recent period keys, oldest first and ending with the
+ * current period — the x-axis of the exact usage graph. Daily providers get
+ * the last 14 days (in the provider's own reset timezone); monthly providers
+ * get the last 6 months.
+ */
+export function recentPeriodKeys(provider, now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  if (provider === 'gemini' || provider === 'openrouter') {
+    const keyOf = provider === 'gemini' ? pacificDateKey : utcDateKey;
+    return Array.from({ length: USAGE_HISTORY_DAYS }, (_, i) =>
+      keyOf(new Date(date.getTime() - (USAGE_HISTORY_DAYS - 1 - i) * 86_400_000)),
+    );
+  }
+  return Array.from({ length: USAGE_HISTORY_MONTHS }, (_, i) =>
+    utcMonthKey(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - (USAGE_HISTORY_MONTHS - 1 - i), 1))),
+  );
+}
+
 /** Hugging Face's included credit is monthly, so group it by UTC month. */
 export function utcMonthKey(value = new Date()) {
   const date = value instanceof Date ? value : new Date(value);
@@ -174,14 +197,30 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
     emptyRecord('openrouter', env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, now),
     emptyRecord('huggingface', env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL, now),
   ];
-  const current = Array.isArray(records)
-    ? records.filter((record) => {
-        if (!record || !PROVIDERS.has(record.provider)) return false;
-        return record.periodKey === usagePeriod(record.provider, now).periodKey;
-      })
-    : [];
+  const stored = Array.isArray(records) ? records.filter((record) => record && PROVIDERS.has(record.provider)) : [];
+  const current = stored.filter(
+    (record) => record.periodKey === usagePeriod(record.provider, now).periodKey,
+  );
   const byModel = new Map(defaults.map((record) => [`${record.provider}:${record.model}`, record]));
   for (const record of current) byModel.set(`${record.provider}:${record.model}`, record);
+
+  // Exact per-period history for the usage graph: one zero-filled point per
+  // recent period, so quiet days render as real zeros rather than gaps.
+  const byPeriod = new Map(
+    stored.map((record) => [`${record.provider}:${record.model}:${record.periodKey}`, record]),
+  );
+  const historyFor = (provider, model) =>
+    recentPeriodKeys(provider, now).map((periodKey) => {
+      const record = byPeriod.get(`${provider}:${model}:${periodKey}`) || {};
+      return {
+        periodKey,
+        requests: finiteNonNegative(record.requests),
+        successfulRequests: finiteNonNegative(record.successfulRequests),
+        failedRequests: finiteNonNegative(record.failedRequests),
+        totalTokens: finiteNonNegative(record.totalTokens),
+        computeSeconds: finiteNonNegative(record.computeSeconds),
+      };
+    });
 
   const models = [...byModel.values()]
     .map((record) => {
@@ -200,6 +239,7 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
         computeSeconds: finiteNonNegative(record.computeSeconds),
         providerMeasuredRequests: finiteNonNegative(record.providerMeasuredRequests),
         updatedAt: record.updatedAt || null,
+        history: historyFor(record.provider, record.model),
       };
       if (record.provider === 'gemini') {
         return {

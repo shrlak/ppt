@@ -1,6 +1,16 @@
 export type UsageProvider = 'gemini' | 'openrouter' | 'nvidia' | 'huggingface';
 export type UsageMetric = 'requests' | 'usd';
 
+/** One period (day or month) of exact usage for the 사용량 graph. */
+export interface UsageHistoryPoint {
+  periodKey: string;
+  requests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  totalTokens: number;
+  computeSeconds: number;
+}
+
 export interface ModelUsage {
   provider: UsageProvider;
   model: string;
@@ -20,6 +30,8 @@ export interface ModelUsage {
   limit: number;
   estimated: boolean;
   usdPerSecond?: number;
+  /** Recent periods, oldest first (zero-filled server-side); [] on old proxies. */
+  history: UsageHistoryPoint[];
 }
 
 export interface AiUsageSnapshot {
@@ -39,6 +51,26 @@ export function hasSharedUsageMonitor(): boolean {
 function nonNegativeNumber(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+/** Coerce the proxy's history list; anything malformed just drops out. */
+function parseHistory(raw: unknown): UsageHistoryPoint[] {
+  if (!Array.isArray(raw)) return [];
+  const points: UsageHistoryPoint[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const point = item as Record<string, unknown>;
+    if (typeof point.periodKey !== 'string' || !point.periodKey) continue;
+    points.push({
+      periodKey: point.periodKey,
+      requests: nonNegativeNumber(point.requests),
+      successfulRequests: nonNegativeNumber(point.successfulRequests),
+      failedRequests: nonNegativeNumber(point.failedRequests),
+      totalTokens: nonNegativeNumber(point.totalTokens),
+      computeSeconds: nonNegativeNumber(point.computeSeconds),
+    });
+  }
+  return points;
 }
 
 export function parseUsageSnapshot(raw: unknown): AiUsageSnapshot {
@@ -80,6 +112,7 @@ export function parseUsageSnapshot(raw: unknown): AiUsageSnapshot {
       limit: nonNegativeNumber(model.limit),
       estimated: model.estimated === true,
       usdPerSecond: model.usdPerSecond == null ? undefined : nonNegativeNumber(model.usdPerSecond),
+      history: parseHistory(model.history),
     };
   });
   return {

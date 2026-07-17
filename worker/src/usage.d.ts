@@ -40,9 +40,22 @@ export const DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT: number;
 export const DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD: number;
 export const DEFAULT_HUGGINGFACE_USD_PER_SECOND: number;
 
+export const USAGE_HISTORY_DAYS: number;
+export const USAGE_HISTORY_MONTHS: number;
+
+export interface UsageHistoryPoint {
+  periodKey: string;
+  requests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  totalTokens: number;
+  computeSeconds: number;
+}
+
 export function pacificDateKey(value?: string | Date): string;
 export function utcDateKey(value?: string | Date): string;
 export function utcMonthKey(value?: string | Date): string;
+export function recentPeriodKeys(provider: UsageProvider, now?: string | Date): string[];
 export function usagePeriod(
   provider: UsageProvider,
   value?: string | Date,
@@ -63,5 +76,6 @@ export function buildUsageSnapshot(
     limit: number;
     estimated: boolean;
     usdPerSecond?: number;
+    history: UsageHistoryPoint[];
   }>;
 };

@@ -182,7 +182,7 @@ describe('concurrent batch recognition', () => {
     expect(out.scores[1].title).toBe('둘째 곡');
   });
 
-  it('fills each page by completion time rather than catalog order', async () => {
+  it('lets the models work together: the strongest reader wins a page even when a weaker model finished first', async () => {
     let resolveGemini!: (scores: ParsedScore[]) => void;
     let resolveOpenRouter!: (scores: ParsedScore[]) => void;
     const gemini = new Promise<ParsedScore[]>((resolve) => { resolveGemini = resolve; });
@@ -195,13 +195,88 @@ describe('concurrent batch recognition', () => {
     );
 
     const pending = recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
-    resolveOpenRouter([first, empty]);
+    // The weaker model answers FIRST — but Gemini (higher in the pool) is
+    // still reading, so its later answer must win the page.
+    resolveOpenRouter([{ ...first, title: '빠른 첫째 곡' }, empty]);
     await Promise.resolve();
-    resolveGemini([{ ...first, title: '늦은 첫째 곡' }, second]);
+    resolveGemini([first, second]);
     const out = await pending;
 
     expect(out.scores[0].title).toBe('첫째 곡');
     expect(out.scores[1].title).toBe('둘째 곡');
+    expect(out.engine).toBe('gemini');
+  });
+
+  it('does not wait for weaker models once every stronger model has settled', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [first, second];
+      throw new Error('down');
+    });
+    // Hugging Face never settles — a lower-priority straggler must not block.
+    vi.mocked(recognizeBatchWithHuggingFace).mockImplementation(() => new Promise(() => {}));
+
+    const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+
+    expect(out.engine).toBe('nvidia');
+    expect(out.scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
+  });
+
+  it('fills the fields the winning model missed from the other models (working together)', async () => {
+    const geminiAnswer: ParsedScore = { title: '주님의 사랑', order: [], sections: [] };
+    const openRouterAnswer: ParsedScore = {
+      title: '다른 제목',
+      key: 'G',
+      order: ['I', 'V1', 'C'],
+      sections: [{ label: 'V1', lines: ['가사 한 줄'] }],
+    };
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [geminiAnswer];
+      throw new Error('down');
+    });
+    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [openRouterAnswer];
+      throw new Error('down');
+    });
+
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+
+    // Gemini's answer wins the page; the key, order, and lyrics it missed
+    // come from the OpenRouter answer — but its title is not overwritten.
+    expect(out.scores[0].title).toBe('주님의 사랑');
+    expect(out.scores[0].key).toBe('G');
+    expect(out.scores[0].order).toEqual(['I', 'V1', 'C']);
+    expect(out.scores[0].sections).toEqual([{ label: 'V1', lines: ['가사 한 줄'] }]);
+  });
+
+  it('never fills lyric fields from a model that disagrees with a non-score verdict', async () => {
+    const nonScore: ParsedScore = {
+      pageType: 'non_score',
+      sermonTitle: '믿음으로 걷기',
+      order: [],
+      sections: [],
+    };
+    const disagreeing: ParsedScore = {
+      pageType: 'score',
+      title: '엉뚱한 곡',
+      order: ['I'],
+      sections: [{ label: 'V1', lines: ['잘못 읽은 가사'] }],
+    };
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [nonScore];
+      throw new Error('down');
+    });
+    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [disagreeing];
+      throw new Error('down');
+    });
+
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+
+    expect(out.scores[0].pageType).toBe('non_score');
+    expect(out.scores[0].sermonTitle).toBe('믿음으로 걷기');
+    expect(out.scores[0].title).toBeUndefined();
+    expect(out.scores[0].sections).toEqual([]);
   });
 
   it('forwards title hints to every concurrent Gemini model', async () => {

@@ -110,4 +110,51 @@ describe('parseUsageSnapshot', () => {
       }),
     ).toThrow(/공급자/);
   });
+
+  it('parses the exact usage-graph history and tolerates proxies without one', () => {
+    const base = {
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+      period: 'day',
+      periodKey: '2026-07-15',
+      metric: 'requests',
+      used: 2,
+      limit: 50,
+      estimated: false,
+    };
+    const withHistory = parseUsageSnapshot({
+      models: [
+        {
+          ...base,
+          history: [
+            { periodKey: '2026-07-14', requests: 3, successfulRequests: 2, failedRequests: 1, totalTokens: 900 },
+            { periodKey: '2026-07-15', requests: '2', successfulRequests: 2 },
+            { periodKey: '', requests: 9 },
+            'garbage',
+          ],
+        },
+      ],
+    });
+    expect(withHistory.models[0].history).toEqual([
+      {
+        periodKey: '2026-07-14',
+        requests: 3,
+        successfulRequests: 2,
+        failedRequests: 1,
+        totalTokens: 900,
+        computeSeconds: 0,
+      },
+      {
+        periodKey: '2026-07-15',
+        requests: 2,
+        successfulRequests: 2,
+        failedRequests: 0,
+        totalTokens: 0,
+        computeSeconds: 0,
+      },
+    ]);
+
+    const withoutHistory = parseUsageSnapshot({ models: [base] });
+    expect(withoutHistory.models[0].history).toEqual([]);
+  });
 });

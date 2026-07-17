@@ -444,8 +444,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
-          // Every model reads the conti at once. The first usable answer per
-          // page wins, and later completions fill any remaining gaps.
+          // Every model reads the conti at once and works on the answer
+          // together: the strongest model that read a page wins it, and the
+          // other models fill in whatever fields it missed.
           const lyricResult = await recognizeScoreBatchEnsemble(
             remaining.map(({ image }) => image),
             settings,
