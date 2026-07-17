@@ -22,19 +22,20 @@ export interface RecognitionModelInfo extends RecognitionAttempt {
 }
 
 /**
- * Every model recognition can use, strongest-first per provider. This is the
- * single source of truth: the admin priority list, the sanitizer, and the
- * proxy's NVIDIA allowlist all derive from it.
+ * Every model recognition launches concurrently, grouped here by provider for
+ * stable display. This is the
+ * single source of truth: the concurrent model pool, the sanitizer, and the
+ * proxy's OpenRouter allowlist all derive from it.
  */
 export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
-  // Flash leads by default: the 50-song accuracy benchmark measured it at
-  // 97-98% on this task, and free-tier keys currently have NO 2.5 Pro quota
-  // (limit 0), so leading with Pro would only waste a failed call per pass.
+  // The 50-song accuracy benchmark measured Flash at 97-98% on this task.
+  // Only Gemini models with a free API tier belong in
+  // this catalog; paid-only models deliberately stay out of the concurrent pool.
   {
     engine: 'gemini',
     model: 'gemini-2.5-flash',
     label: 'Gemini 2.5 Flash',
-    note: '기본 모델 — 벤치마크 정확도 97%+, 주 1회 콘티는 무료 한도로 충분합니다',
+    note: '벤치마크 정확도 97%+ — 주 1회 콘티는 무료 한도로 충분합니다',
   },
   {
     engine: 'gemini',
@@ -43,34 +44,22 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
     note: '별도의 무료 한도를 가진 예비 Gemini',
   },
   {
-    engine: 'gemini',
-    model: 'gemini-2.5-pro',
-    label: 'Gemini 2.5 Pro',
-    note: '유료 키에서 가장 정확 — 무료 키에는 한도가 없어 건너뜁니다',
-  },
-  {
     engine: 'nvidia',
     model: 'nvidia/nemotron-nano-12b-v2-vl',
-    label: 'NVIDIA Nemotron Nano 12B VL',
-    note: '문서·악보 OCR 특화 (build.nvidia.com)',
+    label: 'NVIDIA Nemotron Nano 12B VL · OpenRouter Free',
+    note: '문서·악보 OCR 특화 — 입력과 출력이 공급자에 기록되는 시험용 무료 엔드포인트',
   },
   {
     engine: 'nvidia',
-    model: 'meta/llama-3.2-90b-vision-instruct',
-    label: 'NVIDIA Llama 3.2 90B Vision',
-    note: '대형 범용 비전 모델 (build.nvidia.com)',
+    model: 'google/gemma-4-31b-it:free',
+    label: 'OpenRouter Gemma 4 31B · Free',
+    note: '강력한 대형 멀티모달 예비 모델 — 이미지·텍스트 이해 및 구조화 출력',
   },
   {
     engine: 'nvidia',
-    model: 'google/gemma-3-27b-it',
-    label: 'NVIDIA Gemma 3 27B',
-    note: '한국어에 강한 다국어 비전 모델 (build.nvidia.com)',
-  },
-  {
-    engine: 'nvidia',
-    model: 'microsoft/phi-4-multimodal-instruct',
-    label: 'NVIDIA Phi-4 Multimodal',
-    note: '가벼운 예비 비전 모델 (build.nvidia.com)',
+    model: 'google/gemma-3-27b-it:free',
+    label: 'OpenRouter Gemma 3 27B · Free',
+    note: '140개 이상 언어를 지원하는 다국어 비전 모델 — 한국어 가사 예비 인식',
   },
   {
     engine: 'huggingface',
@@ -80,7 +69,7 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
   },
 ];
 
-/** Default attempt order = the catalog order (already strongest-first). */
+/** Stable display/storage order; execution starts every entry concurrently. */
 export const DEFAULT_ATTEMPT_ORDER: RecognitionAttempt[] = RECOGNITION_MODEL_CATALOG.map(
   ({ engine, model }) => ({ engine, model }),
 );
@@ -110,7 +99,7 @@ export interface AiSettings extends SharedRecognitionSettings {
   geminiModel: string;
   /** Cross-check recognized lyrics against the web via Gemini's Google Search grounding. */
   geminiUseSearch: boolean;
-  nvidiaApiKey: string;
+  openrouterApiKey: string;
   huggingfaceApiKey: string;
 }
 
@@ -122,7 +111,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
   geminiUseSearch: true,
-  nvidiaApiKey: '',
+  openrouterApiKey: '',
   huggingfaceApiKey: '',
 };
 

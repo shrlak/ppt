@@ -20,8 +20,13 @@ function trimTrailingSlash(url: string): string {
 }
 
 const BASE_PROMPT = [
-  '이 이미지는 한국어 찬양(worship) 악보 한 페이지입니다.',
+  '이 이미지는 한국어 찬양 콘티 PDF의 한 페이지이며, 악보가 아닐 수도 있습니다.',
+  '먼저 오선과 음표가 실제로 보이는지 확인해 페이지 종류를 분류하세요.',
   '다음을 읽어 JSON으로만 답하세요:',
+  '- pageType: 오선과 음표가 있는 악보 페이지면 "score", 아니면 "non_score".',
+  '- sermonTitle: non_score 페이지에 명시된 설교 제목. 없으면 빈 문자열.',
+  '- scripture: non_score 페이지에 명시된 본문 성경 구절/범위. 없으면 빈 문자열.',
+  'pageType이 "score"일 때만 아래 찬양 필드를 읽으세요:',
   '- title: 곡 제목',
   '- key: 조성(예: E, F, F#m). 안 보이면 빈 문자열.',
   '- order: 악보 맨 위의 진행 순서. 보통 I(간주)로 시작합니다. 예: ["I","V1","V2","PC","C","C"]. 없으면 빈 배열.',
@@ -35,6 +40,8 @@ const BASE_PROMPT = [
   '가사는 음절을 나누는 하이픈(-)이나 붙임표 없이 단어를 자연스럽게 이어서 적으세요',
   '(예: "Ce-le-brate" → "Celebrate", "찬-양-해" → "찬양해").',
   '가사에 없는 내용을 지어내지 말고, 확신이 없는 글자도 보이는 대로 최대한 읽으세요.',
+  'pageType이 "non_score"이면 title과 key는 빈 문자열, order와 sections는 빈 배열로 반환하세요.',
+  'non_score 페이지에서는 다른 안내문을 추측하지 말고 설교 제목과 본문만 옮기세요.',
   '반드시 유효한 JSON 객체 하나만 출력하고, 다른 설명은 넣지 마세요.',
 ].join('\n');
 
@@ -52,16 +59,20 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
   const task =
     mode === 'titles'
       ? [
-          '각 이미지에서 찬양 제목과 조성만 읽으세요.',
+          '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
+          'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
+          'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 읽지 마세요.',
-          '각 결과는 imageIndex, title, key만 포함하세요.',
+          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
         ]
       : [
-          '모든 이미지의 제목, 조성, 진행 순서와 가사를 한 번에 읽으세요.',
+          '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
+          'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
+          'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
           BASE_PROMPT,
         ];
   return [
-    `서로 다른 한국어 찬양 악보 이미지 ${imageCount}개가 입력됩니다.`,
+    `서로 다른 한국어 찬양 콘티 PDF 페이지 이미지 ${imageCount}개가 입력됩니다.`,
     '각 이미지 앞의 imageIndex를 결과에 그대로 사용하세요.',
     ...(hasHints
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']

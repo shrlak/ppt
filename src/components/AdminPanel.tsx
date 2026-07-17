@@ -1,13 +1,12 @@
 // Administrator panel: replace or restore the front/back slide decks that
 // frame every generated presentation (stored in this browser via IndexedDB),
-// plus the shared recognition settings — model priority and excluded titles —
+// plus the shared recognition settings — concurrent model pool and excluded titles —
 // which are stored on the recognition proxy so every device sees the same
 // configuration.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
 import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from '../lib/storage/deckStore';
 import {
-  DEFAULT_ATTEMPT_ORDER,
   attemptKey,
   fetchSharedSettings,
   findModelInfo,
@@ -201,7 +200,7 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
     <Modal title="관리자 설정" onClose={onClose}>
       <p className="admin-intro">
         PPT의 front/back 슬라이드와 가사 인식 설정을 관리합니다. 슬라이드 파일은 이 브라우저에
-        저장되고, 인식 모델 우선순위와 제외 곡 목록은 공유 서버에 저장되어 모든 기기에 동일하게
+        저장되고, 동시 실행 모델 목록과 제외 곡 목록은 공유 서버에 저장되어 모든 기기에 동일하게
         적용됩니다. 공유 API 사용량은 헤더의 '사용량' 버튼에서 확인할 수 있습니다.
       </p>
       {SLOTS.map(({ slot, label, description }) => (
@@ -263,18 +262,6 @@ function RecognitionSettingsSection() {
       );
   }, []);
 
-  function move(index: number, delta: -1 | 1) {
-    const to = index + delta;
-    if (to < 0 || to >= settings.attempts.length) return;
-    const attempts = settings.attempts.slice();
-    [attempts[index], attempts[to]] = [attempts[to], attempts[index]];
-    persist({ ...settings, attempts });
-  }
-
-  function resetOrder() {
-    persist({ ...settings, attempts: [...DEFAULT_ATTEMPT_ORDER] });
-  }
-
   function saveExcluded() {
     const excludedTitles = sanitizeExcludedTitles(excludedText.split('\n'));
     setExcludedText(excludedTitles.join('\n'));
@@ -282,65 +269,33 @@ function RecognitionSettingsSection() {
     showToast('제외 곡 목록을 저장했습니다.');
   }
 
-  const isDefaultOrder =
-    settings.attempts.map(attemptKey).join() === DEFAULT_ATTEMPT_ORDER.map(attemptKey).join();
-
   return (
     <>
       <section className="admin-deck admin-recognition" data-testid="admin-recognition-order">
         <div className="admin-deck-info">
-          <h4>가사 인식 모델 우선순위</h4>
+          <h4>가사 인식 동시 실행 모델</h4>
           <p>
-            위에서부터 차례로 시도하고, 실패하거나 한도가 차면 다음 모델로 넘어갑니다. 어려운
-            페이지는 상위 모델 여러 개를 동시에 사용해 가장 먼저 읽어낸 결과를 씁니다. 변경은 모든
-            기기에 적용되어 다음 변경 전까지 유지됩니다.
+            아래 모델을 매번 모두 동시에 실행하고, 결과를 함께 조합합니다. 각 페이지는 목록에서
+            가장 위에 있는(가장 정확한) 모델의 결과를 쓰고, 그 모델이 놓친 제목·조성·진행 순서·가사는
+            다른 모델의 결과로 채웁니다. 모든 공급자의 무료 요청 한도가 인식할 때마다 함께 사용됩니다.
           </p>
           <p className={`admin-sync admin-sync-${sync.state}`} data-testid="admin-settings-sync" role="status">
             {sync.message}
           </p>
-          <ol className="admin-engine-list">
-            {settings.attempts.map((attempt, index) => {
+          <ul className="admin-engine-list">
+            {settings.attempts.map((attempt) => {
               const info = findModelInfo(attempt);
               const label = info?.label ?? `${attempt.engine} · ${attempt.model}`;
               return (
-                <li key={attemptKey(attempt)} className="admin-engine" data-testid={`admin-attempt-${index}`}>
+                <li key={attemptKey(attempt)} className="admin-engine" data-testid="admin-attempt">
                   <span className="admin-engine-label">
-                    {index + 1}. {label}
+                    {label}
                     {info?.note && <em className="admin-engine-note">{info.note}</em>}
-                  </span>
-                  <span className="admin-engine-actions">
-                    <button
-                      type="button"
-                      className="btn btn-chip"
-                      aria-label={`${label} 순서 올리기`}
-                      data-testid={`admin-attempt-up-${index}`}
-                      disabled={index === 0}
-                      onClick={() => move(index, -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-chip"
-                      aria-label={`${label} 순서 내리기`}
-                      data-testid={`admin-attempt-down-${index}`}
-                      disabled={index === settings.attempts.length - 1}
-                      onClick={() => move(index, 1)}
-                    >
-                      ↓
-                    </button>
                   </span>
                 </li>
               );
             })}
-          </ol>
-        </div>
-        <div className="admin-deck-actions">
-          {!isDefaultOrder && (
-            <button type="button" className="btn" data-testid="admin-attempt-reset" onClick={resetOrder}>
-              기본 순서로
-            </button>
-          )}
+          </ul>
         </div>
       </section>
       <section className="admin-deck admin-recognition" data-testid="admin-excluded-section">

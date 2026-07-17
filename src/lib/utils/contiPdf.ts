@@ -2,8 +2,8 @@
 // per-page text extraction, page classification, and page-image rendering.
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import type { ParsedConti } from './types';
-import { classifyPages, matchSongsToPages, parseCoverText } from './contiText';
+import type { ContiInfo, ParsedConti } from './types';
+import { classifyPages, matchSongsToPages, parseCoverText, parseSermonInfoText } from './contiText';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -84,9 +84,17 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   }
 
   const { coverIndex, musicPages } = classifyPages(pageTexts);
-  const info = (coverIndex !== null ? parseCoverText(pageTexts[coverIndex - 1]) : null) ?? {
+  const info: ContiInfo = (coverIndex !== null ? parseCoverText(pageTexts[coverIndex - 1]) : null) ?? {
     songs: [],
   };
+  // A sermon-information page may be separate from the song-list cover. Read
+  // any embedded PDF text now; image-only pages are handled by vision models
+  // during the title/classification pass.
+  for (const pageText of pageTexts) {
+    const detected = parseSermonInfoText(pageText);
+    info.sermonTitle ??= detected.sermonTitle;
+    info.scripture ??= detected.scripture;
+  }
   matchSongsToPages(info, pageTexts, musicPages);
 
   const parsed: ParsedConti = { info, numPages: doc.numPages, pageTexts, musicPages };

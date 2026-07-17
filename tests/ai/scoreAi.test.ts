@@ -25,6 +25,8 @@ describe('buildGeminiBody', () => {
     };
     const parts = body.contents[0].parts;
     expect(parts.some((p) => p.text?.includes('악보'))).toBe(true);
+    expect(parts.some((p) => p.text?.includes('pageType'))).toBe(true);
+    expect(parts.some((p) => p.text?.includes('설교 제목과 본문'))).toBe(true);
     expect(parts.find((p) => p.inline_data)?.inline_data).toEqual({ mime_type: 'image/png', data: 'ZZZ' });
     expect(body.generationConfig.responseMimeType).toBe('application/json');
     expect(body.tools).toBeUndefined();
@@ -74,6 +76,15 @@ describe('Gemini batch recognition', () => {
     );
     expect(scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
     expect(scores.every((score) => score.sections.length === 0)).toBe(true);
+  });
+
+  it('asks the title pass to classify pages before reading song fields', () => {
+    const body = buildGeminiBatchBody(['data:image/png;base64,FIRST'], 'titles') as {
+      contents: { parts: { text?: string }[] }[];
+    };
+    const prompt = body.contents[0].parts[0].text ?? '';
+    expect(prompt).toContain('pageType');
+    expect(prompt).toContain('non_score 페이지에서는 설교 제목과 본문만');
   });
 
   it('sends multiple score images with one fetch call', async () => {

@@ -6,6 +6,7 @@ import {
   deriveSongsFromMusicPages,
   matchSongsToPages,
   parseCoverText,
+  parseSermonInfoText,
   splitLyricsAndConfessionSongs,
 } from '../../src/lib/utils/contiText';
 import type { LibraryEntry } from '../../src/lib/utils/types';
@@ -37,6 +38,22 @@ describe('parseCoverText', () => {
   it('returns null for non-cover text', () => {
     expect(parseCoverText('그냥 아무 내용 없는 페이지')).toBeNull();
     expect(parseCoverText(notesText)).toBeNull();
+  });
+});
+
+describe('parseSermonInfoText', () => {
+  it('reads labeled sermon metadata without requiring a song list', () => {
+    expect(parseSermonInfoText('설교 제목: “믿음으로 걷기”\n본문: 히브리서 11장 1-3절')).toEqual({
+      sermonTitle: '믿음으로 걷기',
+      scripture: '히브리서 11장 1-3절',
+    });
+  });
+
+  it('does not guess a sermon title from unrelated page text', () => {
+    expect(parseSermonInfoText('주님의 사랑\n가사 한 줄')).toEqual({
+      sermonTitle: undefined,
+      scripture: undefined,
+    });
   });
 });
 

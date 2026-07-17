@@ -1,8 +1,7 @@
-// NVIDIA NIM (build.nvidia.com) vision engine for score recognition.
-// The NVIDIA API catalog exposes hosted vision-language models behind an
-// OpenAI-compatible chat-completions endpoint; images travel as data: URLs
-// inside the message content. Used as the first fallback after Gemini —
-// stronger and more reliable than the legacy Hugging Face inference API.
+// OpenRouter vision engine for score recognition. This legacy filename is
+// retained to avoid a noisy module rename, but every catalog model handled
+// here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
+// travel as data: URLs in an OpenAI-compatible chat-completions request.
 import { RecognitionError } from './recognitionError';
 import {
   coerceParsedScore,
@@ -12,13 +11,11 @@ import {
   type ParsedScore,
 } from './scoreParser';
 
-const ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 /**
  * Default catalog model. Nemotron Nano 12B v2 VL is NVIDIA's document/OCR
- * vision model on build.nvidia.com — the strongest fit for reading dense
- * sheet-music text. The shared proxy can override this via its NVIDIA_MODEL
- * environment variable without redeploying the app.
+ * vision model and is served here through OpenRouter's free endpoint.
  */
 export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
 
@@ -28,8 +25,13 @@ function trimTrailingSlash(url: string): string {
 }
 
 const BASE_PROMPT = [
-  '이 이미지는 한국어 찬양(worship) 악보 한 페이지입니다.',
+  '이 이미지는 한국어 찬양 콘티 PDF의 한 페이지이며, 악보가 아닐 수도 있습니다.',
+  '먼저 오선과 음표가 실제로 보이는지 확인해 페이지 종류를 분류하세요.',
   '다음을 읽어 JSON으로만 답하세요:',
+  '- pageType: 오선과 음표가 있는 악보 페이지면 "score", 아니면 "non_score".',
+  '- sermonTitle: non_score 페이지에 명시된 설교 제목. 없으면 빈 문자열.',
+  '- scripture: non_score 페이지에 명시된 본문 성경 구절/범위. 없으면 빈 문자열.',
+  'pageType이 "score"일 때만 아래 찬양 필드를 읽으세요:',
   '- title: 곡 제목',
   '- key: 조성(예: E, F, F#m). 안 보이면 빈 문자열.',
   '- order: 악보 맨 위의 진행 순서. 보통 I(간주)로 시작합니다. 예: ["I","V1","V2","PC","C","C"]. 없으면 빈 배열.',
@@ -43,6 +45,8 @@ const BASE_PROMPT = [
   '가사는 음절을 나누는 하이픈(-)이나 붙임표 없이 단어를 자연스럽게 이어서 적으세요',
   '(예: "Ce-le-brate" → "Celebrate", "찬-양-해" → "찬양해").',
   '가사에 없는 내용을 지어내지 말고, 확신이 없는 글자도 보이는 대로 최대한 읽으세요.',
+  'pageType이 "non_score"이면 title과 key는 빈 문자열, order와 sections는 빈 배열로 반환하세요.',
+  'non_score 페이지에서는 다른 안내문을 추측하지 말고 설교 제목과 본문만 옮기세요.',
   '반드시 유효한 JSON 객체 하나만 출력하고, 다른 설명이나 마크다운(```)은 넣지 마세요.',
 ].join('\n');
 
@@ -73,13 +77,20 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
   const task =
     mode === 'titles'
       ? [
-          '각 이미지에서 찬양 제목과 조성만 읽으세요.',
+          '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
+          'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
+          'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 읽지 마세요.',
-          '각 결과는 imageIndex, title, key만 포함하세요.',
+          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
         ]
-      : ['모든 이미지의 제목, 조성, 진행 순서와 가사를 한 번에 읽으세요.', BASE_PROMPT];
+      : [
+          '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
+          'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
+          'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
+          BASE_PROMPT,
+        ];
   return [
-    `서로 다른 한국어 찬양 악보 이미지 ${imageCount}개가 입력됩니다.`,
+    `서로 다른 한국어 찬양 콘티 PDF 페이지 이미지 ${imageCount}개가 입력됩니다.`,
     '각 이미지 앞의 imageIndex를 결과에 그대로 사용하세요.',
     ...(hasHints
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']
@@ -127,15 +138,22 @@ export function extractNvidiaText(response: unknown): string {
   return '';
 }
 
-async function callNvidia(body: unknown, apiKey: string, proxyUrl?: string): Promise<string> {
+async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string): Promise<string> {
   const useProxy = !apiKey.trim() && !!proxyUrl;
-  const url = useProxy ? `${trimTrailingSlash(proxyUrl!)}/nvidia` : ENDPOINT;
+  const url = useProxy ? `${trimTrailingSlash(proxyUrl!)}/openrouter` : ENDPOINT;
+  const requestBody =
+    !useProxy &&
+    body &&
+    typeof body === 'object' &&
+    (body as { model?: unknown }).model === DEFAULT_NVIDIA_MODEL
+      ? { ...(body as Record<string, unknown>), model: `${DEFAULT_NVIDIA_MODEL}:free` }
+      : body;
   const res = await fetch(url, {
     method: 'POST',
     headers: useProxy
       ? { 'Content-Type': 'application/json' }
       : { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
@@ -148,19 +166,17 @@ async function callNvidia(body: unknown, apiKey: string, proxyUrl?: string): Pro
     } catch {
       // ignore body parse errors; keep the status code
     }
-    throw new RecognitionError(`NVIDIA 호출 실패: ${detail}`, res.status);
+    throw new RecognitionError(`OpenRouter 호출 실패: ${detail}`, res.status);
   }
 
   return extractNvidiaText((await res.json()) as unknown);
 }
 
 /**
- * Recognize a single score image with an NVIDIA-hosted vision model.
+ * Recognize a single score image with an OpenRouter-hosted free vision model.
  *
  * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through
- * the shared server-side proxy (see worker/) that holds its own NVIDIA key —
- * integrate.api.nvidia.com does not serve browser CORS requests, so in the
- * deployed app the proxy path is the one that matters.
+ * the shared Cloudflare proxy (see worker/) that holds the OpenRouter key.
  */
 export async function recognizeWithNvidia(
   dataUrl: string,
@@ -168,16 +184,16 @@ export async function recognizeWithNvidia(
   model: string = DEFAULT_NVIDIA_MODEL,
   proxyUrl?: string,
 ): Promise<ParsedScore> {
-  const text = await callNvidia(buildNvidiaBody(dataUrl, model), apiKey, proxyUrl);
+  const text = await callOpenRouter(buildNvidiaBody(dataUrl, model), apiKey, proxyUrl);
   const payload = parseModelJson(
     text,
-    'NVIDIA 응답이 비어 있습니다.',
-    'NVIDIA 응답을 JSON으로 해석하지 못했습니다.',
+    'OpenRouter 응답이 비어 있습니다.',
+    'OpenRouter 응답을 JSON으로 해석하지 못했습니다.',
   );
   return coerceParsedScore(payload);
 }
 
-/** Recognize every supplied score image in one NVIDIA request. */
+/** Recognize every supplied score image in one OpenRouter request. */
 export async function recognizeBatchWithNvidia(
   dataUrls: string[],
   apiKey: string,
@@ -187,11 +203,11 @@ export async function recognizeBatchWithNvidia(
   hints?: (string | undefined)[],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
-  const text = await callNvidia(buildNvidiaBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
+  const text = await callOpenRouter(buildNvidiaBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
   const payload = parseModelJson(
     text,
-    'NVIDIA 일괄 응답이 비어 있습니다.',
-    'NVIDIA 일괄 응답을 JSON으로 해석하지 못했습니다.',
+    'OpenRouter 일괄 응답이 비어 있습니다.',
+    'OpenRouter 일괄 응답을 JSON으로 해석하지 못했습니다.',
   );
   return coerceParsedScoreBatch(payload, dataUrls.length, mode);
 }

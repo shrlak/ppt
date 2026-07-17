@@ -1,23 +1,32 @@
-// Shared recognition settings (model priority + excluded titles) served by
+// Shared recognition settings (concurrent model pool + excluded titles) served by
 // the proxy so every device sees the same configuration. Pure helpers live
 // here so they can be unit-tested; storage happens in the Durable Object.
 //
 // The catalog mirrors src/lib/ai/aiSettings.ts (a unit test keeps the two in
 // sync). The Worker validates everything it stores or relays: only catalog
-// models can be prioritized, and only catalog NVIDIA models (plus the
-// NVIDIA_MODEL env override) may be requested through POST /nvidia — the
-// shared key must not be usable with arbitrary expensive models.
+// models can be used. Every OpenAI-compatible vision model is
+// pinned to an OpenRouter :free model. Arbitrary model IDs can never spend
+// the shared OpenRouter key.
+
+import { DEFAULT_NVIDIA_MODEL } from './usage.js';
+
+/** The OpenRouter free variant used for the existing Nemotron catalog slot. */
+export const OPENROUTER_NEMOTRON_MODEL = `${DEFAULT_NVIDIA_MODEL}:free`;
 
 export const RECOGNITION_MODEL_CATALOG = [
   { engine: 'gemini', model: 'gemini-2.5-flash' },
   { engine: 'gemini', model: 'gemini-2.0-flash' },
-  { engine: 'gemini', model: 'gemini-2.5-pro' },
   { engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' },
-  { engine: 'nvidia', model: 'meta/llama-3.2-90b-vision-instruct' },
-  { engine: 'nvidia', model: 'google/gemma-3-27b-it' },
-  { engine: 'nvidia', model: 'microsoft/phi-4-multimodal-instruct' },
+  { engine: 'nvidia', model: 'google/gemma-4-31b-it:free' },
+  { engine: 'nvidia', model: 'google/gemma-3-27b-it:free' },
   { engine: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' },
 ];
+
+const OPENROUTER_MODEL_ALIASES = new Map([
+  [DEFAULT_NVIDIA_MODEL, OPENROUTER_NEMOTRON_MODEL],
+  ['google/gemma-4-31b-it:free', 'google/gemma-4-31b-it:free'],
+  ['google/gemma-3-27b-it:free', 'google/gemma-3-27b-it:free'],
+]);
 
 export const DEFAULT_EXCLUDED_TITLES = ['공동체 고백송', '예배 전 준비 찬양'];
 
@@ -86,15 +95,47 @@ export function sanitizeSharedSettings(raw) {
   };
 }
 
-/** NVIDIA models POST /nvidia may forward to with the shared key. */
-export function allowedNvidiaModels(env = {}) {
-  const models = new Set(
+/** Catalog models POST /openrouter may forward to with the shared key. */
+export function allowedOpenRouterModels() {
+  return new Set(
     RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').map((entry) => entry.model),
   );
-  if (env.NVIDIA_MODEL) models.add(env.NVIDIA_MODEL);
-  return models;
+}
+
+/**
+ * Resolve the shared `/openrouter` catalog request to its exact free upstream
+ * slug. Nemotron keeps its suffix-free client ID for stored-settings
+ * compatibility; the Worker adds `:free` before forwarding it.
+ */
+export function resolveOpenRouterRoute(requested) {
+  const configuredModel = allowedOpenRouterModels().has(requested) ? requested : DEFAULT_NVIDIA_MODEL;
+  return {
+    configuredModel,
+    upstreamModel: OPENROUTER_MODEL_ALIASES.get(configuredModel) || OPENROUTER_NEMOTRON_MODEL,
+  };
 }
 
 export function adminPassword(env = {}) {
   return env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+}
+
+/**
+ * Every model in the system as the {provider, model} pair it is METERED
+ * under, so the 사용량 page can show a card per model even before its first
+ * request. The OpenRouter lane meters the exact upstream :free slug the
+ * Worker forwards to; Hugging Face meters whatever model the proxy is
+ * pinned to (HUGGINGFACE_MODEL env override included).
+ */
+export function usageCatalogModels(env = {}) {
+  const models = [];
+  for (const entry of RECOGNITION_MODEL_CATALOG) {
+    if (entry.engine === 'gemini') {
+      models.push({ provider: 'gemini', model: entry.model });
+    } else if (entry.engine === 'nvidia') {
+      models.push({ provider: 'openrouter', model: resolveOpenRouterRoute(entry.model).upstreamModel });
+    } else if (entry.engine === 'huggingface') {
+      models.push({ provider: 'huggingface', model: env.HUGGINGFACE_MODEL || entry.model });
+    }
+  }
+  return models;
 }

@@ -41,6 +41,8 @@ describe('buildNvidiaBody', () => {
     expect(imagePart?.image_url?.url).toBe(DATA_URL);
     const textPart = body.messages[0].content.find((part) => part.type === 'text');
     expect(textPart?.text).toContain('JSON');
+    expect(textPart?.text).toContain('pageType');
+    expect(textPart?.text).toContain('설교 제목과 본문');
   });
 });
 
@@ -53,6 +55,8 @@ describe('buildNvidiaBatchBody', () => {
     expect(texts.some((text) => text?.includes('imageIndex: 0'))).toBe(true);
     expect(texts.some((text) => text?.includes('imageIndex: 1'))).toBe(true);
     expect(body.messages[0].content.filter((part) => part.type === 'image_url')).toHaveLength(2);
+    expect(texts[0]).toContain('pageType');
+    expect(texts[0]).toContain('non_score 페이지에서는 설교 제목과 본문만');
   });
 
   it('attaches a title hint to its image marker only', () => {
@@ -83,7 +87,7 @@ describe('extractNvidiaText', () => {
 });
 
 describe('recognizeWithNvidia', () => {
-  it('calls the NVIDIA endpoint directly with a bearer key and parses the JSON answer', async () => {
+  it('calls OpenRouter directly with a bearer key and parses the JSON answer', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify(
@@ -101,12 +105,15 @@ describe('recognizeWithNvidia', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const score = await recognizeWithNvidia(DATA_URL, 'nv-key');
+    const score = await recognizeWithNvidia(DATA_URL, 'or-key');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://integrate.api.nvidia.com/v1/chat/completions');
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer nv-key');
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer or-key');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+    });
     expect(score.title).toBe('주 은혜임을');
     expect(score.order).toEqual(['I', 'V1', 'C']);
     // Note-split hyphens are joined by the shared normalizer.
@@ -122,7 +129,7 @@ describe('recognizeWithNvidia', () => {
     await recognizeWithNvidia(DATA_URL, '', undefined, 'https://proxy.example/');
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://proxy.example/nvidia');
+    expect(url).toBe('https://proxy.example/openrouter');
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 

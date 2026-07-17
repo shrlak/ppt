@@ -120,28 +120,24 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
 });
 
-test('admin panel reorders the recognition model priority and persists it', async ({ page }) => {
+test('admin panel lists the complete concurrent recognition model pool', async ({ page }) => {
   await page.goto('./');
   await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
 
   const rows = page.getByTestId('admin-recognition-order').locator('.admin-engine');
-  // Full model catalog listed, benchmark-validated default first.
-  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
-  expect(await rows.count()).toBeGreaterThan(3);
-
-  // Push the top model down one; the order persists across a reload.
-  await page.getByTestId('admin-attempt-down-0').click();
-  await expect(rows.first()).toContainText('Gemini 2.0 Flash');
-  await expect(rows.nth(1)).toContainText('Gemini 2.5 Flash');
-
-  await page.reload();
-  await page.getByTestId('admin-open').click();
-  await expect(rows.first()).toContainText('Gemini 2.0 Flash');
-
-  await page.getByTestId('admin-attempt-reset').click();
-  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
+  await expect(page.getByRole('heading', { name: '가사 인식 동시 실행 모델' })).toBeVisible();
+  await expect(rows).toHaveCount(6);
+  await expect(rows).toContainText([
+    'Gemini 2.5 Flash',
+    'Gemini 2.0 Flash',
+    'NVIDIA Nemotron Nano 12B VL',
+    'OpenRouter Gemma 4 31B',
+    'OpenRouter Gemma 3 27B',
+    'Hugging Face Qwen2-VL 7B',
+  ]);
+  await expect(page.getByTestId('admin-recognition-order').getByRole('button')).toHaveCount(0);
 });
 
 test('admin panel edits the excluded-title list and persists it', async ({ page }) => {

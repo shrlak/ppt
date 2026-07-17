@@ -1,6 +1,6 @@
 // Shared recognition proxy for the lyrics app's score-recognition feature.
 //
-// Holds the site owner's Gemini / NVIDIA / Hugging Face API keys as Worker
+// Holds the site owner's Gemini / Hugging Face / OpenRouter API keys as Worker
 // secrets (never shipped to the browser) and forwards recognition requests
 // to the real provider with the key attached. The client sends the exact
 // same request body it would send directly to the provider — this Worker is
@@ -9,10 +9,10 @@
 //
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
-//   POST /nvidia          -> https://integrate.api.nvidia.com/v1/chat/completions (allowlisted build.nvidia.com models)
+//   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
 //   POST /huggingface     -> https://api-inference.huggingface.co/models/:HUGGINGFACE_MODEL
 //   GET  /usage           -> current per-model usage from the shared proxy
-//   GET  /settings        -> shared recognition settings (model priority, excluded titles)
+//   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
 //
 // See worker/README.md for deployment instructions.
@@ -20,16 +20,15 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   DEFAULT_HUGGINGFACE_MODEL,
-  DEFAULT_NVIDIA_MODEL,
   buildUsageSnapshot,
   mergeUsageRecord,
   sanitizeUsageEvent,
   usageStorageKey,
 } from './usage.js';
-import { adminPassword, allowedNvidiaModels, sanitizeSharedSettings } from './config.js';
+import { adminPassword, resolveOpenRouterRoute, sanitizeSharedSettings, usageCatalogModels } from './config.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
-const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const HUGGINGFACE_ENDPOINT = 'https://api-inference.huggingface.co/models';
 
 // Always allow the production GitHub Pages origin, even if ALLOWED_ORIGINS
@@ -68,7 +67,7 @@ function jsonResponse(obj, status, headers) {
 
 /**
  * Strongly consistent shared state, persisted by a SQLite Durable Object:
- * usage counters plus the shared recognition settings (model priority and
+ * usage counters plus the shared recognition settings (model pool and
  * excluded titles) every device reads.
  */
 export class UsageTracker extends DurableObject {
@@ -118,7 +117,7 @@ async function recordUsage(env, event) {
 async function readUsage(env) {
   const tracker = usageTracker(env);
   if (!tracker) throw new Error('usage tracker is not configured');
-  return buildUsageSnapshot(await tracker.records(), env);
+  return buildUsageSnapshot(await tracker.records(), env, new Date(), usageCatalogModels(env));
 }
 
 function geminiUsageMetadata(responseBody) {
@@ -185,7 +184,7 @@ export default {
       }
     }
 
-    // Shared recognition settings: everyone reads the same model priority
+    // Shared recognition settings: everyone reads the same model pool
     // and excluded-title list; writes require the 관리자 설정 password.
     if (url.pathname === '/settings') {
       const tracker = usageTracker(env);
@@ -252,14 +251,10 @@ export default {
       return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
 
-    if (url.pathname === '/nvidia') {
-      if (!env.NVIDIA_API_KEY) {
-        return jsonResponse({ error: 'NVIDIA_API_KEY not configured on the proxy' }, 500, headers);
-      }
+    if (url.pathname === '/openrouter' || url.pathname === '/nvidia') {
       // The body is OpenAI-compatible JSON. The client picks the model from
-      // the shared priority list, but only allowlisted catalog models (plus
-      // the NVIDIA_MODEL env value) may use the shared key — anything else
-      // falls back to the configured default.
+      // the shared model pool, and the Worker pins it to an allowlisted
+      // OpenRouter :free vision endpoint before attaching the server key.
       let body;
       try {
         body = JSON.parse(await request.text());
@@ -267,25 +262,28 @@ export default {
         return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
       }
       const requested = typeof body?.model === 'string' ? body.model : '';
-      const model = allowedNvidiaModels(env).has(requested)
-        ? requested
-        : env.NVIDIA_MODEL || DEFAULT_NVIDIA_MODEL;
-      body = { ...body, model };
+      const route = resolveOpenRouterRoute(requested);
+      if (!env.OPENROUTER_API_KEY) {
+        return jsonResponse({ error: 'OPENROUTER_API_KEY not configured on the proxy' }, 500, headers);
+      }
+      body = { ...body, model: route.upstreamModel };
       const startedAt = Date.now();
-      const res = await fetch(NVIDIA_ENDPOINT, {
+      const res = await fetch(OPENROUTER_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
+          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          'HTTP-Referer': 'https://shrlak.github.io/ppt/',
+          'X-OpenRouter-Title': 'KCCP PPT Generator',
         },
         body: JSON.stringify(body),
       });
       const resBody = await res.text();
       const wallSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
       await recordUsage(env, {
-        provider: 'nvidia',
-        model,
+        provider: 'openrouter',
+        model: route.upstreamModel,
         success: res.ok,
         wallSeconds,
         ...openAiUsageMetadata(resBody),

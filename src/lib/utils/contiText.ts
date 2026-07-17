@@ -6,12 +6,39 @@ const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:
 const DATE_RE = /\b(\d{1,2})\s*[/.]\s*(\d{1,2})\s*[/.]\s*(\d{2,4})\b/;
 const QUOTED_RE = /[“"]([^“”"]{2,60})[”"]/;
 const SCRIPTURE_RE = /^본문\s*[:：]\s*(.+)$/;
+const SERMON_TITLE_RE = /^(?:설교\s*제목|말씀\s*제목|설교)\s*[:：]\s*(.+)$/;
 const NOTES_RE = /[세셰]션\s*노트/;
 
 function normalizeKey(raw: string): string {
   let key = raw[0].toUpperCase();
   const rest = raw.slice(1).replace('♯', '#').replace('♭', 'b').replace('B', 'b');
   return key + rest;
+}
+
+/**
+ * Read the two Bible-slide fields from any text-bearing non-score page. Unlike
+ * parseCoverText this does not require a song list, so a standalone sermon
+ * information page can still populate the next wizard step.
+ */
+export function parseSermonInfoText(text: string): Pick<ContiInfo, 'sermonTitle' | 'scripture'> {
+  let sermonTitle: string | undefined;
+  let scripture: string | undefined;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const scriptureMatch = line.match(SCRIPTURE_RE);
+    if (scriptureMatch) {
+      scripture ??= scriptureMatch[1].trim();
+      continue;
+    }
+    const titleMatch = line.match(SERMON_TITLE_RE);
+    if (titleMatch) {
+      sermonTitle ??= titleMatch[1].trim().replace(/^[“"]|[”"]$/g, '').trim();
+    }
+  }
+
+  return { sermonTitle, scripture };
 }
 
 /**
@@ -24,8 +51,9 @@ export function parseCoverText(text: string): ContiInfo | null {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
   const songs: ContiSongEntry[] = [];
   let date: string | undefined;
-  let sermonTitle: string | undefined;
-  let scripture: string | undefined;
+  const labeledInfo = parseSermonInfoText(text);
+  let sermonTitle = labeledInfo.sermonTitle;
+  let scripture = labeledInfo.scripture;
 
   for (const line of lines) {
     if (!line) continue;

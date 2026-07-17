@@ -315,6 +315,11 @@ body {
   background: rgba(79, 70, 229, 0.11);
   color: #5145cd;
 }
+
+.admin-provider-badge.provider-openrouter {
+  background: #eef2ff;
+  color: #4338ca;
+}
 .admin-provider-badge.provider-huggingface {
   background: rgba(234, 179, 8, 0.16);
   color: #9a6700;

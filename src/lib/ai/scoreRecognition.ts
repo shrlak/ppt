@@ -26,8 +26,8 @@ function delay(ms: number): Promise<void> {
 
 /**
  * Run an engine call, retrying once after a short pause when the failure is
- * transient (429/408/5xx/network). One retry rescues rate-limit bursts and
- * hiccups without materially delaying the fallback to the next engine.
+ * transient (408/5xx/network). One retry rescues brief provider hiccups while
+ * the rest of the model pool continues independently.
  */
 async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
   try {
@@ -40,24 +40,12 @@ async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Plan which engine+model attempts to run, in order. Lyric passes follow the
- * administrator-configured attempt list exactly (every catalog model in the
- * shared priority order). The quick title pass instead visits each engine
- * once — Gemini on its fast default model — because title identification
- * doesn't need the expensive models.
+ * Return the complete shared model pool. Every recognition phase launches
+ * this entire pool concurrently; array order is display-only and never gates
+ * which provider starts first.
  */
-function planAttempts(settings: AiSettings, lyricPass: boolean): RecognitionAttempt[] {
-  if (lyricPass) return settings.attempts;
-  const seen = new Set<string>();
-  const attempts: RecognitionAttempt[] = [];
-  for (const attempt of settings.attempts) {
-    if (seen.has(attempt.engine)) continue;
-    seen.add(attempt.engine);
-    attempts.push(
-      attempt.engine === 'gemini' ? { engine: 'gemini', model: settings.geminiModel } : attempt,
-    );
-  }
-  return attempts;
+function planAttempts(settings: AiSettings): RecognitionAttempt[] {
+  return settings.attempts;
 }
 
 async function recognizeWithEngine(
@@ -71,8 +59,8 @@ async function recognizeWithEngine(
     return recognizeWithGemini(dataUrl, key, attempt.model, settings.geminiUseSearch, PROXY_URL);
   }
   if (attempt.engine === 'nvidia') {
-    const key = settings.nvidiaApiKey.trim();
-    if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
+    const key = settings.openrouterApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
     return recognizeWithNvidia(dataUrl, key, attempt.model, PROXY_URL);
   }
   if (attempt.engine === 'huggingface') {
@@ -116,8 +104,8 @@ async function recognizeBatchWithEngine(
     );
   }
   if (attempt.engine === 'nvidia') {
-    const key = settings.nvidiaApiKey.trim();
-    if (!key && !PROXY_URL) throw new Error('NVIDIA API 키가 설정되지 않았습니다.');
+    const key = settings.openrouterApiKey.trim();
+    if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
     return recognizeBatchWithNvidia(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
   }
   if (attempt.engine === 'huggingface') {
@@ -131,15 +119,22 @@ async function recognizeBatchWithEngine(
 /** True when the result carries nothing usable at all. */
 function isEmptyScore(score: ParsedScore | undefined): boolean {
   if (!score) return true;
-  return !score.title && !score.key && score.order.length === 0 && score.sections.length === 0;
+  // A confidently classified non-score page is useful even when it contains
+  // neither requested field: the caller must still keep it out of 찬양 가사.
+  if (score.pageType === 'non_score') return false;
+  return (
+    !score.sermonTitle &&
+    !score.scripture &&
+    !score.title &&
+    !score.key &&
+    score.order.length === 0 &&
+    score.sections.length === 0
+  );
 }
 
 /**
- * Recognize a set of score pages as one operation. Each engine uses one
- * multimodal request for the entire set. An engine answer where every page
- * came back completely empty counts as a failure — a well-formed but blank
- * response must fall through to the next engine, not silently produce blank
- * cards.
+ * Recognize a set of score pages as one operation. Every model receives one
+ * multimodal batch request at the same time; blank answers never claim a page.
  */
 export async function recognizeScoreBatch(
   dataUrls: string[],
@@ -148,154 +143,190 @@ export async function recognizeScoreBatch(
   /** Optional per-image title hints (e.g. from the conti cover), advisory only. */
   hints?: (string | undefined)[],
 ): Promise<BatchRecognitionResult> {
-  if (dataUrls.length === 0) return { scores: [], engine: settings.attempts[0]?.engine ?? 'off' };
-  const attempts = planAttempts(settings, mode === 'full');
-  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
-
-  let lastError: Error | null = null;
-  for (const attempt of attempts) {
-    try {
-      const scores = await withTransientRetry(() =>
-        recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints),
-      );
-      if (scores.every((score) => isEmptyScore(score))) {
-        throw new Error('인식 결과가 비어 있습니다.');
-      }
-      return { scores, engine: attempt.engine };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`${attempt.engine} (${attempt.model}) 일괄 인식 실패, 다음 시도:`, lastError.message);
-    }
-  }
-  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints);
 }
 
 /**
- * Run recognition on one score image, walking the administrator-configured
- * attempt list (engine+model pairs) top to bottom until one produces a
- * non-empty result. An empty answer also moves on to the next attempt.
+ * Run every configured model on one score image at the same time and make
+ * them work together: the highest-priority model that produced a usable
+ * answer wins (a failed or empty higher model just yields to the next), and
+ * whatever the winner missed is filled from the other models' answers.
  */
 export async function recognizeScore(dataUrl: string, settings: AiSettings): Promise<RecognitionResult> {
-  const attempts = planAttempts(settings, true);
+  const attempts = planAttempts(settings);
   if (attempts.length === 0) {
     throw new Error('자동 인식이 꺼져 있습니다.');
   }
 
-  let lastError: Error | null = null;
-  for (const attempt of attempts) {
-    try {
-      const score = await withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings));
-      if (isEmptyScore(score)) throw new Error('인식 결과가 비어 있습니다.');
-      return { score, engine: attempt.engine };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`${attempt.engine} (${attempt.model}) 인식 실패, 다음 시도:`, lastError.message);
-    }
-  }
+  return new Promise((resolve, reject) => {
+    // undefined = still running, null = failed, ParsedScore = that model's answer.
+    const answers: (ParsedScore | null | undefined)[] = new Array(attempts.length).fill(undefined);
+    let finished = false;
+    let lastError: Error | null = null;
 
-  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+    const tryFinish = () => {
+      if (finished) return;
+      for (let index = 0; index < attempts.length; index += 1) {
+        const answer = answers[index];
+        if (answer === undefined) return; // a higher-priority model may still answer
+        if (answer && !isEmptyScore(answer)) {
+          const others = answers.filter(
+            (score, other): score is ParsedScore => other !== index && !!score && !isEmptyScore(score),
+          );
+          finished = true;
+          resolve({ score: fillScoreGaps(answer, others), engine: attempts[index].engine });
+          return;
+        }
+      }
+      finished = true;
+      reject(lastError || new Error('모든 인식 엔진이 실패했습니다.'));
+    };
+
+    attempts.forEach((attempt, index) => {
+      void withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings))
+        .then((score) => {
+          answers[index] = score;
+        })
+        .catch((error) => {
+          answers[index] = null;
+          lastError = error instanceof Error ? error : new Error(String(error));
+          console.warn(`${attempt.engine} (${attempt.model}) 동시 인식 실패:`, lastError.message);
+        })
+        .finally(tryFinish);
+    });
+  });
 }
 
 /**
- * Recognize a set of score pages with several models AT ONCE: the top
- * `groupSize` attempts run in parallel, and the answers merge per song —
- * each page takes the highest-priority model's non-empty result, and pages
- * that model missed are filled from the next model's answer. One weak spot
- * in one model no longer decides the whole conti, and the extra models cost
- * no extra wall time because they run simultaneously. Falls through to the
- * next parallel group when an entire group produced nothing.
+ * Merge one page's winning answer with the other models' answers for that
+ * page: whatever the winner missed (title, key, order, sections, sermon
+ * fields) is filled from the next candidate that read it. Candidates whose
+ * page classification contradicts the winner's are skipped — a model that
+ * thinks the page is 악보 must not inject lyrics into a non-score verdict.
+ */
+function fillScoreGaps(winner: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  const merged: ParsedScore = { ...winner, order: [...winner.order], sections: [...winner.sections] };
+  for (const candidate of candidates) {
+    if (merged.pageType && candidate.pageType && candidate.pageType !== merged.pageType) continue;
+    if (!merged.title && candidate.title) merged.title = candidate.title;
+    if (!merged.key && candidate.key) merged.key = candidate.key;
+    if (merged.order.length === 0 && candidate.order.length > 0) merged.order = [...candidate.order];
+    if (merged.sections.length === 0 && candidate.sections.length > 0) {
+      merged.sections = candidate.sections.map((section) => ({ label: section.label, lines: [...section.lines] }));
+    }
+    if (!merged.sermonTitle && candidate.sermonTitle) merged.sermonTitle = candidate.sermonTitle;
+    if (!merged.scripture && candidate.scripture) merged.scripture = candidate.scripture;
+  }
+  return merged;
+}
+
+/**
+ * Start every model together and make them WORK TOGETHER on the answer:
+ *
+ * - Each page's final result comes from the highest-priority (pool-order)
+ *   model that actually read it — a fast-but-weak model can no longer
+ *   displace a stronger model's answer just by finishing first. A page
+ *   finalizes as soon as every higher-priority model has settled, so a
+ *   failed or rate-limited top model never blocks the rest.
+ * - The winning answer is then completed from the other models: a missing
+ *   key, 진행 순서, lyric sections, or sermon field is filled from the next
+ *   model that read it, so one page can be assembled from several models.
+ *
+ * The call resolves once every page is final (or every model has settled);
+ * provider calls still in flight keep running in the background and remain
+ * accounted for by the Worker.
+ */
+function recognizeBatchWithAllModels(
+  dataUrls: string[],
+  settings: AiSettings,
+  mode: BatchRecognitionMode,
+  hints?: (string | undefined)[],
+): Promise<BatchRecognitionResult> {
+  if (dataUrls.length === 0) {
+    return Promise.resolve({ scores: [], engine: settings.attempts[0]?.engine ?? 'off' });
+  }
+  const attempts = planAttempts(settings);
+  if (attempts.length === 0) return Promise.reject(new Error('자동 인식이 꺼져 있습니다.'));
+
+  return new Promise((resolve, reject) => {
+    // undefined = still running, null = failed, array = that model's answers.
+    const answers: (ParsedScore[] | null | undefined)[] = new Array(attempts.length).fill(undefined);
+    let finished = false;
+    let lastError: Error | null = null;
+
+    /** The page's final answer, or undefined while a higher-priority model
+     * that could still claim the page is running (also undefined when every
+     * model settled without reading the page — the caller resolves that). */
+    const finalWinner = (page: number): { score: ParsedScore; attemptIndex: number } | undefined => {
+      for (let index = 0; index < attempts.length; index += 1) {
+        const answer = answers[index];
+        if (answer === undefined) return undefined;
+        if (answer && !isEmptyScore(answer[page])) return { score: answer[page], attemptIndex: index };
+      }
+      return undefined;
+    };
+
+    const tryFinish = () => {
+      if (finished) return;
+      const allSettled = answers.every((answer) => answer !== undefined);
+      const winners = dataUrls.map((_, page) => finalWinner(page));
+      if (!allSettled && winners.some((winner) => winner === undefined)) return;
+      if (winners.every((winner) => winner === undefined)) {
+        finished = true;
+        reject(lastError || new Error('모든 인식 엔진이 실패했습니다.'));
+        return;
+      }
+      const contributions = new Map<number, number>();
+      const scores = winners.map((winner, page) => {
+        if (!winner) return { order: [], sections: [] } as ParsedScore;
+        contributions.set(winner.attemptIndex, (contributions.get(winner.attemptIndex) ?? 0) + 1);
+        const others = answers
+          .map((answer, index) => (index === winner.attemptIndex ? undefined : answer?.[page]))
+          .filter((score): score is ParsedScore => score !== undefined && !isEmptyScore(score));
+        return fillScoreGaps(winner.score, others);
+      });
+      const primary = [...contributions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+      finished = true;
+      resolve({ scores, engine: attempts[primary].engine });
+    };
+
+    attempts.forEach((attempt, index) => {
+      void withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints))
+        .then((scores) => {
+          answers[index] = scores;
+        })
+        .catch((error) => {
+          answers[index] = null;
+          lastError = error instanceof Error ? error : new Error(String(error));
+          console.warn(`${attempt.engine} (${attempt.model}) 동시 일괄 인식 실패:`, lastError.message);
+        })
+        .finally(tryFinish);
+    });
+  });
+}
+
+/**
+ * Compatibility name used by the full-lyrics flow. All models now launch in
+ * one concurrent pool; there are no priority groups.
  */
 export async function recognizeScoreBatchEnsemble(
   dataUrls: string[],
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
-  groupSize = 2,
 ): Promise<BatchRecognitionResult> {
-  if (dataUrls.length === 0) return { scores: [], engine: settings.attempts[0]?.engine ?? 'off' };
-  const attempts = planAttempts(settings, mode === 'full');
-  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
-
-  let lastError: Error | null = null;
-  for (let start = 0; start < attempts.length; start += groupSize) {
-    const group = attempts.slice(start, start + groupSize);
-    const settled = await Promise.allSettled(
-      group.map((attempt) =>
-        withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints)),
-      ),
-    );
-
-    // Merge per song in priority order: first non-empty answer wins.
-    const merged: (ParsedScore | undefined)[] = Array.from({ length: dataUrls.length });
-    const contributions = new Array(group.length).fill(0);
-    settled.forEach((result, attemptIndex) => {
-      if (result.status === 'rejected') {
-        lastError = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
-        console.warn(
-          `${group[attemptIndex].engine} (${group[attemptIndex].model}) 동시 일괄 인식 실패:`,
-          lastError.message,
-        );
-        return;
-      }
-      result.value.forEach((score, songIndex) => {
-        if (merged[songIndex] === undefined && !isEmptyScore(score)) {
-          merged[songIndex] = score;
-          contributions[attemptIndex] += 1;
-        }
-      });
-    });
-
-    if (merged.some((score) => score !== undefined)) {
-      // Report the engine that contributed the most songs.
-      const primary = contributions.indexOf(Math.max(...contributions));
-      return {
-        scores: merged.map((score) => score ?? { order: [], sections: [] }),
-        engine: group[primary >= 0 ? primary : 0].engine,
-      };
-    }
-    console.warn(
-      `동시 일괄 인식 그룹 (${group.map((attempt) => attempt.model).join(', ')}) 전체 실패, 다음 그룹 시도`,
-    );
-  }
-  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints);
 }
 
 /**
- * Recognize one score image by running several models AT ONCE. Used for
- * pages that already failed the batch pass ("if needed"): attempts run in
- * parallel groups of `groupSize` in priority order, and the first non-empty
- * answer wins — a hard page gets multiple strong readers immediately
- * instead of waiting out the ladder one model at a time.
+ * Compatibility name used by the rescue flow. All configured models start
+ * together and cooperate on the answer (see recognizeScore).
  */
 export async function recognizeScoreRaced(
   dataUrl: string,
   settings: AiSettings,
-  groupSize = 3,
 ): Promise<RecognitionResult> {
-  const attempts = planAttempts(settings, true);
-  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
-
-  let lastError: Error | null = null;
-  for (let start = 0; start < attempts.length; start += groupSize) {
-    const group = attempts.slice(start, start + groupSize);
-    try {
-      return await Promise.any(
-        group.map(async (attempt) => {
-          const score = await withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings));
-          if (isEmptyScore(score)) throw new Error('인식 결과가 비어 있습니다.');
-          return { score, engine: attempt.engine };
-        }),
-      );
-    } catch (error) {
-      const causes = error instanceof AggregateError ? error.errors : [error];
-      lastError = causes[0] instanceof Error ? causes[0] : new Error(String(causes[0]));
-      console.warn(
-        `동시 인식 실패 (${group.map((attempt) => attempt.model).join(', ')}), 다음 그룹 시도:`,
-        causes.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join(' / '),
-      );
-    }
-  }
-  throw lastError || new Error('모든 인식 엔진이 실패했습니다.');
+  return recognizeScore(dataUrl, settings);
 }
 
 function hasLyrics(song: Song): boolean {

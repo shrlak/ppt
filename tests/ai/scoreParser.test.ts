@@ -1,5 +1,52 @@
 import { describe, expect, it } from 'vitest';
-import { cleanLyricLine, parseScoreText } from '../../src/lib/ai/scoreParser';
+import {
+  cleanLyricLine,
+  coerceParsedScore,
+  coerceParsedScoreBatch,
+  parseScoreText,
+} from '../../src/lib/ai/scoreParser';
+
+describe('page classification metadata', () => {
+  it('normalizes a non-score page and its sermon fields', () => {
+    expect(
+      coerceParsedScore({
+        pageType: 'non-score',
+        sermonTitle: '  믿음으로 걷기  ',
+        scripture: ' 히브리서 11장 1-3절 ',
+      }),
+    ).toMatchObject({
+      pageType: 'non_score',
+      sermonTitle: '믿음으로 걷기',
+      scripture: '히브리서 11장 1-3절',
+      order: [],
+      sections: [],
+    });
+  });
+
+  it('preserves classification and sermon metadata in the title-only batch pass', () => {
+    const [result] = coerceParsedScoreBatch(
+      {
+        results: [
+          {
+            imageIndex: 0,
+            pageType: 'non_score',
+            sermonTitle: '새 설교',
+            scripture: '요한복음 3:16',
+            sections: [{ label: 'C', lines: ['가사가 아님'] }],
+          },
+        ],
+      },
+      1,
+      'titles',
+    );
+    expect(result).toMatchObject({
+      pageType: 'non_score',
+      sermonTitle: '새 설교',
+      scripture: '요한복음 3:16',
+      sections: [],
+    });
+  });
+});
 
 describe('cleanLyricLine', () => {
   it('joins syllable hyphens (with or without spaces) into natural words', () => {

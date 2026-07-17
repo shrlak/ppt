@@ -73,11 +73,68 @@ describe('parseUsageSnapshot', () => {
     });
   });
 
+  it('accepts OpenRouter free-model usage rows', () => {
+    const snapshot = parseUsageSnapshot({
+      models: [
+        {
+          provider: 'openrouter',
+          model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+          period: 'day',
+          periodKey: '2026-07-15',
+          requests: 2,
+          successfulRequests: 2,
+          failedRequests: 0,
+          promptTokens: 1000,
+          outputTokens: 300,
+          totalTokens: 1300,
+          metric: 'requests',
+          used: 2,
+          limit: 50,
+          estimated: false,
+        },
+      ],
+    });
+
+    expect(snapshot.models[0]).toMatchObject({
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-nano-12b-v2-vl:free',
+      used: 2,
+      limit: 50,
+    });
+  });
+
   it('rejects unknown providers instead of displaying untrusted data', () => {
     expect(() =>
       parseUsageSnapshot({
         models: [{ provider: 'unknown', model: 'x', period: 'day', metric: 'requests' }],
       }),
     ).toThrow(/공급자/);
+  });
+
+  it('keeps zero-usage rows so every system model stays visible', () => {
+    const snapshot = parseUsageSnapshot({
+      models: [
+        {
+          provider: 'openrouter',
+          model: 'google/gemma-3-27b-it:free',
+          period: 'day',
+          periodKey: '2026-07-15',
+          requests: 0,
+          successfulRequests: 0,
+          failedRequests: 0,
+          metric: 'requests',
+          used: 0,
+          limit: 50,
+          estimated: false,
+        },
+      ],
+    });
+
+    expect(snapshot.models[0]).toMatchObject({
+      model: 'google/gemma-3-27b-it:free',
+      requests: 0,
+      used: 0,
+      limit: 50,
+    });
   });
 });

@@ -50,6 +50,16 @@ function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
 }
 
+/** Vision engines may identify a non-score page explicitly or by returning
+ * sermon metadata with no song identity. Either form must stay out of lyrics. */
+function isNonScoreRecognition(score: ParsedScore): boolean {
+  if (score.pageType === 'score') return false;
+  return (
+    score.pageType === 'non_score' ||
+    ((!score.title || !score.title.trim()) && !!(score.sermonTitle?.trim() || score.scripture?.trim()))
+  );
+}
+
 function songFromLibrary(entry: LibraryEntry, pageIndex?: number): Song {
   return {
     id: crypto.randomUUID(),
@@ -84,6 +94,7 @@ interface Props {
 export default function LyricsGenerator({ onSongsChange, onDateDetected, onContiInfoDetected }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [info, setInfo] = useState<ContiInfo | null>(null);
+  const infoRef = useRef<ContiInfo | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [pageImages, setPageImages] = useState<Record<number, string>>({});
   const [parsing, setParsing] = useState(false);
@@ -110,6 +121,27 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
   useEffect(() => {
     pageImagesRef.current = pageImages;
   }, [pageImages]);
+
+  /** Merge metadata found on scanned non-score pages without replacing the
+   * cover's existing values, then re-send the complete info to the Bible step. */
+  const mergeDetectedContiInfo = useCallback(
+    (detected: Pick<ParsedScore, 'sermonTitle' | 'scripture'>) => {
+      const sermonTitle = detected.sermonTitle?.trim();
+      const scripture = detected.scripture?.trim();
+      if (!sermonTitle && !scripture) return;
+
+      const current = infoRef.current ?? { songs: [] };
+      const next: ContiInfo = {
+        ...current,
+        sermonTitle: current.sermonTitle || sermonTitle,
+        scripture: current.scripture || scripture,
+      };
+      infoRef.current = next;
+      setInfo(next);
+      onContiInfoDetected?.(next);
+    },
+    [onContiInfoDetected],
+  );
 
   const zoomSong = zoomSongId != null ? (songs.find((s) => s.id === zoomSongId) ?? null) : null;
 
@@ -246,6 +278,24 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     showToast(`라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
   }, []);
 
+  /** Remove an AI-classified non-score page from the song editor and forward
+   * any sermon metadata found there to the Bible step. */
+  const discardNonScorePage = useCallback(
+    (song: Song, result: ParsedScore) => {
+      if (!isNonScoreRecognition(result)) return false;
+      scanCancelledRef.current.add(song.id);
+      autoAttemptedRef.current.add(song.id);
+      setSongs((list) => list.filter((candidate) => candidate.id !== song.id));
+      setRecog((current) => {
+        const { [song.id]: _discarded, ...rest } = current;
+        return rest;
+      });
+      mergeDetectedContiInfo(result);
+      return true;
+    },
+    [mergeDetectedContiInfo],
+  );
+
   /**
    * Recognize every supplied score as one staged job with a live percentage:
    * 1) render the score pages (real per-page progress);
@@ -316,7 +366,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             return url;
           }),
         );
-        // Shared settings: administrator-configured model priority and the
+        // Shared settings: concurrent model pool and the
         // excluded-title list, synced across every device via the proxy.
         const settings = await getSyncedAiSettings();
 
@@ -341,6 +391,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
           const identity = titleScores[index] ?? { order: [], sections: [] };
+          if (discardNonScorePage(song, identity)) {
+            resolvedIds.add(song.id);
+            return;
+          }
           const recognizedTitle = identity.title?.trim();
           if (recognizedTitle && excludeRecognizedSong(song, recognizedTitle, settings.excludedTitles)) {
             resolvedIds.add(song.id);
@@ -350,6 +404,12 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
           if (hit) {
             resolvedIds.add(song.id);
             fillFromLibrary(song, hit);
+            return;
+          }
+          // Pages that already came from the library still participate in
+          // classification, but never need the expensive full-lyrics pass.
+          if (songHasLyrics(song)) {
+            markDone([song.id], 'library');
             return;
           }
           identityById.set(song.id, identity);
@@ -384,8 +444,9 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
-          // Multiple models read the conti at once; answers merge per song
-          // (highest-priority model wins, gaps filled by the next one).
+          // Every model reads the conti at once and works on the answer
+          // together: the strongest model that read a page wins it, and the
+          // other models fill in whatever fields it missed.
           const lyricResult = await recognizeScoreBatchEnsemble(
             remaining.map(({ image }) => image),
             settings,
@@ -415,6 +476,11 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         for (const { song } of remaining) {
           const score = scoreById.get(song.id);
           if (!score || isCancelled(song.id)) continue;
+          if (discardNonScorePage(song, score)) {
+            scoreById.delete(song.id);
+            resolvedIds.add(song.id);
+            continue;
+          }
           const recognizedTitle = score.title?.trim() || song.title;
           if (recognizedTitle && excludeRecognizedSong(song, recognizedTitle, settings.excludedTitles)) {
             scoreById.delete(song.id);
@@ -462,8 +528,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
               const rescueImage = await doc
                 .renderPage(song.pageIndex as number, RESCUE_RENDER_WIDTH, 'png')
                 .catch(() => image);
-              // Hard page: race several models at once and take the first
-              // non-empty answer instead of walking the ladder serially.
+              // Hard page: race the complete model pool and take the first
+              // non-empty answer.
               const single = await recognizeScoreRaced(rescueImage, settings);
               if (isCancelled(song.id)) return;
               const known = scoreById.get(song.id);
@@ -472,6 +538,10 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
                 title: single.score.title ?? known?.title ?? identity.title,
                 key: single.score.key ?? known?.key ?? identity.key,
               };
+              if (discardNonScorePage(song, merged)) {
+                resolvedIds.add(song.id);
+                return;
+              }
               const mergedTitle = merged.title?.trim();
               if (mergedTitle && excludeRecognizedSong(song, mergedTitle, settings.excludedTitles)) {
                 resolvedIds.add(song.id);
@@ -522,7 +592,7 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         window.clearInterval(ticker);
       }
     },
-    [fillFromLibrary, excludeRecognizedSong],
+    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage],
   );
 
   const handleRecognizeClick = useCallback(
@@ -549,29 +619,22 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
     });
   }, []);
 
-  // Auto-recognize new songs (a score page, no lyrics yet) right after upload.
-  // Songs whose title is already in the library skip the scan entirely and get
-  // their saved lyrics instead. The rest are sent through one batch job rather
-  // than one request per song, each attempted at most once, and scanning is skipped
-  // under browser automation so tests stay deterministic.
+  // Classify every candidate PDF page right after upload — including pages
+  // whose song is already in the library. That first visual pass is what keeps
+  // non-score pages out of 찬양 가사. Only classified score pages that still
+  // lack lyrics continue into the full pass. Each page is attempted once, and
+  // scanning is skipped under browser automation so tests stay deterministic.
   useEffect(() => {
     const pending = songs.filter(
-      (s) => s.pageIndex != null && !songHasLyrics(s) && !autoAttemptedRef.current.has(s.id),
+      (s) => s.pageIndex != null && !autoAttemptedRef.current.has(s.id),
     );
     if (pending.length === 0) return;
 
-    const toScan: Song[] = [];
-    for (const s of pending) {
-      const known = s.title.trim() && !/^새 찬양/.test(s.title) ? findEntry(library, s.title) : undefined;
-      if (known) fillFromLibrary(s, known);
-      else toScan.push(s);
-    }
-
     const isAutomated = typeof navigator !== 'undefined' && navigator.webdriver;
     if (isAutomated || !docRef.current) return;
-    for (const s of toScan) autoAttemptedRef.current.add(s.id);
-    void recognizeSongsBatch(toScan);
-  }, [songs, library, recognizeSongsBatch, fillFromLibrary]);
+    for (const song of pending) autoAttemptedRef.current.add(song.id);
+    void recognizeSongsBatch(pending);
+  }, [songs, recognizeSongsBatch]);
 
   useEffect(() => {
     onSongsChange(songs);
@@ -684,7 +747,15 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
         );
       }
 
-      setInfo(hasCover ? parsed.info : null);
+      const hasDetectedInfo = !!(
+        parsed.info.date ||
+        parsed.info.sermonTitle ||
+        parsed.info.scripture ||
+        parsed.info.songs.length > 0
+      );
+      const initialInfo = hasDetectedInfo ? parsed.info : null;
+      infoRef.current = initialInfo;
+      setInfo(initialInfo);
       setSongs(kept);
       setEdited(false);
       setPageImages({});
@@ -793,8 +864,8 @@ export default function LyricsGenerator({ onSongsChange, onDateDetected, onConti
             <>
               <p className="dropzone-title">📄 찬양 콘티 PDF를 여기에 끌어다 놓거나 클릭하세요</p>
               <p className="dropzone-sub">
-                표지의 날짜·설교 제목·곡 목록(키)을 자동으로 인식하고, 저장된 곡은 가사까지
-                채워 드립니다.
+                악보 페이지에서만 찬양 가사를 읽고, 악보가 없는 페이지에서는 설교 제목·본문을
+                찾아 자동으로 채워 드립니다.
               </p>
             </>
           )}

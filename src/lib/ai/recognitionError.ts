@@ -1,6 +1,6 @@
 // Error type shared by the recognition engines so the orchestrator can tell
-// transient failures (worth one quick retry) from permanent ones (move on to
-// the next engine immediately).
+// transient failures (worth one quick retry) from permanent ones (let the
+// other concurrently running models carry the request).
 
 /** An engine call that failed with a known HTTP status. */
 export class RecognitionError extends Error {
@@ -20,9 +20,8 @@ export class RecognitionError extends Error {
  *
  * 429 is deliberately NOT transient: Gemini free-tier rate limits ask for
  * 15-50s waits (and exhausted daily/zero quotas never recover), so a quick
- * retry of the same model is wasted — the multi-model attempt ladder IS the
- * retry, and falling to the next model immediately is both faster and more
- * likely to succeed.
+ * retry of the same model is wasted — the other models are already running
+ * concurrently and are more likely to succeed first.
  */
 export function isTransientRecognitionError(error: unknown): boolean {
   if (error instanceof RecognitionError && error.status != null) {

@@ -1,4 +1,4 @@
-// Standalone usage page: shows the shared Gemini/NVIDIA/Hugging Face API
+// Standalone usage page: shows the shared Gemini/OpenRouter/Hugging Face API
 // usage, separated from AdminPanel so anyone can check it without the admin
 // password.
 import { useEffect, useState } from 'react';
@@ -13,6 +13,7 @@ const NUMBER_FORMAT = new Intl.NumberFormat('ko-KR');
 
 const PROVIDER_NAMES: Record<string, string> = {
   gemini: 'Gemini',
+  openrouter: 'OpenRouter',
   nvidia: 'NVIDIA',
   huggingface: 'Hugging Face',
 };
@@ -33,7 +34,12 @@ function ModelUsageCard({ usage }: { usage: ModelUsage }) {
   const percent = usagePercent(usage);
   const level = percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'normal';
   const providerName = PROVIDER_NAMES[usage.provider] ?? usage.provider;
-  const resetLabel = usage.period === 'day' ? '매일 자정(미 서부) 초기화' : '매월 초기화';
+  const resetLabel =
+    usage.period === 'day'
+      ? usage.provider === 'gemini'
+        ? '매일 자정(미 서부) 초기화'
+        : '매일 초기화'
+      : '매월 초기화';
   const details =
     usage.provider === 'huggingface'
       ? `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 계산 ${usage.computeSeconds.toFixed(1)}초`
@@ -97,8 +103,8 @@ export default function UsagePanel({ onClose }: Props) {
           <div>
             <h4>무료 API 사용량</h4>
             <p>
-              가사 인식은 Gemini를 우선 사용하고, 토큰·한도가 소진되면 NVIDIA → Hugging Face 순으로
-              자동 전환됩니다. 아래는 공유 키를 사용하는 모든 브라우저의 모델별 사용량입니다.
+              가사 인식 때 Gemini·OpenRouter·Hugging Face 모델이 모두 동시에 실행됩니다. 아래는 공유
+              키를 사용하는 모든 브라우저의 모델별 사용량입니다.
             </p>
           </div>
           <button
@@ -124,8 +130,7 @@ export default function UsagePanel({ onClose }: Props) {
               ))}
             </div>
             <p className="admin-usage-note">
-              Gemini 막대는 AI Studio의 일일 요청 한도 기준입니다. NVIDIA 막대는 build.nvidia.com
-              무료 크레딧(요청 1회 = 1크레딧) 기준입니다. Hugging Face 막대는 응답 계산 시간과
+              Gemini와 OpenRouter 막대는 일일 요청 한도 기준입니다. Hugging Face 막대는 응답 계산 시간과
               설정 단가로 추정하며, 최종 청구 내역은 공급자 대시보드가 기준입니다.
             </p>
           </>

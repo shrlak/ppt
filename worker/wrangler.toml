@@ -9,17 +9,15 @@ compatibility_date = "2025-01-01"
 [vars]
 ALLOWED_ORIGINS = "https://shrlak.github.io"
 # Dashboard reference limits. Gemini quotas vary per project; update this to
-# the RPD value shown in AI Studio. NVIDIA (build.nvidia.com) grants free API
-# credits where one request costs one credit — set the limit to your remaining
-# credits to pace usage. Hugging Face currently grants free users $0.10/month,
-# while hf-inference cost is estimated from compute time.
+# the RPD value shown in AI Studio. Hugging Face currently grants free users
+# $0.10/month, while hf-inference cost is estimated from compute time.
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_DAILY_REQUEST_LIMIT = "250"
-# Fallback vision model for POST /nvidia when the client doesn't request an
-# allowlisted https://build.nvidia.com/models model (clients normally pick
-# from the shared priority list; see src/config.js for the allowlist).
-NVIDIA_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
-NVIDIA_MONTHLY_REQUEST_LIMIT = "1000"
+# OpenRouter's free-model allowance is shared across all :free models. Keep
+# this at 50 for accounts that have not purchased credits; set it to 1000
+# after the account has purchased at least $10 in credits.
+OPENROUTER_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free"
+OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
 HUGGINGFACE_USD_PER_SECOND = "0.00012"
 
@@ -33,8 +31,8 @@ new_sqlite_classes = ["UsageTracker"]
 
 # API keys are NOT set here (this file is committed to git). Set them with:
 #   npx wrangler secret put GEMINI_API_KEY
-#   npx wrangler secret put NVIDIA_API_KEY
 #   npx wrangler secret put HUGGINGFACE_API_KEY
+#   npx wrangler secret put OPENROUTER_API_KEY
 # POST /settings (shared recognition settings) is guarded by the 관리자 설정
 # password. It defaults to the app's built-in admin password; override with:
 #   npx wrangler secret put ADMIN_PASSWORD

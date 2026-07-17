@@ -54,6 +54,9 @@ describe('Hugging Face batch recognition', () => {
       'FIRST',
       'SECOND',
     ]);
+    const prompt = payload.inputs[0].content.find((part) => part.type === 'text') as { text?: string };
+    expect(prompt.text).toContain('pageType');
+    expect(prompt.text).toContain('non_score 페이지에서는 설교 제목과 본문만');
   });
 
   it('restores results to image order and keeps title mode lyric-free', () => {

@@ -10,17 +10,18 @@ import {
   sanitizeSharedSettings,
 } from '../../src/lib/ai/aiSettings';
 import {
+  OPENROUTER_NEMOTRON_MODEL,
   RECOGNITION_MODEL_CATALOG as WORKER_CATALOG,
   DEFAULT_EXCLUDED_TITLES as WORKER_EXCLUDED,
+  resolveOpenRouterRoute,
   sanitizeSharedSettings as workerSanitize,
 } from '../../worker/src/config.js';
 
 describe('recognition model catalog', () => {
-  it('has unique engine+model entries and leads with the benchmark-validated default', () => {
+  it('has a unique, stable concurrent model catalog', () => {
     const keys = RECOGNITION_MODEL_CATALOG.map(attemptKey);
     expect(new Set(keys).size).toBe(keys.length);
-    // Flash first: 97%+ on the 50-song benchmark, and free keys have no
-    // 2.5 Pro quota, so Pro must not be the default first attempt.
+    // Stable display order starts with the benchmark-validated Flash model.
     expect(RECOGNITION_MODEL_CATALOG[0]).toMatchObject({ engine: 'gemini', model: 'gemini-2.5-flash' });
     // Multiple providers and multiple models per provider are available.
     expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'gemini').length).toBeGreaterThan(1);
@@ -31,12 +32,27 @@ describe('recognition model catalog', () => {
     expect(RECOGNITION_MODEL_CATALOG.map(({ engine, model }) => ({ engine, model }))).toEqual(WORKER_CATALOG);
     expect(DEFAULT_EXCLUDED_TITLES).toEqual(WORKER_EXCLUDED);
   });
+
+  it('pins every OpenRouter fallback to an allowlisted free vision model', () => {
+    expect(resolveOpenRouterRoute('nvidia/nemotron-nano-12b-v2-vl')).toEqual({
+      configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
+      upstreamModel: OPENROUTER_NEMOTRON_MODEL,
+    });
+    expect(resolveOpenRouterRoute('google/gemma-4-31b-it:free')).toEqual({
+      configuredModel: 'google/gemma-4-31b-it:free',
+      upstreamModel: 'google/gemma-4-31b-it:free',
+    });
+    expect(resolveOpenRouterRoute('paid/or-made-up-model')).toEqual({
+      configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
+      upstreamModel: OPENROUTER_NEMOTRON_MODEL,
+    });
+  });
 });
 
 describe('sanitizeAttemptOrder', () => {
   it('keeps a valid custom order and appends the missing catalog models', () => {
     const custom = [
-      { engine: 'nvidia', model: 'google/gemma-3-27b-it' },
+      { engine: 'nvidia', model: 'google/gemma-3-27b-it:free' },
       { engine: 'gemini', model: 'gemini-2.5-flash' },
     ];
     const order = sanitizeAttemptOrder(custom);
@@ -49,9 +65,10 @@ describe('sanitizeAttemptOrder', () => {
     const order = sanitizeAttemptOrder([
       { engine: 'gemini', model: 'made-up-model' },
       { engine: 'gemini', model: 'gemini-2.5-pro' },
-      { engine: 'gemini', model: 'gemini-2.5-pro' },
+      { engine: 'gemini', model: 'gemini-2.0-flash' },
+      { engine: 'gemini', model: 'gemini-2.0-flash' },
     ]);
-    expect(order[0]).toEqual({ engine: 'gemini', model: 'gemini-2.5-pro' });
+    expect(order[0]).toEqual({ engine: 'gemini', model: 'gemini-2.0-flash' });
     expect(order).toHaveLength(DEFAULT_ATTEMPT_ORDER.length);
   });
 
@@ -89,7 +106,7 @@ describe('sanitizeExcludedTitles', () => {
 describe('shared settings sanitizers (client vs proxy)', () => {
   it('produce identical results for the same raw payload', () => {
     const raw = {
-      attempts: [{ engine: 'nvidia', model: 'google/gemma-3-27b-it' }, 'gemini', { engine: 'x', model: 'y' }],
+      attempts: [{ engine: 'nvidia', model: 'google/gemma-3-27b-it:free' }, 'gemini', { engine: 'x', model: 'y' }],
       excludedTitles: [' 공동체 고백송 ', 42, '준비 찬양'],
     };
     expect(sanitizeSharedSettings(raw)).toEqual(workerSanitize(raw));

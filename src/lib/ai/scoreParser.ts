@@ -8,6 +8,12 @@ import type { Section } from '../utils/types';
 import { normalizeToken, parseOrder } from '../utils/orderParser';
 
 export interface ParsedScore {
+  /** Visual page classification performed before lyric extraction. */
+  pageType?: 'score' | 'non_score';
+  /** Sermon title read from a page without sheet music. */
+  sermonTitle?: string;
+  /** Scripture reference (본문) read from a page without sheet music. */
+  scripture?: string;
   title?: string;
   key?: string;
   /** Normalized play-order tokens, e.g. ["I","V1","V2","PC","C","C"] */
@@ -25,7 +31,7 @@ interface SectionLike {
 
 /**
  * Coerce a model's parsed JSON payload into a ParsedScore, defensively. All
- * vision engines (Gemini, NVIDIA, Hugging Face) answer with the same shape,
+ * vision engines (Gemini, OpenRouter, Hugging Face) answer with the same shape,
  * so they share this one normalizer: labels are canonicalized (후렴→C, …) to
  * line up with the order tokens the slide planner matches against, and lyric
  * lines get their note-split hyphens joined back into words.
@@ -33,6 +39,17 @@ interface SectionLike {
 export function coerceParsedScore(payload: unknown): ParsedScore {
   const obj = (payload ?? {}) as Record<string, unknown>;
 
+  const rawPageType = typeof obj.pageType === 'string' ? obj.pageType.trim().toLowerCase() : '';
+  const pageType =
+    rawPageType === 'score' || rawPageType === 'music' || rawPageType === 'music_score'
+      ? 'score'
+      : rawPageType === 'non_score' || rawPageType === 'non-score' || rawPageType === 'info'
+        ? 'non_score'
+        : undefined;
+  const sermonTitle =
+    typeof obj.sermonTitle === 'string' && obj.sermonTitle.trim() ? obj.sermonTitle.trim() : undefined;
+  const scripture =
+    typeof obj.scripture === 'string' && obj.scripture.trim() ? obj.scripture.trim() : undefined;
   const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
   const key = typeof obj.key === 'string' && obj.key.trim() ? obj.key.trim() : undefined;
 
@@ -53,7 +70,7 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
     sections.push({ label, lines });
   }
 
-  return { title, key, order, sections };
+  return { pageType, sermonTitle, scripture, title, key, order, sections };
 }
 
 /**
@@ -76,7 +93,17 @@ export function coerceParsedScoreBatch(
     if (imageIndex < 0 || imageIndex >= imageCount) return;
     const score = coerceParsedScore(record);
     results[imageIndex] =
-      mode === 'titles' ? { title: score.title, key: score.key, order: [], sections: [] } : score;
+      mode === 'titles'
+        ? {
+            pageType: score.pageType,
+            sermonTitle: score.sermonTitle,
+            scripture: score.scripture,
+            title: score.title,
+            key: score.key,
+            order: [],
+            sections: [],
+          }
+        : score;
   });
   return results;
 }

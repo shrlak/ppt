@@ -1,15 +1,16 @@
 // Pure usage-metering helpers shared by the Worker and its unit tests.
-// Gemini's free tier is request-limited per model/project/day, NVIDIA's API
-// catalog (build.nvidia.com) grants a pool of free credits where one request
-// costs one credit, and Hugging Face's included Inference Providers allowance
-// is a monthly dollar credit. Provider dashboards remain authoritative; this
+// Gemini and OpenRouter free tiers are request-limited per day, while Hugging
+// Face's included Inference Providers allowance is a monthly dollar credit.
+// Provider dashboards remain authoritative; this
 // module maintains the app's own counter because none of these APIs exposes a
 // portable "remaining credit" API.
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
+export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
 export const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT = 250;
+export const DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT = 50;
 // build.nvidia.com grants free API credits (1 credit = 1 request). The pool
 // is per-account rather than per-month; the monthly bar is a pacing guide.
 export const DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT = 1000;
@@ -18,10 +19,10 @@ export const DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD = 0.1;
 // default mirrors the public pricing example and is deliberately configurable.
 export const DEFAULT_HUGGINGFACE_USD_PER_SECOND = 0.00012;
 
-const PROVIDERS = new Set(['gemini', 'nvidia', 'huggingface']);
+const PROVIDERS = new Set(['gemini', 'openrouter', 'nvidia', 'huggingface']);
 
-/** Display/sort order of providers, matching the recognition priority. */
-const PROVIDER_RANK = { gemini: 0, nvidia: 1, huggingface: 2 };
+/** Stable display/sort order for the usage dashboard. */
+const PROVIDER_RANK = { gemini: 0, openrouter: 1, huggingface: 2, nvidia: 3 };
 
 function finiteNonNegative(value, fallback = 0) {
   const number = Number(value);
@@ -46,6 +47,12 @@ export function pacificDateKey(value = new Date()) {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+/** Calendar date in UTC, used for OpenRouter's daily free-model allowance. */
+export function utcDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toISOString().slice(0, 10);
+}
+
 /** Hugging Face's included credit is monthly, so group it by UTC month. */
 export function utcMonthKey(value = new Date()) {
   const date = value instanceof Date ? value : new Date(value);
@@ -55,6 +62,9 @@ export function utcMonthKey(value = new Date()) {
 export function usagePeriod(provider, value = new Date()) {
   if (provider === 'gemini') {
     return { period: 'day', periodKey: pacificDateKey(value) };
+  }
+  if (provider === 'openrouter') {
+    return { period: 'day', periodKey: utcDateKey(value) };
   }
   // NVIDIA credits and Hugging Face credit are both tracked per UTC month.
   return { period: 'month', periodKey: utcMonthKey(value) };
@@ -137,8 +147,15 @@ function emptyRecord(provider, model, now) {
   };
 }
 
-/** Convert current-period records into the browser-facing, model-level view. */
-export function buildUsageSnapshot(records, env = {}, now = new Date()) {
+/**
+ * Convert current-period records into the browser-facing, model-level view.
+ *
+ * `catalogModels` ({provider, model} pairs) lists every model the system can
+ * use; each one gets a card even before its first recorded request, so the
+ * 사용량 page always shows the complete model pool. Without it (older
+ * callers, tests) only the per-provider default models are guaranteed rows.
+ */
+export function buildUsageSnapshot(records, env = {}, now = new Date(), catalogModels = null) {
   const geminiLimit = positiveNumber(
     env.GEMINI_DAILY_REQUEST_LIMIT,
     DEFAULT_GEMINI_DAILY_REQUEST_LIMIT,
@@ -146,6 +163,10 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
   const nvidiaLimit = positiveNumber(
     env.NVIDIA_MONTHLY_REQUEST_LIMIT,
     DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT,
+  );
+  const openRouterLimit = positiveNumber(
+    env.OPENROUTER_DAILY_REQUEST_LIMIT,
+    DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT,
   );
   const huggingFaceLimit = positiveNumber(
     env.HUGGINGFACE_MONTHLY_CREDIT_USD,
@@ -155,11 +176,20 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
     env.HUGGINGFACE_USD_PER_SECOND,
     DEFAULT_HUGGINGFACE_USD_PER_SECOND,
   );
-  const defaults = [
-    emptyRecord('gemini', env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL, now),
-    emptyRecord('nvidia', env.NVIDIA_MODEL || DEFAULT_NVIDIA_MODEL, now),
-    emptyRecord('huggingface', env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL, now),
-  ];
+  const defaultPairs = [
+    ...(Array.isArray(catalogModels) ? catalogModels : []),
+    { provider: 'gemini', model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL },
+    { provider: 'openrouter', model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL },
+    { provider: 'huggingface', model: env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL },
+  ].filter((pair) => pair && PROVIDERS.has(pair.provider) && typeof pair.model === 'string' && pair.model);
+  const defaults = [];
+  const seenPairs = new Set();
+  for (const pair of defaultPairs) {
+    const key = `${pair.provider}:${pair.model}`;
+    if (seenPairs.has(key)) continue;
+    seenPairs.add(key);
+    defaults.push(emptyRecord(pair.provider, pair.model, now));
+  }
   const current = Array.isArray(records)
     ? records.filter((record) => {
         if (!record || !PROVIDERS.has(record.provider)) return false;
@@ -193,6 +223,15 @@ export function buildUsageSnapshot(records, env = {}, now = new Date()) {
           metric: 'requests',
           used: requests,
           limit: geminiLimit,
+          estimated: false,
+        };
+      }
+      if (record.provider === 'openrouter') {
+        return {
+          ...common,
+          metric: 'requests',
+          used: requests,
+          limit: openRouterLimit,
           estimated: false,
         };
       }
