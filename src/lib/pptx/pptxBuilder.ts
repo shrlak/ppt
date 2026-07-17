@@ -79,12 +79,6 @@ export function suggestFileName(date?: string, today = new Date()): string {
   return `${month}${day}.pptx`;
 }
 
-/** Round a DrawingML font size (in 1/100 pt) to a clean value. */
-function shrinkSize(baseSz: number, fitChars: number, actualChars: number, minSz: number): number {
-  if (actualChars <= fitChars) return baseSz;
-  return Math.max(minSz, Math.round((baseSz * fitChars) / actualChars / 100) * 100);
-}
-
 function setTextOfFirstRun(xml: string, from: number, text: string): string {
   const open = xml.indexOf('<a:t>', from);
   const close = xml.indexOf('</a:t>', open);
@@ -94,12 +88,11 @@ function setTextOfFirstRun(xml: string, from: number, text: string): string {
   return xml.slice(0, open + 5) + text + xml.slice(close);
 }
 
-/** Build one title slide from the template title slide (slide1). */
+/** Build one title slide from the template title slide (slide1). The
+ * template's own font size (sz="5000") is left untouched — every title
+ * slide renders at the same size, regardless of how long the title is. */
 function buildTitleSlide(titleTpl: string, title: string): string {
-  const sz = shrinkSize(5000, 12, title.length, 2800);
-  let xml = titleTpl.replace(/sz="5000"/g, `sz="${sz}"`);
-  xml = setTextOfFirstRun(xml, 0, xmlEscape(title));
-  return xml;
+  return setTextOfFirstRun(titleTpl, 0, xmlEscape(title));
 }
 
 /** Build one lyrics slide from the template lyrics slide (slide2). */
@@ -117,11 +110,12 @@ function buildLyricsSlide(lyricsTpl: string, title: string, lines: string[]): st
   }
   const paraTpl = body.slice(firstP, body.indexOf('</a:p>', firstP) + '</a:p>'.length);
 
-  const maxLen = Math.max(...lines.map((l) => l.length), 1);
-  const sz = shrinkSize(4100, 16, maxLen, 2000);
+  // Every lyrics slide keeps the template's own font size (sz="4100") —
+  // never shrunk to fit longer lines — so the text size matches across
+  // every 찬양 가사 slide regardless of how much a given slide holds.
   const paragraphs = lines
     .map((line) => {
-      let p = paraTpl.replace(/sz="\d+"/g, `sz="${sz}"`);
+      let p = paraTpl;
       // 1.25 line spacing between lyric lines (template ships with 1.15).
       p = p.replace(/<a:lnSpc><a:spcPct val="\d+"\/><\/a:lnSpc>/g, '<a:lnSpc><a:spcPct val="125000"/></a:lnSpc>');
       p = setTextOfFirstRun(p, 0, xmlEscape(line));

@@ -1,9 +1,11 @@
 // Left-hand slide list for the 편집기 (PPT editor) view — a PowerPoint-style
 // slide pane showing a real visual thumbnail of every slide in final deck
-// order (from pptxRenderer.ts), not just a text label. 찬양/광고 rows are
-// clickable and scroll the right-hand editor to that exact slide; the rest
-// (front/prayer/bible/sermon/back) are informational, since they come from
-// fixed templates or other wizard steps rather than being edited here.
+// order (from pptxRenderer.ts), not just a text label. 찬양/말씀/광고 rows are
+// clickable and scroll the right-hand editor to that exact section; the rest
+// (front/prayer/sermon/back) are informational, since they come from fixed
+// templates or other wizard steps rather than being edited here. A toolbar
+// above the list lets the whole deck be downloaded or saved to the 라이브러리
+// without leaving this view.
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { RenderedSlide } from '../lib/pptx/pptxRenderer';
 import SlideThumbnail from './SlideThumbnail';
@@ -20,6 +22,8 @@ const KIND_ICON: Record<DeckOverviewItem['kind'], string> = {
   back: '🖼',
 };
 
+const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set(['lyrics-title', 'lyrics', 'bible', 'announcement']);
+
 const THUMB_WIDTH = 248;
 
 interface Props {
@@ -28,20 +32,59 @@ interface Props {
   loading: boolean;
   error: string | null;
   onSelectSong: (songId: string) => void;
+  onSelectBible: () => void;
   onSelectAnnouncement: () => void;
+  onDownload: () => void;
+  onSaveToLibrary: () => void;
+  downloading: boolean;
+  savingToLibrary: boolean;
 }
 
-export default function SlideOverviewList({ overview, slides, loading, error, onSelectSong, onSelectAnnouncement }: Props) {
+export default function SlideOverviewList({
+  overview,
+  slides,
+  loading,
+  error,
+  onSelectSong,
+  onSelectBible,
+  onSelectAnnouncement,
+  onDownload,
+  onSaveToLibrary,
+  downloading,
+  savingToLibrary,
+}: Props) {
   return (
     <aside className="slide-overview" data-testid="slide-overview">
-      <h2 className="slide-overview-title">슬라이드{slides ? ` (${slides.length})` : ''}</h2>
+      <div className="slide-overview-header">
+        <h2 className="slide-overview-title">슬라이드{slides ? ` (${slides.length})` : ''}</h2>
+        <div className="slide-overview-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-testid="editor-generate-pptx"
+            disabled={downloading}
+            onClick={onDownload}
+          >
+            {downloading ? '생성 중…' : '⬇ 다운로드'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            data-testid="editor-save-to-library"
+            disabled={savingToLibrary}
+            onClick={onSaveToLibrary}
+          >
+            {savingToLibrary ? '저장 중…' : '📚 저장'}
+          </button>
+        </div>
+      </div>
       {error && <p className="banner banner-warn slide-overview-error">{error}</p>}
       {overview.length === 0 && !loading ? (
         <p className="empty-hint">콘티나 광고를 입력하면 여기에 슬라이드 목록이 표시됩니다.</p>
       ) : (
         <ol className="slide-overview-list">
           {overview.map((item, index) => {
-            const clickable = item.kind === 'lyrics-title' || item.kind === 'lyrics' || item.kind === 'announcement';
+            const clickable = CLICKABLE_KINDS.has(item.kind);
             const body = (
               <>
                 <SlideThumbnail slide={slides?.[index]} width={THUMB_WIDTH} />
@@ -66,9 +109,11 @@ export default function SlideOverviewList({ overview, slides, loading, error, on
                 {clickable ? (
                   <button
                     type="button"
-                    onClick={() =>
-                      item.kind === 'announcement' ? onSelectAnnouncement() : onSelectSong(item.songId!)
-                    }
+                    onClick={() => {
+                      if (item.kind === 'announcement') onSelectAnnouncement();
+                      else if (item.kind === 'bible') onSelectBible();
+                      else onSelectSong(item.songId!);
+                    }}
                   >
                     {body}
                   </button>

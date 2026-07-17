@@ -145,10 +145,27 @@ body {
   box-shadow: var(--shadow-sm);
   padding: 18px;
 }
-.slide-overview-title {
+.slide-overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 12px;
+}
+.slide-overview-title {
+  margin: 0;
   font-size: 1rem;
   font-weight: 650;
+  white-space: nowrap;
+}
+.slide-overview-actions {
+  display: flex;
+  gap: 6px;
+}
+.slide-overview-actions .btn {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 .slide-overview-list {
   list-style: none;

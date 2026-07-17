@@ -112,6 +112,42 @@ describe('buildPptx', () => {
   it('rejects an empty song list', async () => {
     await expect(buildPptx(template, [])).rejects.toThrow();
   });
+
+  it('never shrinks lyric font size for a long line — every 찬양 가사 slide keeps the template size', async () => {
+    const longLineSong: Song = {
+      id: 'c',
+      title: '긴 줄 찬양',
+      sections: [
+        { label: 'V1', lines: ['이것은 매우 매우 매우 긴 가사 줄로서 열여섯 글자를 훌쩍 넘습니다'] },
+        { label: 'C', lines: ['짧은 줄'] },
+      ],
+      order: ['V1', 'C'],
+      linesPerSlide: 4,
+    };
+    const out = await buildPptx(template, [longLineSong]);
+    const zip = await JSZip.loadAsync(out);
+    // title, V1 (long line), C (short line).
+    const longLineSlide = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    const shortLineSlide = await zip.file('ppt/slides/slide3.xml')!.async('string');
+    // The old length-based shrink would have produced sz="2000" here.
+    expect(longLineSlide).not.toContain('sz="2000"');
+    expect(longLineSlide).toContain('sz="4100"');
+    expect(shortLineSlide).toContain('sz="4100"');
+  });
+
+  it('never shrinks the title font size for a long song title', async () => {
+    const longTitleSong: Song = {
+      ...songB,
+      id: 'd',
+      title: '아주 길고 긴 제목의 찬양 예시입니다 정말로 깁니다',
+    };
+    const out = await buildPptx(template, [longTitleSong]);
+    const zip = await JSZip.loadAsync(out);
+    const titleSlide = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    // The old length-based shrink would have dropped this toward sz="2800".
+    expect(titleSlide).not.toContain('sz="2800"');
+    expect(titleSlide).toContain('sz="5000"');
+  });
 });
 
 describe('suggestFileName', () => {
