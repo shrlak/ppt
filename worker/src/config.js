@@ -13,10 +13,15 @@ import { DEFAULT_NVIDIA_MODEL } from './usage.js';
 /** The OpenRouter free variant used for the existing Nemotron catalog slot. */
 export const OPENROUTER_NEMOTRON_MODEL = `${DEFAULT_NVIDIA_MODEL}:free`;
 
+// Order is priority order (earlier entries win a page when several models
+// answer it — see fillScoreGaps in src/lib/ai/scoreRecognition.ts). Gemini
+// 2.5 Flash and Nemotron Nano are the two PRIMARY models; everything after
+// them is a supporting/assistant model that only fills gaps the primary
+// pair's answers left. Mirrors src/lib/ai/aiSettings.ts exactly.
 export const RECOGNITION_MODEL_CATALOG = [
   { engine: 'gemini', model: 'gemini-2.5-flash' },
-  { engine: 'gemini', model: 'gemini-2.0-flash' },
   { engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' },
+  { engine: 'gemini', model: 'gemini-2.0-flash' },
   { engine: 'nvidia', model: 'google/gemma-4-31b-it:free' },
   { engine: 'nvidia', model: 'google/gemma-3-27b-it:free' },
   { engine: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' },
