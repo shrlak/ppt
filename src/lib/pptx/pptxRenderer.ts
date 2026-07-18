@@ -10,6 +10,16 @@
 // production dependency tree sight-unseen. A generic renderer only needs
 // enough of DrawingML to cover text boxes and pictures, which is what every
 // slide this app produces (and most uploaded sermon decks) actually use.
+//
+// A slide built from scratch (this app's own templates, all Google-Slides
+// exports) bakes an explicit position/size/font onto every shape. A slide
+// from a real PowerPoint deck (an admin-uploaded Front/Back replacement)
+// commonly does neither: its title/content text is a PLACEHOLDER that only
+// says "I'm the title" and inherits its actual position, size, and font from
+// the slide's layout (and the layout in turn from the master) — exactly how
+// PowerPoint itself composites master → layout → slide. Skipping that
+// inheritance is what made such decks render squished/mispositioned, so
+// readSpTreeShapes/readTextShape below resolve it explicitly.
 import JSZip from 'jszip';
 
 const EMU_PER_POINT = 12700;
@@ -20,6 +30,8 @@ export interface RenderedRun {
   bold?: boolean;
   italic?: boolean;
   color?: string; // CSS color, e.g. "#112233"
+  /** Resolved from the run's own typeface, or the theme's major/minor Latin font for a +mj-lt/+mn-lt reference. */
+  fontFamily?: string;
 }
 
 export interface RenderedParagraph {
@@ -87,8 +99,9 @@ function parseXml(text: string): Document {
 }
 
 /** A part's own Target is relative to its parent directory; every part this
- * reader visits (slides, slideLayouts, slideMasters, media) lives exactly
- * one directory below `ppt/`, so a single `../` strip always resolves it. */
+ * reader visits (slides, slideLayouts, slideMasters, media, themes) lives
+ * exactly one directory below `ppt/`, so a single `../` strip always
+ * resolves it. */
 function resolvePartTarget(target: string): string {
   return target.startsWith('/') ? target.slice(1) : `ppt/${target.replace(/^\.\.\//, '')}`;
 }
@@ -112,6 +125,41 @@ function findRelTarget(relsXml: string, typeSuffix: string): string | null {
 /** A shape only counts as slide-specific content if it fills a layout/master placeholder. */
 function isPlaceholder(shapeEl: Element): boolean {
   return shapeEl.getElementsByTagName('p:ph').length > 0;
+}
+
+interface PlaceholderKey {
+  type: string;
+  idx: string | null;
+}
+
+/** A shape's placeholder identity (type + idx), used to find its counterpart on the layout/master. */
+function readPlaceholderKey(shapeEl: Element): PlaceholderKey | null {
+  const ph = shapeEl.getElementsByTagName('p:ph')[0];
+  if (!ph) return null;
+  return { type: ph.getAttribute('type') ?? 'body', idx: ph.getAttribute('idx') };
+}
+
+/** Placeholder types templates commonly re-type loosely across a body/subtitle/content family. */
+const BODY_LIKE_TYPES = new Set(['body', 'subTitle', 'obj', 'txBox']);
+
+/**
+ * Find the layout/master placeholder a slide placeholder inherits from:
+ * exact idx match first (OOXML's real matching key), then same type, then
+ * any other body-like placeholder.
+ */
+function findMatchingPlaceholder(spTree: Element | null, key: PlaceholderKey): Element | null {
+  if (!spTree) return null;
+  const candidates = Array.from(spTree.children).filter(isPlaceholder);
+  if (key.idx) {
+    const byIdx = candidates.find((c) => readPlaceholderKey(c)?.idx === key.idx);
+    if (byIdx) return byIdx;
+  }
+  const byType = candidates.find((c) => (readPlaceholderKey(c)?.type ?? 'body') === key.type);
+  if (byType) return byType;
+  if (BODY_LIKE_TYPES.has(key.type)) {
+    return candidates.find((c) => BODY_LIKE_TYPES.has(readPlaceholderKey(c)?.type ?? 'body')) ?? null;
+  }
+  return null;
 }
 
 /** Read a shape's <a:solidFill> as a CSS color, from srgbClr or (approximately) schemeClr. */
@@ -142,13 +190,79 @@ function readXfrm(spPr: Element | null): ShapeBase | null {
   return { xEmu, yEmu, wEmu, hEmu };
 }
 
+/**
+ * A shape's box: its own <a:xfrm> when present, otherwise (for a
+ * placeholder only) the matching layout placeholder's box, then the
+ * matching master placeholder's box — the same fallback chain PowerPoint
+ * itself uses, so a placeholder that only exists to inherit its geometry
+ * still lands in the right place instead of being skipped.
+ */
+function resolveBox(shapeEl: Element, layoutSpTree: Element | null, masterSpTree: Element | null): ShapeBase | null {
+  const own = readXfrm(firstEl(shapeEl, 'p:spPr'));
+  if (own) return own;
+  const key = readPlaceholderKey(shapeEl);
+  if (!key) return null;
+  const layoutMatch = findMatchingPlaceholder(layoutSpTree, key);
+  const fromLayout = layoutMatch && readXfrm(firstEl(layoutMatch, 'p:spPr'));
+  if (fromLayout) return fromLayout;
+  const masterMatch = findMatchingPlaceholder(masterSpTree, key);
+  return (masterMatch && readXfrm(firstEl(masterMatch, 'p:spPr'))) ?? null;
+}
+
+interface ThemeFonts {
+  major?: string;
+  minor?: string;
+}
+
+/** Resolve a run's actual typeface: a literal font name as-is, or the theme's major/minor Latin font for +mj-lt/+mn-lt. */
+function resolveFontFamily(rPr: Element | null, themeFonts: ThemeFonts): string | undefined {
+  const typeface = rPr && firstEl(rPr, 'a:latin')?.getAttribute('typeface');
+  if (!typeface) return undefined;
+  if (typeface === '+mj-lt') return themeFonts.major;
+  if (typeface === '+mn-lt') return themeFonts.minor;
+  return typeface;
+}
+
+function styleBucketFor(placeholderType: string): 'p:titleStyle' | 'p:bodyStyle' | 'p:otherStyle' {
+  if (placeholderType === 'title' || placeholderType === 'ctrTitle') return 'p:titleStyle';
+  if (BODY_LIKE_TYPES.has(placeholderType)) return 'p:bodyStyle';
+  return 'p:otherStyle';
+}
+
+/** Master-level default run size for a placeholder type, from p:txStyles/*Style/lvl1pPr/defRPr@sz. */
+function resolveMasterDefaultFontPt(masterDoc: Document | null, placeholderType: string): number | undefined {
+  const txStyles = masterDoc && firstEl(masterDoc.documentElement, 'p:txStyles');
+  const bucket = txStyles && firstEl(txStyles, styleBucketFor(placeholderType));
+  const lvl1 = bucket && firstEl(bucket, 'a:lvl1pPr');
+  const sz = lvl1 && firstEl(lvl1, 'a:defRPr')?.getAttribute('sz');
+  return sz ? Number(sz) / 100 : undefined;
+}
+
+/** A layout placeholder's own run size, when the layout gives its prompt text an explicit size. */
+function resolveLayoutPlaceholderFontPt(layoutMatch: Element | null): number | undefined {
+  if (!layoutMatch) return undefined;
+  const rPr = layoutMatch.getElementsByTagName('a:rPr')[0] ?? layoutMatch.getElementsByTagName('a:defRPr')[0];
+  const sz = rPr?.getAttribute('sz');
+  return sz ? Number(sz) / 100 : undefined;
+}
+
 function readAlign(pPr: Element | null): RenderedParagraph['align'] {
   const algn = pPr?.getAttribute('algn');
   if (algn === 'ctr' || algn === 'r' || algn === 'l') return algn;
   return undefined;
 }
 
-function readTextShape(sp: Element, box: ShapeBase): RenderedTextShape | null {
+/** Inherited context a placeholder shape's text falls back to when it doesn't set something itself. */
+interface TextInheritContext {
+  placeholderKey: PlaceholderKey | null;
+  layoutMatch: Element | null;
+  masterDoc: Document | null;
+  themeFonts: ThemeFonts;
+}
+
+const NO_INHERIT: TextInheritContext = { placeholderKey: null, layoutMatch: null, masterDoc: null, themeFonts: {} };
+
+function readTextShape(sp: Element, box: ShapeBase, ctx: TextInheritContext): RenderedTextShape | null {
   const spPr = firstEl(sp, 'p:spPr');
   const txBody = firstEl(sp, 'p:txBody');
   const fill = readSolidFill(spPr);
@@ -164,12 +278,19 @@ function readTextShape(sp: Element, box: ShapeBase): RenderedTextShape | null {
       if (!text) continue;
       const rPr = firstEl(r, 'a:rPr');
       const szAttr = rPr?.getAttribute('sz');
+      const sizePt = szAttr
+        ? Number(szAttr) / 100
+        : (ctx.placeholderKey &&
+            (resolveLayoutPlaceholderFontPt(ctx.layoutMatch) ??
+              resolveMasterDefaultFontPt(ctx.masterDoc, ctx.placeholderKey.type))) ||
+          undefined;
       runs.push({
         text,
-        sizePt: szAttr ? Number(szAttr) / 100 : undefined,
+        sizePt,
         bold: rPr?.getAttribute('b') === '1',
         italic: rPr?.getAttribute('i') === '1',
         color: readSolidFill(rPr),
+        fontFamily: resolveFontFamily(rPr, ctx.themeFonts),
       });
     }
     if (runs.length > 0 || paragraphs.length > 0) paragraphs.push({ align, runs });
@@ -215,6 +336,14 @@ async function readPictureShape(
   return { kind: 'picture', ...box, imageUrl: url };
 }
 
+/** Geometry/font inheritance sources for a spTree's placeholder shapes — undefined when reading a layout/master's own (non-placeholder) art, which never needs it. */
+interface InheritSources {
+  layoutSpTree: Element | null;
+  masterSpTree: Element | null;
+  masterDoc: Document | null;
+  themeFonts: ThemeFonts;
+}
+
 /** Read every `p:sp`/`p:pic` child of a `p:spTree` into shapes, in document order. */
 async function readSpTreeShapes(
   spTree: Element,
@@ -222,14 +351,27 @@ async function readSpTreeShapes(
   relTargets: Map<string, string>,
   urlCache: Map<string, string>,
   skipPlaceholders: boolean,
+  inherit?: InheritSources,
 ): Promise<RenderedShape[]> {
   const shapes: RenderedShape[] = [];
   for (const child of Array.from(spTree.children)) {
     if (skipPlaceholders && isPlaceholder(child)) continue;
-    const box = readXfrm(firstEl(child, 'p:spPr'));
+    const box = inherit
+      ? resolveBox(child, inherit.layoutSpTree, inherit.masterSpTree)
+      : readXfrm(firstEl(child, 'p:spPr'));
     if (!box) continue;
     if (child.tagName === 'p:sp') {
-      const shape = readTextShape(child, box);
+      const key = readPlaceholderKey(child);
+      const ctx: TextInheritContext =
+        inherit && key
+          ? {
+              placeholderKey: key,
+              layoutMatch: findMatchingPlaceholder(inherit.layoutSpTree, key),
+              masterDoc: inherit.masterDoc,
+              themeFonts: inherit.themeFonts,
+            }
+          : { ...NO_INHERIT, themeFonts: inherit?.themeFonts ?? {} };
+      const shape = readTextShape(child, box, ctx);
       if (shape) shapes.push(shape);
     } else if (child.tagName === 'p:pic') {
       const shape = await readPictureShape(child, box, zip, relTargets, urlCache);
@@ -242,6 +384,8 @@ async function readSpTreeShapes(
 interface StaticLayer {
   background?: string;
   shapes: RenderedShape[];
+  spTree: Element | null;
+  doc: Document | null;
 }
 
 /**
@@ -249,12 +393,13 @@ interface StaticLayer {
  * using it inherits: its background (when the slide doesn't set its own)
  * and any non-placeholder shapes/pictures (logos, watermarks) — matching
  * how PowerPoint actually composites a slide over its layout over its
- * master. Placeholders are skipped: their real content lives on the slide
- * itself (or is absent), not here.
+ * master. Placeholders are skipped here: their content lives on the slide
+ * itself, inheriting this part's placeholder geometry/fonts (resolved
+ * separately by resolveInheritance) rather than being drawn twice.
  */
 async function readStaticLayer(zip: JSZip, partPath: string, urlCache: Map<string, string>): Promise<StaticLayer> {
   const file = zip.file(partPath);
-  if (!file) return { shapes: [] };
+  if (!file) return { shapes: [], spTree: null, doc: null };
   const xml = await file.async('string');
   const doc = parseXml(xml);
   const cSld = firstEl(doc.documentElement, 'p:cSld');
@@ -267,41 +412,89 @@ async function readStaticLayer(zip: JSZip, partPath: string, urlCache: Map<strin
 
   const spTree = cSld && firstEl(cSld, 'p:spTree');
   const shapes = spTree ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, true) : [];
-  return { background, shapes };
+  return { background, shapes, spTree, doc };
 }
 
-/** Resolve the slideLayout, then slideMaster, a slide/layout part inherits from — cached by path since many slides share one layout. */
-async function readInheritedLayers(
+async function resolveThemeFonts(zip: JSZip, masterPath: string): Promise<ThemeFonts> {
+  const relsFile = zip.file(relsPathFor(masterPath));
+  const relsXml = relsFile ? await relsFile.async('string') : null;
+  const themeTarget = relsXml ? findRelTarget(relsXml, '/theme') : null;
+  if (!themeTarget) return {};
+  const themeFile = zip.file(resolvePartTarget(themeTarget));
+  if (!themeFile) return {};
+  const doc = parseXml(await themeFile.async('string'));
+  const fontScheme = firstEl(doc.documentElement, 'a:fontScheme');
+  const major = fontScheme && firstEl(fontScheme, 'a:majorFont');
+  const minor = fontScheme && firstEl(fontScheme, 'a:minorFont');
+  return {
+    major: (major && firstEl(major, 'a:latin')?.getAttribute('typeface')) || undefined,
+    minor: (minor && firstEl(minor, 'a:latin')?.getAttribute('typeface')) || undefined,
+  };
+}
+
+interface Inheritance {
+  /** Master then layout, for background + static-shape composition (master furthest back). */
+  layers: StaticLayer[];
+  layoutSpTree: Element | null;
+  masterSpTree: Element | null;
+  masterDoc: Document | null;
+  themeFonts: ThemeFonts;
+}
+
+const EMPTY_INHERITANCE: Inheritance = {
+  layers: [],
+  layoutSpTree: null,
+  masterSpTree: null,
+  masterDoc: null,
+  themeFonts: {},
+};
+
+/** Resolve everything a slide inherits from its slideLayout and slideMaster — cached by path since many slides share one layout. */
+async function resolveInheritance(
   zip: JSZip,
   ownRelsXml: string | null,
   urlCache: Map<string, string>,
   layerCache: Map<string, Promise<StaticLayer>>,
-): Promise<StaticLayer[]> {
-  const layers: StaticLayer[] = [];
+  themeCache: Map<string, Promise<ThemeFonts>>,
+): Promise<Inheritance> {
   const layoutTarget = ownRelsXml ? findRelTarget(ownRelsXml, '/slideLayout') : null;
-  if (!layoutTarget) return layers;
+  if (!layoutTarget) return EMPTY_INHERITANCE;
   const layoutPath = resolvePartTarget(layoutTarget);
-  let layoutLayer = layerCache.get(layoutPath);
-  if (!layoutLayer) {
-    layoutLayer = readStaticLayer(zip, layoutPath, urlCache);
-    layerCache.set(layoutPath, layoutLayer);
+  let layoutLayerP = layerCache.get(layoutPath);
+  if (!layoutLayerP) {
+    layoutLayerP = readStaticLayer(zip, layoutPath, urlCache);
+    layerCache.set(layoutPath, layoutLayerP);
   }
-  layers.push(await layoutLayer);
+  const layoutLayer = await layoutLayerP;
 
   const layoutRelsFile = zip.file(relsPathFor(layoutPath));
   const layoutRelsXml = layoutRelsFile ? await layoutRelsFile.async('string') : null;
   const masterTarget = layoutRelsXml ? findRelTarget(layoutRelsXml, '/slideMaster') : null;
-  if (masterTarget) {
-    const masterPath = resolvePartTarget(masterTarget);
-    let masterLayer = layerCache.get(masterPath);
-    if (!masterLayer) {
-      masterLayer = readStaticLayer(zip, masterPath, urlCache);
-      layerCache.set(masterPath, masterLayer);
-    }
-    layers.push(await masterLayer);
+  if (!masterTarget) {
+    return { layers: [layoutLayer], layoutSpTree: layoutLayer.spTree, masterSpTree: null, masterDoc: null, themeFonts: {} };
   }
-  // Master first, then layout, so the slide's own content ends up on top.
-  return layers.reverse();
+  const masterPath = resolvePartTarget(masterTarget);
+  let masterLayerP = layerCache.get(masterPath);
+  if (!masterLayerP) {
+    masterLayerP = readStaticLayer(zip, masterPath, urlCache);
+    layerCache.set(masterPath, masterLayerP);
+  }
+  const masterLayer = await masterLayerP;
+
+  let themeP = themeCache.get(masterPath);
+  if (!themeP) {
+    themeP = resolveThemeFonts(zip, masterPath);
+    themeCache.set(masterPath, themeP);
+  }
+  const themeFonts = await themeP;
+
+  return {
+    layers: [masterLayer, layoutLayer], // master furthest back, then layout, so the slide's own content ends up on top.
+    layoutSpTree: layoutLayer.spTree,
+    masterSpTree: masterLayer.spTree,
+    masterDoc: masterLayer.doc,
+    themeFonts,
+  };
 }
 
 /** Resolve a deck's slide part paths in presentation display order via sldIdLst + rels. */
@@ -345,6 +538,7 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
   const slidePaths = slideOrderPaths(presentationXml, presentationRels);
   const urlCache = new Map<string, string>();
   const layerCache = new Map<string, Promise<StaticLayer>>();
+  const themeCache = new Map<string, Promise<ThemeFonts>>();
 
   const slides: RenderedSlide[] = [];
   for (let index = 0; index < slidePaths.length; index++) {
@@ -358,17 +552,24 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
     const relsFile = zip.file(relsPathFor(path));
     const relsXml = relsFile ? await relsFile.async('string') : null;
     const relTargets = readSlideRelTargets(relsXml);
-    const inheritedLayers = await readInheritedLayers(zip, relsXml, urlCache, layerCache);
+    const inheritance = await resolveInheritance(zip, relsXml, urlCache, layerCache, themeCache);
 
     const doc = parseXml(slideXml);
     const cSld = firstEl(doc.documentElement, 'p:cSld');
     const bg = cSld && firstEl(cSld, 'p:bg');
     const ownBackground = bg ? readSolidFill(firstEl(bg, 'p:bgPr')) : undefined;
-    const background = ownBackground ?? inheritedLayers.find((l) => l.background)?.background;
+    const background = ownBackground ?? inheritance.layers.find((l) => l.background)?.background;
 
     const spTree = cSld && firstEl(cSld, 'p:spTree');
-    const ownShapes = spTree ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, false) : [];
-    const shapes = [...inheritedLayers.flatMap((l) => l.shapes), ...ownShapes];
+    const ownShapes = spTree
+      ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, false, {
+          layoutSpTree: inheritance.layoutSpTree,
+          masterSpTree: inheritance.masterSpTree,
+          masterDoc: inheritance.masterDoc,
+          themeFonts: inheritance.themeFonts,
+        })
+      : [];
+    const shapes = [...inheritance.layers.flatMap((l) => l.shapes), ...ownShapes];
     slides.push({ index, widthEmu, heightEmu, background, shapes });
   }
   return slides;

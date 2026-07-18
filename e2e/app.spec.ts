@@ -9,6 +9,7 @@ const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
+const PLACEHOLDER_FRONT_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'placeholder-front-slide.pptx');
 
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
@@ -192,6 +193,52 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
   await page.getByTestId('admin-open').click();
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('template.pptx');
 
+  await page.getByTestId('admin-deck-front').getByRole('button', { name: '기본값 복원' }).click();
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
+});
+
+test('a real PowerPoint deck\'s placeholder text inherits position/size/font from its layout and master', async ({
+  page,
+}) => {
+  await page.goto('./');
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+  // This fixture's only slide is a title placeholder with NO position, size,
+  // or font of its own — exactly how a real PowerPoint deck (unlike this
+  // app's own Google-Slides-exported templates, which bake those onto every
+  // shape) authors a title. It must inherit position/size from its layout
+  // and font size from its master, not render missing or mispositioned.
+  await page.getByTestId('admin-deck-input-front').setInputFiles(PLACEHOLDER_FRONT_PPTX);
+  await expect(page.getByTestId('admin-deck-status-front')).toContainText('placeholder-front-slide.pptx');
+  await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+
+  await page.getByTestId('wizard-tab-announcement').click();
+  await page.getByTestId('announcement-input').fill('1. <공지>\n안내 문구');
+  await page.getByTestId('view-mode-toggle').click();
+  await expect(page.getByTestId('slide-overview-loading')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+
+  const titleShape = page.getByTestId('slide-overview-row-front').first().locator('.slide-thumb-text');
+  await expect(titleShape).toContainText('플레이스홀더 제목');
+  const width = await titleShape.evaluate((el) => parseFloat((el as HTMLElement).style.width));
+  // The layout's own xfrm (7772400 EMU wide) at the 248px-wide thumbnail
+  // scale is ~211px — distinct from the master's differing xfrm (~223px)
+  // and from a missing/0-width box, so this pins down which part the box
+  // actually came from rather than just "some" box happening to be non-zero.
+  expect(width).toBeGreaterThan(205);
+  expect(width).toBeLessThan(217);
+  const fontSize = await titleShape
+    .locator('.slide-thumb-run')
+    .first()
+    .evaluate((el) => parseFloat((el as HTMLElement).style.fontSize));
+  // The master's titleStyle default (44pt) at thumbnail scale is ~15px —
+  // distinct from the 18pt no-inheritance-found fallback (~6px).
+  expect(fontSize).toBeGreaterThan(12);
+  expect(fontSize).toBeLessThan(18);
+
+  // Leave the app in its default state for later tests.
+  await page.getByTestId('view-mode-toggle').click();
+  await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-deck-front').getByRole('button', { name: '기본값 복원' }).click();
   await expect(page.getByTestId('admin-deck-status-front')).toContainText('기본 제공 파일 사용 중');
 });

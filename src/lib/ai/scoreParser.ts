@@ -128,21 +128,23 @@ export function parseModelJson(text: string, emptyMessage: string, unparsableMes
 /** A bare canonical part token like I, V1, PC, C2, B, O, T. */
 const PART_TOKEN = /^(I|V\d*|PC\d*|C\d*|B\d*|O\d*|T\d*)$/i;
 
-/** Korean/English words scores use to label a part. */
+/** Korean/English words scores use to label a part. Words with no printed
+ * 1/2 distinction map to the bare label (V, not V1) — only an explicitly
+ * numbered word ("1절", "2절") should produce a numbered label. */
 const PART_WORD: Record<string, string> = {
   '1절': 'V1',
   '2절': 'V2',
   '3절': 'V3',
   '4절': 'V4',
-  절: 'V1',
+  절: 'V',
   후렴: 'C',
   후렴구: 'C',
   브릿지: 'B',
   간주: 'I',
   전주: 'I',
-  벌스: 'V1',
-  버스: 'V1',
-  verse: 'V1',
+  벌스: 'V',
+  버스: 'V',
+  verse: 'V',
   chorus: 'C',
   bridge: 'B',
   prechorus: 'PC',
@@ -313,7 +315,7 @@ export function parseScoreText(text: string): ParsedScore {
     // recognized lyric text into the first one for the user to redistribute
     // while looking at the score.
     const parts = uniqueParts(order);
-    const labels = parts.length > 0 ? parts : ['V1', 'C'];
+    const labels = parts.length > 0 ? parts : ['V', 'C'];
     sections = labels.map((label, i) => ({
       label,
       lines: i === 0 ? lyricLines : [],

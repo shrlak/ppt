@@ -65,6 +65,11 @@ function ShapeView({ shape, pxPerEmu }: { shape: RenderedShape; pxPerEmu: number
                 fontWeight: r.bold ? 700 : undefined,
                 fontStyle: r.italic ? 'italic' : undefined,
                 color: r.color,
+                // The exact font may not be installed in the viewer's browser (no
+                // font files ship with the deck); naming it still gets a closer
+                // system-font match than the browser's generic default, and a
+                // sans-serif fallback keeps it from silently reverting to serif.
+                fontFamily: r.fontFamily ? `"${r.fontFamily}", sans-serif` : undefined,
               }}
             >
               {r.text}
