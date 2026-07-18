@@ -20,7 +20,7 @@ export default function SermonUploadSection({ value, onChange }: Props) {
   }
 
   return (
-    <section className="card">
+    <section className="card" data-testid="sermon-upload-section">
       <h2>설교 PPT 업로드</h2>
       <p className="tool-intro" style={{ margin: '0 0 14px' }}>
         말씀 슬라이드 다음에 그대로 삽입됩니다. 목사님께 받은 설교 PPT 파일을 업로드하세요 (선택).

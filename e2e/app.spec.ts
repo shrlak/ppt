@@ -75,7 +75,7 @@ test('moves through the five-step wizard with next and back buttons', async ({ p
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 });
 
-test('editor view shows slides on the left and the 찬양/광고 editors together on the right', async ({ page }) => {
+test('editor view shows slides on the left and the 찬양/성경 말씀/설교/광고 editors together on the right', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);
 
@@ -101,6 +101,10 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   // 성경 말씀 (설교 제목 및 본문) is reachable too, auto-filled from the conti.
   await expect(page.getByTestId('wizard-panel-bible')).toBeVisible();
   await expect(page.getByTestId('bible-verse-input')).not.toHaveValue('');
+  // 설교 PPT 업로드 is reachable too — the same SermonUploadSection instance
+  // the wizard uses, not a duplicate.
+  await expect(page.getByTestId('wizard-panel-sermon')).toBeVisible();
+  await expect(page.getByTestId('sermon-upload-section')).toBeVisible();
   await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/새가족 환영/);
 
@@ -132,6 +136,17 @@ test('editor view shows slides on the left and the 찬양/광고 editors togethe
   // Clicking a 말씀 row focuses the 성경 구절 input in the same right-hand column.
   await page.getByTestId('slide-overview-row-bible').first().getByRole('button').click();
   await expect(page.getByTestId('bible-verse-input')).toBeFocused();
+
+  // 설교 PPT can be uploaded directly from 편집기, without switching back to
+  // the wizard, and the slide list picks it up like any other section.
+  await page.getByTestId('sermon-input').setInputFiles(SERMON_PPTX);
+  await expect(page.getByText('업로드됨: bible-template.pptx')).toBeVisible();
+  await expect(page.getByTestId('slide-overview-loading')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await expect(page.getByTestId('slide-overview-row-sermon').first()).toBeVisible();
+
+  // Clicking a 설교 row scrolls the sermon upload section into view.
+  await page.getByTestId('slide-overview-row-sermon').first().getByRole('button').click();
+  await expect(page.getByTestId('sermon-upload-section')).toBeInViewport();
 
   // The whole deck can be downloaded or saved to the 라이브러리 without leaving
   // 편집기 — a toolbar next to the slide list, not just the wizard's last step.

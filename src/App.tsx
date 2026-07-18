@@ -161,14 +161,15 @@ export default function App() {
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
   const fileName = suggestFileName(contiDate);
 
-  // 편집기 view: 찬양 가사, 성경 말씀(설교 제목·본문), and 광고 all stay the SAME
-  // mounted LyricsGenerator/BibleSlideGenerator/AnnouncementSection instances
-  // used by the wizard steps (just made simultaneously visible instead of
-  // one-at-a-time) — never a second copy, so there is nothing to keep in sync.
+  // 편집기 view: 찬양 가사, 성경 말씀(설교 제목·본문), 설교 PPT 업로드, and 광고 all stay
+  // the SAME mounted LyricsGenerator/BibleSlideGenerator/SermonUploadSection/
+  // AnnouncementSection instances used by the wizard steps (just made
+  // simultaneously visible instead of one-at-a-time) — never a second copy,
+  // so there is nothing to keep in sync.
   const isPanelActive = useCallback(
     (stepId: (typeof WIZARD_STEPS)[number]['id']) =>
       viewMode === 'editor'
-        ? stepId === 'lyrics' || stepId === 'bible' || stepId === 'announcement'
+        ? stepId === 'lyrics' || stepId === 'bible' || stepId === 'sermon' || stepId === 'announcement'
         : WIZARD_STEPS[activeStep].id === stepId,
     [viewMode, activeStep],
   );
@@ -184,6 +185,9 @@ export default function App() {
     const el = document.querySelector<HTMLTextAreaElement>('[data-testid="announcement-input"]');
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el?.focus();
+  }
+  function scrollToSermon() {
+    document.querySelector('[data-testid="sermon-upload-section"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   const lyricsSlideCount = planAllSlides(songs).length;
@@ -525,6 +529,7 @@ export default function App() {
               error={editorError}
               onSelectSong={scrollToSong}
               onSelectBible={scrollToBible}
+              onSelectSermon={scrollToSermon}
               onSelectAnnouncement={scrollToAnnouncement}
               onDownload={() => void generate()}
               onSaveToLibrary={() => void saveCurrentToLibrary()}

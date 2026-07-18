@@ -1,11 +1,10 @@
 // Left-hand slide list for the 편집기 (PPT editor) view — a PowerPoint-style
 // slide pane showing a real visual thumbnail of every slide in final deck
-// order (from pptxRenderer.ts), not just a text label. 찬양/말씀/광고 rows are
-// clickable and scroll the right-hand editor to that exact section; the rest
-// (front/prayer/sermon/back) are informational, since they come from fixed
-// templates or other wizard steps rather than being edited here. A toolbar
-// above the list lets the whole deck be downloaded or saved to the 라이브러리
-// without leaving this view.
+// order (from pptxRenderer.ts), not just a text label. 찬양/말씀/설교/광고 rows
+// are clickable and scroll the right-hand editor to that exact section; the
+// rest (front/prayer/back) are informational, since they come from fixed
+// templates rather than being edited here. A toolbar above the list lets the
+// whole deck be downloaded or saved to the 라이브러리 without leaving this view.
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { RenderedSlide } from '../lib/pptx/pptxRenderer';
 import SlideThumbnail from './SlideThumbnail';
@@ -22,7 +21,7 @@ const KIND_ICON: Record<DeckOverviewItem['kind'], string> = {
   back: '🖼',
 };
 
-const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set(['lyrics-title', 'lyrics', 'bible', 'announcement']);
+const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set(['lyrics-title', 'lyrics', 'bible', 'sermon', 'announcement']);
 
 const THUMB_WIDTH = 248;
 
@@ -33,6 +32,7 @@ interface Props {
   error: string | null;
   onSelectSong: (songId: string) => void;
   onSelectBible: () => void;
+  onSelectSermon: () => void;
   onSelectAnnouncement: () => void;
   onDownload: () => void;
   onSaveToLibrary: () => void;
@@ -47,6 +47,7 @@ export default function SlideOverviewList({
   error,
   onSelectSong,
   onSelectBible,
+  onSelectSermon,
   onSelectAnnouncement,
   onDownload,
   onSaveToLibrary,
@@ -112,6 +113,7 @@ export default function SlideOverviewList({
                     onClick={() => {
                       if (item.kind === 'announcement') onSelectAnnouncement();
                       else if (item.kind === 'bible') onSelectBible();
+                      else if (item.kind === 'sermon') onSelectSermon();
                       else onSelectSong(item.songId!);
                     }}
                   >
