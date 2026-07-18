@@ -71,6 +71,12 @@ export async function saveDeckToLibrary(entry: SavedDeckInput): Promise<SavedDec
   return saved;
 }
 
+/** Overwrite an existing entry in place (rename, and/or replace its pptx bytes/slideCount after editing). */
+export async function updateSavedDeck(deck: SavedDeck): Promise<SavedDeck> {
+  await withStore('readwrite', (store) => store.put(deck));
+  return deck;
+}
+
 export async function listSavedDecks(): Promise<SavedDeck[]> {
   try {
     const all = await withStore<SavedDeck[]>('readonly', (store) => store.getAll());
