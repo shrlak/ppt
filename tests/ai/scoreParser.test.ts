@@ -102,9 +102,22 @@ describe('parseScoreText', () => {
     expect(parsed.sections[0].lines.length).toBeGreaterThan(0);
   });
 
-  it('falls back to a default scaffold with neither order nor labels', () => {
+  it('reads an unnumbered printed Korean label ("절", "후렴") as bare V/C, not V1/C1', () => {
+    const text = [
+      '은혜',
+      'I-V-C',
+      '절',
+      '내가 주를 사랑하는 이유',
+      '후렴',
+      '은혜 은혜 하나님의 은혜',
+    ].join('\n');
+    const parsed = parseScoreText(text);
+    expect(parsed.sections.map((s) => s.label)).toEqual(['V', 'C']);
+  });
+
+  it('falls back to a default scaffold with neither order nor labels, unnumbered since there is no printed 1/2 distinction', () => {
     const parsed = parseScoreText('그냥 제목 같은 줄\n가사 한 줄');
     expect(parsed.order).toEqual([]);
-    expect(parsed.sections.map((s) => s.label)).toEqual(['V1', 'C']);
+    expect(parsed.sections.map((s) => s.label)).toEqual(['V', 'C']);
   });
 });

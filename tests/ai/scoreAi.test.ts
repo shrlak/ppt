@@ -28,9 +28,11 @@ describe('buildGeminiBody', () => {
     expect(parts.some((p) => p.text?.includes('pageType'))).toBe(true);
     expect(parts.some((p) => p.text?.includes('설교 제목과 본문'))).toBe(true);
     // Stacked lines under one staff row number sequentially within ANY part
-    // type, not just verses — a chorus repeated twice becomes C1/C2.
-    expect(parts.some((p) => p.text?.includes('후렴이면 C1, C2'))).toBe(true);
-    expect(parts.some((p) => p.text?.includes('브릿지면 B1, B2'))).toBe(true);
+    // type, not just verses — a chorus repeated twice becomes C, C2.
+    expect(parts.some((p) => p.text?.includes('후렴이면 C, C2'))).toBe(true);
+    expect(parts.some((p) => p.text?.includes('브릿지면 B, B2'))).toBe(true);
+    // A part appearing only once is never forced to a numbered label.
+    expect(parts.some((p) => p.text?.includes('번호 없이'))).toBe(true);
     expect(parts.find((p) => p.inline_data)?.inline_data).toEqual({ mime_type: 'image/png', data: 'ZZZ' });
     expect(body.generationConfig.responseMimeType).toBe('application/json');
     expect(body.tools).toBeUndefined();
