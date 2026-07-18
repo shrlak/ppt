@@ -54,7 +54,11 @@ interface Props {
   editorOnly?: boolean;
 }
 
-const QUICK_LABELS = ['V1', 'V2', 'PC', 'C', 'B'];
+// A single "V" quick-add button rather than separate "V1"/"V2" ones: most
+// songs' first verse doesn't need a number, and findSection() in
+// slidePlanner.ts already treats a plain "V" section as V1 for order
+// matching, so nothing forces a song to have exactly two verses either.
+const QUICK_LABELS = ['V', 'PC', 'C', 'B'];
 
 export default function SongCard({
   song,
