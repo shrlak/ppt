@@ -301,6 +301,60 @@ test('PPT library saves a generated deck with its source files and can re-downlo
   await expect(page.getByTestId('library-empty')).toBeVisible();
 });
 
+test('PPT library entries can be renamed and trimmed, and the saved file reflects the edit', async ({ page }, testInfo) => {
+  await page.goto('./');
+  await uploadExamplePdf(page);
+  await moveFromLyricsToDownload(page);
+
+  await page.getByTestId('save-to-library').click();
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible();
+
+  await page.getByTestId('library-open').click();
+  const entry = page.getByTestId('library-entry');
+  await expect(entry).toBeVisible();
+
+  const originalName = (await entry.locator('.library-entry-name').innerText()).trim();
+  expect(originalName).toMatch(/\.pptx$/);
+
+  await entry.getByTestId('library-entry-edit').click();
+  const editDialog = page.getByRole('dialog').filter({ hasText: 'PPT 편집' });
+  const nameInput = page.getByTestId('library-edit-name');
+  // Pre-filled with the deck's current name, not blank.
+  await expect(nameInput).toHaveValue(originalName);
+
+  // At least the front (4) + back (21) + prayer (2) + generated slides, well
+  // above 1 — plenty of room to drop one slide without hitting the "keep at
+  // least one" floor.
+  const countBefore = Number((await page.getByTestId('library-edit-slide-count').innerText()).replace('장', ''));
+  expect(countBefore).toBeGreaterThan(1);
+  await expect(page.getByTestId('library-edit-slide-row')).toHaveCount(countBefore);
+
+  await page.getByTestId('library-edit-slide-remove').first().click();
+  await expect(page.getByTestId('library-edit-slide-count')).toHaveText(`${countBefore - 1}장`);
+  await expect(page.getByTestId('library-edit-slide-row')).toHaveCount(countBefore - 1);
+
+  await nameInput.fill('Edited Deck');
+  await page.getByTestId('library-edit-save').click();
+  await expect(page.getByText(/'Edited Deck\.pptx'을\(를\) 수정했습니다/)).toBeVisible();
+
+  await editDialog.getByRole('button', { name: '닫기' }).click();
+  await expect(entry).toContainText('Edited Deck.pptx');
+  await expect(entry).toContainText(`${countBefore - 1}장`);
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    entry.getByRole('button', { name: 'PPTX 다운로드' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('Edited Deck.pptx');
+  const zip = await loadPptx(download, testInfo.outputPath('edited.pptx'));
+  expect(slideFileNames(zip)).toHaveLength(countBefore - 1);
+
+  // The entry survives a reload with its edits intact — real IndexedDB, not in-memory state.
+  await page.reload();
+  await page.getByTestId('library-open').click();
+  await expect(page.getByTestId('library-entry')).toContainText('Edited Deck.pptx');
+});
+
 test('admin panel lists the complete concurrent recognition model pool', async ({ page }) => {
   await page.goto('./');
   await page.getByTestId('admin-open').click();
