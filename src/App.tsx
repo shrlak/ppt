@@ -429,14 +429,16 @@ export default function App() {
     <>
       <header className={`header${scrolled ? ' header-scrolled' : ''}`}>
         <div className="header-inner">
-          <img
-            className="header-logo"
-            src={`${BASE}favicon.svg`}
-            alt="Korean Central Church of Pittsburgh 대학·청년부 로고"
-          />
-          <div className="header-text">
-            <h1>KCCP PPT Generator</h1>
-            <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+          <div className="header-brand">
+            <img
+              className="header-logo"
+              src={`${BASE}favicon.svg`}
+              alt="Korean Central Church of Pittsburgh 대학·청년부 로고"
+            />
+            <div className="header-text">
+              <h1>KCCP PPT Generator</h1>
+              <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
+            </div>
           </div>
           <div className="header-actions">
             <button
