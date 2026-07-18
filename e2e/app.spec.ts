@@ -305,7 +305,7 @@ test('score click opens the split view: whole conti left, lyric editor right', a
   // Recognition can be triggered and monitored from inside the split view.
   await expect(editor.getByTestId('recognize-btn')).toBeVisible();
   if ((await editor.getByTestId('section-textarea').count()) === 0) {
-    await editor.getByRole('button', { name: 'V1', exact: true }).click();
+    await editor.getByRole('button', { name: 'V', exact: true }).click();
   }
   const textarea = editor.getByTestId('section-textarea').first();
   // 4 lines fit one slide at the default 4 lines/slide, so the blank line is
