@@ -26,6 +26,13 @@ export interface RecognitionModelInfo extends RecognitionAttempt {
  * stable display. This is the
  * single source of truth: the concurrent model pool, the sanitizer, and the
  * proxy's OpenRouter allowlist all derive from it.
+ *
+ * Gemini 2.5 Flash and NVIDIA Nemotron Nano are the two PRIMARY models —
+ * catalog order is priority order (earlier entries win a page when multiple
+ * models answer it), so they lead the list. Every model after them is a
+ * supporting/assistant model: it only fills in whatever the primary pair's
+ * answers are missing (see fillScoreGaps in scoreRecognition.ts), never
+ * overriding a primary model's answer for the same field.
  */
 export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
   // The 50-song accuracy benchmark measured Flash at 97-98% on this task.
@@ -35,37 +42,37 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
     engine: 'gemini',
     model: 'gemini-2.5-flash',
     label: 'Gemini 2.5 Flash',
-    note: '벤치마크 정확도 97%+ — 주 1회 콘티는 무료 한도로 충분합니다',
-  },
-  {
-    engine: 'gemini',
-    model: 'gemini-2.0-flash',
-    label: 'Gemini 2.0 Flash',
-    note: '별도의 무료 한도를 가진 예비 Gemini',
+    note: '주 모델 — 벤치마크 정확도 97%+, 주 1회 콘티는 무료 한도로 충분합니다',
   },
   {
     engine: 'nvidia',
     model: 'nvidia/nemotron-nano-12b-v2-vl',
     label: 'NVIDIA Nemotron Nano 12B VL · OpenRouter Free',
-    note: '문서·악보 OCR 특화 — 입력과 출력이 공급자에 기록되는 시험용 무료 엔드포인트',
+    note: '주 모델 — 문서·악보 OCR 특화 (입력과 출력이 공급자에 기록되는 시험용 무료 엔드포인트)',
+  },
+  {
+    engine: 'gemini',
+    model: 'gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash',
+    note: '보조 모델 — 별도의 무료 한도를 가진 예비 Gemini',
   },
   {
     engine: 'nvidia',
     model: 'google/gemma-4-31b-it:free',
     label: 'OpenRouter Gemma 4 31B · Free',
-    note: '강력한 대형 멀티모달 예비 모델 — 이미지·텍스트 이해 및 구조화 출력',
+    note: '보조 모델 — 강력한 대형 멀티모달 예비 모델, 이미지·텍스트 이해 및 구조화 출력',
   },
   {
     engine: 'nvidia',
     model: 'google/gemma-3-27b-it:free',
     label: 'OpenRouter Gemma 3 27B · Free',
-    note: '140개 이상 언어를 지원하는 다국어 비전 모델 — 한국어 가사 예비 인식',
+    note: '보조 모델 — 140개 이상 언어를 지원하는 다국어 비전 모델, 한국어 가사 예비 인식',
   },
   {
     engine: 'huggingface',
     model: 'Qwen/Qwen2-VL-7B-Instruct',
     label: 'Hugging Face Qwen2-VL 7B',
-    note: '마지막 예비 엔진',
+    note: '보조 모델 — 마지막 예비 엔진',
   },
 ];
 

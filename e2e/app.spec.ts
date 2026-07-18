@@ -248,10 +248,12 @@ test('admin panel lists the complete concurrent recognition model pool', async (
   const rows = page.getByTestId('admin-recognition-order').locator('.admin-engine');
   await expect(page.getByRole('heading', { name: '가사 인식 동시 실행 모델' })).toBeVisible();
   await expect(rows).toHaveCount(6);
+  // Gemini 2.5 Flash and Nemotron Nano are the two primary models, so they
+  // lead the priority-ordered list; everything after is an assistant model.
   await expect(rows).toContainText([
     'Gemini 2.5 Flash',
-    'Gemini 2.0 Flash',
     'NVIDIA Nemotron Nano 12B VL',
+    'Gemini 2.0 Flash',
     'OpenRouter Gemma 4 31B',
     'OpenRouter Gemma 3 27B',
     'Hugging Face Qwen2-VL 7B',
