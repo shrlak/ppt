@@ -8,9 +8,13 @@ import {
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
+  queueLyricsDelete,
+  queueLyricsUpsert,
   saveUserLibrary,
+  synchronizeUserLibrary,
   upsertEntry,
 } from '../lib/storage/library';
+import { hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import SongCard, { type RecogState } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
@@ -100,6 +104,9 @@ export default function LyricsGenerator({
   onContiFileLoaded,
 }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
+    hasCloudLibrary() ? 'syncing' : 'local',
+  );
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const infoRef = useRef<ContiInfo | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -189,15 +196,32 @@ export default function LyricsGenerator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomSongId]);
 
-  useEffect(() => {
-    libraryPromiseRef.current = (async () => {
-      const bundled = await fetchBundledLibrary(BASE);
-      const merged = mergeLibraries(bundled, loadUserLibrary());
-      setLibrary(merged);
-      return merged;
-    })();
-    return () => docRef.current?.destroy();
+  const refreshLibrary = useCallback(async () => {
+    const [bundled, synchronized] = await Promise.all([
+      fetchBundledLibrary(BASE),
+      synchronizeUserLibrary(),
+    ]);
+    const merged = mergeLibraries(bundled, synchronized.entries);
+    libraryRef.current = merged;
+    setLibrary(merged);
+    setLibrarySync(synchronized.synced ? 'synced' : synchronized.error ? 'error' : 'local');
+    return merged;
   }, []);
+
+  useEffect(() => {
+    libraryPromiseRef.current = refreshLibrary();
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      libraryPromiseRef.current = refreshLibrary();
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+      docRef.current?.destroy();
+    };
+  }, [refreshLibrary]);
 
   const saveToLibrary = useCallback((song: Song) => {
     if (!song.title.trim()) return;
@@ -209,6 +233,7 @@ export default function LyricsGenerator({
     };
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
+    queueLyricsUpsert(entry);
     setLibrary((lib) => {
       const next = upsertEntry(lib, entry);
       libraryRef.current = next;
@@ -660,6 +685,7 @@ export default function LyricsGenerator({
     const want = normalizeTitle(title);
     const user = loadUserLibrary().filter((e) => normalizeTitle(e.title) !== want);
     saveUserLibrary(user);
+    queueLyricsDelete(title);
     void (async () => {
       const bundled = await fetchBundledLibrary(BASE);
       setLibrary(mergeLibraries(bundled, user));
@@ -674,14 +700,17 @@ export default function LyricsGenerator({
 
   const importLibrary = useCallback((entries: LibraryEntry[]) => {
     let user = loadUserLibrary();
+    const imported: LibraryEntry[] = [];
     for (const e of entries) {
-      if (e && typeof e.title === 'string' && Array.isArray(e.sections)) {
+      if (e && typeof e.title === 'string' && Array.isArray(e.sections) && Array.isArray(e.order)) {
         user = upsertEntry(user, e);
+        imported.push(e);
       }
     }
     saveUserLibrary(user);
-    setLibrary((lib) => entries.reduce((acc, e) => upsertEntry(acc, e), lib));
-    showToast(`${entries.length}곡을 라이브러리로 가져왔습니다.`);
+    for (const entry of imported) queueLyricsUpsert(entry);
+    setLibrary((lib) => imported.reduce((acc, e) => upsertEntry(acc, e), lib));
+    showToast(`${imported.length}곡을 라이브러리로 가져왔습니다.`);
   }, []);
 
   async function handleFile(file: File) {
@@ -957,7 +986,13 @@ export default function LyricsGenerator({
               setEdited(true);
             }}
           />
-          <button className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              setLibraryOpen(true);
+              libraryPromiseRef.current = refreshLibrary();
+            }}
+          >
             📚 라이브러리 관리
           </button>
         </div>
@@ -965,6 +1000,15 @@ export default function LyricsGenerator({
 
       {libraryOpen && (
         <Modal title="곡 라이브러리" onClose={() => setLibraryOpen(false)}>
+          <p className={`admin-sync admin-sync-${librarySync}`} data-testid="lyrics-library-sync" role="status">
+            {librarySync === 'syncing'
+              ? '모든 기기의 가사 라이브러리를 불러오는 중…'
+              : librarySync === 'synced'
+                ? '공유 서버에 저장됨 · 모든 기기와 동기화됩니다.'
+                : librarySync === 'error'
+                  ? '공유 서버에 연결하지 못했습니다. 변경 사항은 이 기기에 보관하고 자동으로 다시 시도합니다.'
+                  : '공유 서버 미연결 · 이 기기에만 저장됩니다.'}
+          </p>
           <LibraryManager
             library={library}
             onDelete={removeFromUserLibrary}

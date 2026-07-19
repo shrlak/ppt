@@ -1,4 +1,4 @@
-# Shared Recognition Proxy
+# Shared Recognition Proxy and Library Backend
 
 A minimal Cloudflare Worker that lets everyone using the deployed lyrics app
 recognize scores with Gemini / OpenRouter / Hugging Face **without each person
@@ -19,6 +19,10 @@ Browser  ──POST /huggingface───▶  Worker (adds real key)  ──▶ 
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
+Everyone ◀──GET /libraries/lyrics── shared user-added lyrics
+Admin    ──PUT/DELETE /libraries/lyrics── save or delete lyrics
+Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
+Admin    ──POST/DELETE /libraries/ppt── save, edit, or delete PPT entries
 ```
 
 `GET/POST /settings` is what makes 관리자 설정 changes apply to **every
@@ -28,6 +32,20 @@ require the admin password (default: the app's built-in one; override with
 the `ADMIN_PASSWORD` secret). Only models from the shared catalog
 (`src/config.js`, mirrored in the app) can be prioritized, and POST /openrouter
 only forwards allowlisted catalog models to the shared key.
+
+The same Durable Object is also the source of truth for both user-facing
+libraries. Existing `localStorage` lyrics and IndexedDB PPT records are merged
+automatically the first time a browser connects. PPTX, PDF, and source PPTX
+files are transferred and stored in 1 MiB chunks, then fetched only when the
+user downloads or edits that entry. Each PPT-library entry is capped at 100 MB
+across all three files, and the shared library accepts up to 250 PPT entries.
+Browser storage remains an offline cache, so a temporary Worker outage does
+not discard a newly generated presentation. Deletion tombstones keep an old
+device from restoring an item deleted elsewhere.
+
+Library reads are limited by the same origin allowlist as recognition. Library
+writes require the administrator credential used by `/settings`. This matches
+the app's current shared-admin model; it is not per-user account isolation.
 
 The `/openrouter` route pins every request to one of three free vision models:
 NVIDIA Nemotron Nano 12B VL (document intelligence), Gemma 4 31B, or the
@@ -44,11 +62,11 @@ would have sent directly to the provider, just with the real key attached
 server-side. It only accepts requests from the origins you allow
 (`ALLOWED_ORIGINS`), so it can't be used as an open proxy by other sites.
 
-Successful and failed upstream requests are grouped by exact model in a
-SQLite-backed Durable Object. This is included in Cloudflare's Workers Free
-plan and is provisioned automatically by the migration in `wrangler.toml`.
-The admin panel reads `GET /usage` to show the shared-key totals across every
-browser using the site.
+Successful and failed upstream requests, shared settings, lyrics entries, and
+chunked PPT-library files are stored in a SQLite-backed Durable Object. It is
+provisioned automatically by the migration in `wrangler.toml`; no additional
+R2 bucket or database binding is required. The admin panel reads `GET /usage`
+to show the shared-key totals across every browser using the site.
 
 Gemini does not publish a portable API for the active project's remaining
 quota. Set `GEMINI_DAILY_REQUEST_LIMIT` in `wrangler.toml` to the current RPD

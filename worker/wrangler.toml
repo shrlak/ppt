@@ -25,6 +25,9 @@ HUGGINGFACE_USD_PER_SECOND = "0.00012"
 name = "USAGE_TRACKER"
 class_name = "UsageTracker"
 
+# This existing SQLite Durable Object stores shared AI usage/settings plus the
+# cross-device lyrics library and chunked PPT library. No R2/D1 binding needed.
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["UsageTracker"]
