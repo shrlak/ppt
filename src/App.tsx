@@ -345,7 +345,7 @@ export default function App() {
       const { merged } = await buildMergedDeck();
       const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
       const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      await saveDeckToLibrary({
+      const saved = await saveDeckToLibrary({
         name: savedName,
         pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
         contiPdf: contiFile,
@@ -353,7 +353,11 @@ export default function App() {
         slideCount,
         songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
       });
-      showToast(`'${savedName}'을(를) 라이브러리에 저장했습니다.`);
+      showToast(
+        saved.syncPending
+          ? `'${savedName}'을(를) 라이브러리에 저장했습니다. 서버 연결 시 다른 기기에도 자동으로 동기화됩니다.`
+          : `'${savedName}'을(를) 라이브러리에 저장했습니다.`,
+      );
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {

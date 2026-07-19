@@ -626,11 +626,13 @@ body {
   color: #15803d;
 }
 .admin-sync-saving,
-.admin-sync-loading {
+.admin-sync-loading,
+.admin-sync-syncing {
   color: var(--ink-muted);
 }
 .admin-sync-local,
-.admin-sync-error {
+.admin-sync-error,
+.admin-sync-pending {
   color: #b45309;
 }
 .admin-engine-note {

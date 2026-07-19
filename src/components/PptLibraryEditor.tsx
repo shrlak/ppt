@@ -92,9 +92,13 @@ export default function PptLibraryEditor({ deck, onClose, onSaved }: Props) {
       }
 
       const updated: SavedDeck = { ...deck, name: normalizedName, pptx: { name: normalizedName, data }, slideCount };
-      await updateSavedDeck(updated);
-      showToast(`'${normalizedName}'을(를) 수정했습니다.`);
-      onSaved(updated);
+      const saved = await updateSavedDeck(updated);
+      showToast(
+        saved.syncPending
+          ? `'${normalizedName}'을(를) 수정했습니다. 서버 연결 시 다른 기기에도 자동으로 반영됩니다.`
+          : `'${normalizedName}'을(를) 수정했습니다.`,
+      );
+      onSaved(saved);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

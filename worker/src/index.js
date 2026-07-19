@@ -14,6 +14,8 @@
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
+//   GET/PUT/DELETE /libraries/lyrics -> shared lyrics library
+//   GET/POST/DELETE /libraries/ppt   -> shared PPT library and chunk transfer
 //
 // See worker/README.md for deployment instructions.
 
@@ -26,6 +28,18 @@ import {
   usageStorageKey,
 } from './usage.js';
 import { adminPassword, resolveOpenRouterRoute, sanitizeSharedSettings, usageCatalogModels } from './config.js';
+import {
+  MAX_PPT_LIBRARY_DECKS,
+  PPT_CHUNK_BYTES,
+  PPT_FILE_KINDS,
+  normalizeLibraryTitle,
+  samePptFiles,
+  sanitizeLyricsEntries,
+  sanitizeLyricsEntry,
+  sanitizePptDeckMetadata,
+  sanitizePptUpload,
+  validLibraryId,
+} from './library.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -52,8 +66,8 @@ function corsHeaders(request, env) {
   const matched = allowed.includes(origin) ? origin : '';
   return {
     'Access-Control-Allow-Origin': matched,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     Vary: 'Origin',
   };
 }
@@ -95,12 +109,194 @@ export class UsageTracker extends DurableObject {
     await this.ctx.storage.put('shared-settings', value);
     return value;
   }
+
+  async lyricsLibrary() {
+    const stored = await this.ctx.storage.list({ prefix: 'library:lyrics:entry:' });
+    const tombstones = await this.ctx.storage.list({ prefix: 'library:lyrics:deleted:' });
+    return {
+      entries: [...stored.values()].map((value) => value.entry).filter(Boolean),
+      deletedTitles: [...tombstones.values()].map((value) => value.normalizedTitle).filter(Boolean),
+    };
+  }
+
+  async mergeLyricsLibrary(rawEntries) {
+    const entries = sanitizeLyricsEntries(rawEntries);
+    for (const entry of entries) {
+      const normalized = normalizeLibraryTitle(entry.title);
+      const entryKey = `library:lyrics:entry:${normalized}`;
+      const deletedKey = `library:lyrics:deleted:${normalized}`;
+      const [existing, deleted] = await Promise.all([
+        this.ctx.storage.get(entryKey),
+        this.ctx.storage.get(deletedKey),
+      ]);
+      // The merge route is only for one-time migration of browser data. A
+      // cloud copy wins, and a deletion tombstone must never be resurrected
+      // by another device's stale IndexedDB/localStorage cache.
+      if (!existing && !deleted) {
+        await this.ctx.storage.put(entryKey, { entry, updatedAt: new Date().toISOString() });
+      }
+    }
+    return this.lyricsLibrary();
+  }
+
+  async upsertLyricsEntry(rawEntry) {
+    const entry = sanitizeLyricsEntry(rawEntry);
+    if (!entry) throw new Error('invalid lyrics entry');
+    const normalized = normalizeLibraryTitle(entry.title);
+    await this.ctx.storage.put(`library:lyrics:entry:${normalized}`, {
+      entry,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.ctx.storage.delete(`library:lyrics:deleted:${normalized}`);
+    return entry;
+  }
+
+  async deleteLyricsEntry(title) {
+    const normalized = normalizeLibraryTitle(title);
+    if (!normalized) throw new Error('invalid lyrics title');
+    await this.ctx.storage.delete(`library:lyrics:entry:${normalized}`);
+    await this.ctx.storage.put(`library:lyrics:deleted:${normalized}`, {
+      normalizedTitle: normalized,
+      deletedAt: new Date().toISOString(),
+    });
+  }
+
+  async cleanupPptUpload(uploadId, files) {
+    const keys = [];
+    for (const kind of PPT_FILE_KINDS) {
+      const descriptor = files?.[kind];
+      if (!descriptor) continue;
+      for (let index = 0; index < descriptor.chunkCount; index += 1) {
+        keys.push(`library:ppt:chunk:${uploadId}:${kind}:${index}`);
+      }
+    }
+    for (let index = 0; index < keys.length; index += 128) {
+      await this.ctx.storage.delete(keys.slice(index, index + 128));
+    }
+  }
+
+  async cleanupStalePptUploads() {
+    const manifests = await this.ctx.storage.list({ prefix: 'library:ppt:upload:' });
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [key, manifest] of manifests) {
+      if (new Date(manifest.createdAt).getTime() >= cutoff) continue;
+      await this.cleanupPptUpload(manifest.uploadId, manifest.files);
+      await this.ctx.storage.delete(key);
+    }
+  }
+
+  async startPptUpload(rawUpload) {
+    const upload = sanitizePptUpload(rawUpload);
+    if (!upload) throw new Error('invalid PPT upload');
+    await this.cleanupStalePptUploads();
+    const key = `library:ppt:upload:${upload.uploadId}`;
+    if (await this.ctx.storage.get(key)) throw new Error('upload already exists');
+    const manifest = { ...upload, createdAt: new Date().toISOString() };
+    await this.ctx.storage.put(key, manifest);
+    return manifest;
+  }
+
+  async putPptChunk(uploadId, kind, index, data) {
+    if (!validLibraryId(uploadId) || !PPT_FILE_KINDS.includes(kind)) throw new Error('invalid chunk target');
+    const manifest = await this.ctx.storage.get(`library:ppt:upload:${uploadId}`);
+    const descriptor = manifest?.files?.[kind];
+    if (!descriptor || !Number.isSafeInteger(index) || index < 0 || index >= descriptor.chunkCount) {
+      throw new Error('invalid chunk index');
+    }
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0 || data.byteLength > PPT_CHUNK_BYTES) {
+      throw new Error('invalid chunk body');
+    }
+    const expectedBytes =
+      index === descriptor.chunkCount - 1
+        ? descriptor.size - PPT_CHUNK_BYTES * (descriptor.chunkCount - 1)
+        : PPT_CHUNK_BYTES;
+    if (data.byteLength !== expectedBytes) throw new Error('chunk size does not match manifest');
+    await this.ctx.storage.put(`library:ppt:chunk:${uploadId}:${kind}:${index}`, data);
+  }
+
+  async commitPptDeck(rawDeck) {
+    const deck = sanitizePptDeckMetadata(rawDeck);
+    if (!deck) throw new Error('invalid PPT metadata');
+    const uploadKey = `library:ppt:upload:${deck.uploadId}`;
+    const manifest = await this.ctx.storage.get(uploadKey);
+    if (!manifest || manifest.deckId !== deck.id || !samePptFiles(manifest.files, deck.files)) {
+      throw new Error('PPT upload manifest does not match');
+    }
+
+    for (const kind of PPT_FILE_KINDS) {
+      const descriptor = deck.files[kind];
+      if (!descriptor) continue;
+      for (let index = 0; index < descriptor.chunkCount; index += 1) {
+        const chunk = await this.ctx.storage.get(`library:ppt:chunk:${deck.uploadId}:${kind}:${index}`);
+        if (!(chunk instanceof ArrayBuffer)) throw new Error(`missing ${kind} chunk ${index}`);
+      }
+    }
+
+    const metaKey = `library:ppt:meta:${deck.id}`;
+    const previous = await this.ctx.storage.get(metaKey);
+    if (!previous) {
+      const all = await this.ctx.storage.list({ prefix: 'library:ppt:meta:' });
+      if (all.size >= MAX_PPT_LIBRARY_DECKS) throw new Error('PPT library is full');
+    }
+    await this.ctx.storage.put(metaKey, deck);
+    await this.ctx.storage.delete(uploadKey);
+    await this.ctx.storage.delete(`library:ppt:deleted:${deck.id}`);
+    if (previous && previous.uploadId !== deck.uploadId) {
+      await this.cleanupPptUpload(previous.uploadId, previous.files);
+    }
+    return deck;
+  }
+
+  async pptLibrary() {
+    const [stored, tombstones] = await Promise.all([
+      this.ctx.storage.list({ prefix: 'library:ppt:meta:' }),
+      this.ctx.storage.list({ prefix: 'library:ppt:deleted:' }),
+    ]);
+    return {
+      decks: [...stored.values()].sort((a, b) => b.savedAt.localeCompare(a.savedAt)),
+      deletedIds: [...tombstones.values()].map((value) => value.id).filter(Boolean),
+    };
+  }
+
+  async getPptDeck(id) {
+    if (!validLibraryId(id, 100)) return null;
+    return (await this.ctx.storage.get(`library:ppt:meta:${id}`)) ?? null;
+  }
+
+  async getPptChunk(id, kind, index) {
+    const deck = await this.getPptDeck(id);
+    const descriptor = deck?.files?.[kind];
+    if (!descriptor || !Number.isSafeInteger(index) || index < 0 || index >= descriptor.chunkCount) return null;
+    return (await this.ctx.storage.get(`library:ppt:chunk:${deck.uploadId}:${kind}:${index}`)) ?? null;
+  }
+
+  async deletePptDeck(id) {
+    if (!validLibraryId(id, 100)) throw new Error('invalid PPT library ID');
+    const deck = await this.getPptDeck(id);
+    if (deck) {
+      await this.ctx.storage.delete(`library:ppt:meta:${id}`);
+      await this.cleanupPptUpload(deck.uploadId, deck.files);
+    }
+    await this.ctx.storage.put(`library:ppt:deleted:${id}`, { id, deletedAt: new Date().toISOString() });
+  }
 }
 
 function usageTracker(env) {
   if (!env.USAGE_TRACKER) return null;
   const id = env.USAGE_TRACKER.idFromName('shared-recognition-api-usage');
   return env.USAGE_TRACKER.get(id);
+}
+
+function isAdminRequest(request, env) {
+  const authorization = request.headers.get('Authorization') || '';
+  return authorization === `Bearer ${adminPassword(env)}`;
+}
+
+function libraryError(error, headers, status = 400) {
+  return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, status, {
+    ...headers,
+    'Cache-Control': 'no-store',
+  });
 }
 
 async function recordUsage(env, event) {
@@ -171,6 +367,124 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // Cross-device libraries share the same strongly consistent Durable
+    // Object already used by recognition settings. Reads are available to the
+    // app; writes use the same administrator password as 관리자 설정.
+    if (url.pathname === '/libraries/lyrics') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        if (request.method === 'GET') {
+          return jsonResponse(await tracker.lyricsLibrary(), 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+        if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+        const body = JSON.parse(await request.text());
+        if (request.method === 'POST') {
+          return jsonResponse(await tracker.mergeLyricsLibrary(body.entries), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'PUT') {
+          return jsonResponse({ entry: await tracker.upsertLyricsEntry(body.entry) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'DELETE') {
+          await tracker.deleteLyricsEntry(body.title);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
+    if (url.pathname === '/libraries/ppt') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      if (request.method !== 'GET') return libraryError('not found', headers, 404);
+      try {
+        return jsonResponse(await tracker.pptLibrary(), 200, { ...headers, 'Cache-Control': 'no-store' });
+      } catch (error) {
+        return libraryError(error, headers, 500);
+      }
+    }
+
+    const uploadStart = url.pathname.match(/^\/libraries\/ppt\/uploads\/([A-Za-z0-9_-]+)$/);
+    if (uploadStart && request.method === 'POST') {
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        const body = JSON.parse(await request.text());
+        if (body.uploadId !== uploadStart[1]) return libraryError('upload ID does not match', headers);
+        return jsonResponse(await tracker.startPptUpload(body), 201, { ...headers, 'Cache-Control': 'no-store' });
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+    }
+
+    const chunkUpload = url.pathname.match(
+      /^\/libraries\/ppt\/uploads\/([A-Za-z0-9_-]+)\/files\/(pptx|contiPdf|sermonPptx)\/chunks\/(\d+)$/,
+    );
+    if (chunkUpload && request.method === 'PUT') {
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        await tracker.putPptChunk(chunkUpload[1], chunkUpload[2], Number(chunkUpload[3]), await request.arrayBuffer());
+        return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+    }
+
+    const pptChunk = url.pathname.match(
+      /^\/libraries\/ppt\/([A-Za-z0-9_-]+)\/files\/(pptx|contiPdf|sermonPptx)\/chunks\/(\d+)$/,
+    );
+    if (pptChunk && request.method === 'GET') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      const chunk = await tracker.getPptChunk(pptChunk[1], pptChunk[2], Number(pptChunk[3]));
+      if (!(chunk instanceof ArrayBuffer)) return libraryError('file chunk not found', headers, 404);
+      return new Response(chunk, {
+        status: 200,
+        headers: { ...headers, 'Content-Type': 'application/octet-stream', 'Cache-Control': 'private, max-age=300' },
+      });
+    }
+
+    const pptDeck = url.pathname.match(/^\/libraries\/ppt\/([A-Za-z0-9_-]+)$/);
+    if (pptDeck) {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        if (request.method === 'GET') {
+          const deck = await tracker.getPptDeck(pptDeck[1]);
+          return deck
+            ? jsonResponse({ deck }, 200, { ...headers, 'Cache-Control': 'no-store' })
+            : libraryError('PPT library entry not found', headers, 404);
+        }
+        if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+        if (request.method === 'POST') {
+          const body = JSON.parse(await request.text());
+          if (body.deck?.id !== pptDeck[1]) return libraryError('deck ID does not match', headers);
+          return jsonResponse({ deck: await tracker.commitPptDeck(body.deck) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'DELETE') {
+          await tracker.deletePptDeck(pptDeck[1]);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
 
     if (request.method === 'GET' && url.pathname === '/usage') {
       try {

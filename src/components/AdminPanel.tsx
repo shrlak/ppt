@@ -19,6 +19,7 @@ import {
   type SharedRecognitionSettings,
 } from '../lib/ai/aiSettings';
 import { showToast } from '../lib/utils/toast';
+import { ADMIN_PASSWORD, ADMIN_UNLOCK_KEY } from '../lib/adminAuth';
 
 interface Props {
   onClose: () => void;
@@ -130,13 +131,10 @@ function DeckSlotRow({
 // Soft gate to keep casual visitors out of deck administration. This is a
 // static client-side site, so the check can't be real security — the decks
 // it protects live in the visitor's own browser anyway.
-const ADMIN_PASSWORD = 'kccpmedia1980';
-const UNLOCK_KEY = 'kccp-admin-unlocked';
-
 export default function AdminPanel({ onClose, onDeckChange }: Props) {
   const [unlocked, setUnlocked] = useState(() => {
     try {
-      return sessionStorage.getItem(UNLOCK_KEY) === '1';
+      return sessionStorage.getItem(ADMIN_UNLOCK_KEY) === '1';
     } catch {
       return false;
     }
@@ -147,7 +145,7 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
   function handleUnlock() {
     if (password === ADMIN_PASSWORD) {
       try {
-        sessionStorage.setItem(UNLOCK_KEY, '1');
+        sessionStorage.setItem(ADMIN_UNLOCK_KEY, '1');
       } catch {
         // Session-only unlock still works without storage.
       }
