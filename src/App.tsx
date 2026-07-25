@@ -345,7 +345,7 @@ export default function App() {
       const { merged } = await buildMergedDeck();
       const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
       const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      const saved = await saveDeckToLibrary({
+      const { deck: saved, replaced } = await saveDeckToLibrary({
         name: savedName,
         pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
         contiPdf: contiFile,
@@ -353,10 +353,14 @@ export default function App() {
         slideCount,
         songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
       });
+      const message =
+        replaced > 0
+          ? `같은 이름의 기존 PPT를 덮어쓰고 '${savedName}'을(를) 라이브러리에 저장했습니다.`
+          : `'${savedName}'을(를) 라이브러리에 저장했습니다.`;
       showToast(
         saved.syncPending
-          ? `'${savedName}'을(를) 라이브러리에 저장했습니다. 서버 연결 시 다른 기기에도 자동으로 동기화됩니다.`
-          : `'${savedName}'을(를) 라이브러리에 저장했습니다.`,
+          ? `${message} 서버 연결 시 다른 기기에도 자동으로 동기화됩니다.`
+          : message,
       );
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');

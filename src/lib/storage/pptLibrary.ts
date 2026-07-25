@@ -3,6 +3,7 @@
 // source of truth. Binary files travel in 1 MiB chunks so a complete generated
 // deck and its source PDF/PPTX files never depend on browser storage alone.
 import JSZip from 'jszip';
+import { decksWithSameName } from './deckNames';
 import {
   cloudLibraryJson,
   cloudLibraryRequest,
@@ -35,6 +36,12 @@ export interface SavedDeck {
 }
 
 export type SavedDeckInput = Omit<SavedDeck, 'id' | 'savedAt' | 'updatedAt' | 'syncPending'>;
+
+export interface SavedDeckResult {
+  deck: SavedDeck;
+  /** Same-name entries this write replaced; 0 when the entry is brand new. */
+  replaced: number;
+}
 
 export interface SavedFileSummary {
   name: string;
@@ -316,6 +323,49 @@ async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDe
   return deck;
 }
 
+interface DeckIdentity {
+  id: string;
+  name: string;
+  savedAt: string;
+}
+
+/**
+ * Every entry this device can see: the IndexedDB cache plus cloud metadata, so
+ * a deck saved on another device is still overwritten instead of duplicated.
+ * Falls back to the local cache alone when the shared library is unreachable.
+ */
+async function knownDecks(): Promise<DeckIdentity[]> {
+  const decks = new Map<string, DeckIdentity>();
+  for (const deck of await listLocalDecks()) {
+    decks.set(deck.id, { id: deck.id, name: deck.name, savedAt: deck.savedAt });
+  }
+  if (hasCloudLibrary()) {
+    try {
+      const snapshot = await fetchRemoteLibrary();
+      for (const id of snapshot.deletedIds) decks.delete(id);
+      for (const deck of snapshot.decks) decks.set(deck.id, { id: deck.id, name: deck.name, savedAt: deck.savedAt });
+    } catch {
+      // Offline or server down: the local cache is the best list available.
+    }
+  }
+  return [...decks.values()];
+}
+
+/**
+ * Collapse leftover same-name entries into the one just written. Only reachable
+ * for duplicates saved before same-name writes overwrote, or when a rename
+ * lands on another entry's name. Failures here never fail the save itself.
+ */
+async function removeSupersededDecks(decks: DeckIdentity[]): Promise<void> {
+  for (const deck of decks) {
+    try {
+      await deleteSavedDeck(deck.id);
+    } catch {
+      // Keeping the stale copy is better than losing the write that replaced it.
+    }
+  }
+}
+
 /** Confirm the bytes are a loadable .pptx before archiving them. */
 export async function inspectDeckBytes(data: ArrayBuffer): Promise<{ slideCount: number }> {
   let zip: JSZip;
@@ -328,32 +378,44 @@ export async function inspectDeckBytes(data: ArrayBuffer): Promise<{ slideCount:
   return { slideCount };
 }
 
-export async function saveDeckToLibrary(entry: SavedDeckInput): Promise<SavedDeck> {
+/**
+ * Save a generated deck. Saving under a name the library already holds replaces
+ * that entry — same ID, new bytes — instead of leaving two copies behind.
+ */
+export async function saveDeckToLibrary(entry: SavedDeckInput): Promise<SavedDeckResult> {
+  const [existing, ...superseded] = decksWithSameName(await knownDecks(), entry.name);
+  const now = new Date().toISOString();
   let saved: SavedDeck = {
     ...entry,
-    id: crypto.randomUUID(),
-    savedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    id: existing?.id ?? crypto.randomUUID(),
+    savedAt: now,
+    updatedAt: now,
   };
   await putLocalDeck(saved);
-  if (!hasCloudLibrary()) return saved;
+  await removeSupersededDecks(superseded);
+  const replaced = existing ? superseded.length + 1 : 0;
+  if (!hasCloudLibrary()) return { deck: saved, replaced };
   try {
     const remote = await uploadDeckToCloud(saved);
     saved = { ...saved, updatedAt: remote.updatedAt, syncPending: false };
-    await putLocalDeck(saved);
-    return saved;
   } catch {
     saved = { ...saved, syncPending: true };
-    await putLocalDeck(saved);
-    return saved;
   }
+  await putLocalDeck(saved);
+  return { deck: saved, replaced };
 }
 
-/** Overwrite an existing entry in place, locally first and then in the cloud. */
-export async function updateSavedDeck(deck: SavedDeck): Promise<SavedDeck> {
+/**
+ * Overwrite an existing entry in place, locally first and then in the cloud. A
+ * rename onto another entry's name replaces that entry too, so the library
+ * never ends up with two decks under one name.
+ */
+export async function updateSavedDeck(deck: SavedDeck): Promise<SavedDeckResult> {
   let updated: SavedDeck = { ...deck, updatedAt: new Date().toISOString(), syncPending: false };
   await putLocalDeck(updated);
-  if (!hasCloudLibrary()) return updated;
+  const superseded = decksWithSameName(await knownDecks(), updated.name, updated.id);
+  await removeSupersededDecks(superseded);
+  if (!hasCloudLibrary()) return { deck: updated, replaced: superseded.length };
   try {
     const remote = await uploadDeckToCloud(updated);
     updated = { ...updated, updatedAt: remote.updatedAt, syncPending: false };
@@ -361,7 +423,7 @@ export async function updateSavedDeck(deck: SavedDeck): Promise<SavedDeck> {
     updated = { ...updated, syncPending: true };
   }
   await putLocalDeck(updated);
-  return updated;
+  return { deck: updated, replaced: superseded.length };
 }
 
 /**
