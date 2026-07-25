@@ -301,6 +301,33 @@ test('PPT library saves a generated deck with its source files and can re-downlo
   await expect(page.getByTestId('library-empty')).toBeVisible();
 });
 
+test('saving the same file name twice overwrites the library entry instead of adding a copy', async ({ page }) => {
+  await page.goto('./');
+  await uploadExamplePdf(page);
+  await moveFromLyricsToDownload(page);
+
+  // The file name comes from the conti date, so a second save reuses it.
+  await page.getByTestId('save-to-library').click();
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible();
+
+  await page.getByTestId('library-open').click();
+  const savedName = (await page.getByTestId('library-entry').locator('.library-entry-name').innerText()).trim();
+  await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+
+  await page.getByTestId('save-to-library').click();
+  await expect(page.getByText(/같은 이름의 기존 PPT를 덮어쓰고/)).toBeVisible();
+
+  await page.getByTestId('library-open').click();
+  await expect(page.getByTestId('library-entry')).toHaveCount(1);
+  await expect(page.getByTestId('library-entry')).toContainText(savedName);
+
+  // Still one entry after a reload — the first copy was replaced in storage,
+  // not just hidden from the list.
+  await page.reload();
+  await page.getByTestId('library-open').click();
+  await expect(page.getByTestId('library-entry')).toHaveCount(1);
+});
+
 test('PPT library entries can be renamed and trimmed, and the saved file reflects the edit', async ({ page }, testInfo) => {
   await page.goto('./');
   await uploadExamplePdf(page);

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
 import PptLibraryEditor from './PptLibraryEditor';
+import { deckNameKey } from '../lib/storage/deckNames';
 import {
   deleteSavedDeck,
   getSavedDeck,
@@ -166,15 +167,17 @@ export default function PptLibraryPanel({ onClose }: Props) {
   }, []);
 
   function handleSaved(updated: SavedDeck) {
-    setSnapshot((current) =>
-      current
-        ? {
-            ...current,
-            sync: updated.syncPending ? 'pending' : current.sync,
-            decks: current.decks.map((deck) => (deck.id === updated.id ? summarizeSavedDeck(updated) : deck)),
-          }
-        : current,
-    );
+    setSnapshot((current) => {
+      if (!current) return current;
+      const summary = summarizeSavedDeck(updated);
+      const nameKey = deckNameKey(summary.name);
+      // A rename onto an existing name overwrote that entry — drop it here too
+      // instead of waiting for the next refresh to notice it is gone.
+      const decks = current.decks
+        .filter((deck) => deck.id === summary.id || deckNameKey(deck.name) !== nameKey)
+        .map((deck) => (deck.id === summary.id ? summary : deck));
+      return { ...current, sync: updated.syncPending ? 'pending' : current.sync, decks };
+    });
   }
 
   const decks = snapshot?.decks ?? null;
