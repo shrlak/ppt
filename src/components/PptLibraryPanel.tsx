@@ -3,14 +3,11 @@
 // material can be found and re-downloaded later without regenerating it.
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
-import PptLibraryEditor from './PptLibraryEditor';
-import { deckNameKey } from '../lib/storage/deckNames';
 import {
   deleteSavedDeck,
   getSavedDeck,
   getSavedDeckFile,
   listSavedDecks,
-  summarizeSavedDeck,
   type PptLibrarySnapshot,
   type SavedDeck,
   type SavedDeckSummary,
@@ -21,6 +18,8 @@ import { showToast } from '../lib/utils/toast';
 
 interface Props {
   onClose: () => void;
+  /** Hands a fully loaded deck to the app, which reopens it in the 단계별 editor. */
+  onEdit: (deck: SavedDeck) => void;
 }
 
 function downloadFile(file: SavedFile) {
@@ -147,9 +146,8 @@ function LibraryEntryCard({
   );
 }
 
-export default function PptLibraryPanel({ onClose }: Props) {
+export default function PptLibraryPanel({ onClose, onEdit }: Props) {
   const [snapshot, setSnapshot] = useState<PptLibrarySnapshot | null>(null);
-  const [editingDeck, setEditingDeck] = useState<SavedDeck | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,69 +164,46 @@ export default function PptLibraryPanel({ onClose }: Props) {
     };
   }, []);
 
-  function handleSaved(updated: SavedDeck) {
-    setSnapshot((current) => {
-      if (!current) return current;
-      const summary = summarizeSavedDeck(updated);
-      const nameKey = deckNameKey(summary.name);
-      // A rename onto an existing name overwrote that entry — drop it here too
-      // instead of waiting for the next refresh to notice it is gone.
-      const decks = current.decks
-        .filter((deck) => deck.id === summary.id || deckNameKey(deck.name) !== nameKey)
-        .map((deck) => (deck.id === summary.id ? summary : deck));
-      return { ...current, sync: updated.syncPending ? 'pending' : current.sync, decks };
-    });
-  }
-
   const decks = snapshot?.decks ?? null;
 
   return (
-    <>
-      <Modal title="PPT 라이브러리" onClose={onClose}>
-        <p className="admin-intro">
-          저장한 예배 PPT와 콘티 PDF·설교 PPT를 어느 기기에서나 다시 열고 다운로드할 수 있습니다.
-          기존 브라우저 저장본도 자동으로 공유 라이브러리에 옮겨집니다.
+    <Modal title="PPT 라이브러리" onClose={onClose}>
+      <p className="admin-intro">
+        저장한 예배 PPT와 콘티 PDF·설교 PPT를 어느 기기에서나 다시 열고 다운로드할 수 있습니다.
+        <strong> 편집</strong>을 누르면 저장할 때의 입력 내용 그대로 찬양·성경 말씀·설교·광고 단계가
+        다시 열리고, 저장하면 같은 항목이 갱신됩니다.
+      </p>
+      {snapshot && (
+        <p className={`admin-sync admin-sync-${snapshot.sync}`} data-testid="ppt-library-sync" role="status">
+          {snapshot.sync === 'synced'
+            ? '공유 서버에 저장됨 · 모든 기기와 동기화됩니다.'
+            : snapshot.sync === 'pending'
+              ? '일부 변경 사항이 이 기기에 안전하게 보관되어 있으며 서버 연결 시 자동으로 다시 동기화됩니다.'
+              : '공유 서버 미연결 · 이 기기에만 저장됩니다.'}
         </p>
-        {snapshot && (
-          <p className={`admin-sync admin-sync-${snapshot.sync}`} data-testid="ppt-library-sync" role="status">
-            {snapshot.sync === 'synced'
-              ? '공유 서버에 저장됨 · 모든 기기와 동기화됩니다.'
-              : snapshot.sync === 'pending'
-                ? '일부 변경 사항이 이 기기에 안전하게 보관되어 있으며 서버 연결 시 자동으로 다시 동기화됩니다.'
-                : '공유 서버 미연결 · 이 기기에만 저장됩니다.'}
-          </p>
-        )}
-        {decks === null ? (
-          <p className="empty-hint">불러오는 중…</p>
-        ) : decks.length === 0 ? (
-          <p className="empty-hint" data-testid="library-empty">
-            아직 저장된 PPT가 없습니다.
-          </p>
-        ) : (
-          <div className="library-list" data-testid="library-list">
-            {decks.map((deck) => (
-              <LibraryEntryCard
-                key={deck.id}
-                deck={deck}
-                onEdit={setEditingDeck}
-                onDeleted={(id) =>
-                  setSnapshot((current) =>
-                    current ? { ...current, decks: current.decks.filter((candidate) => candidate.id !== id) } : current,
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
-      </Modal>
-      {editingDeck && (
-        <PptLibraryEditor
-          key={editingDeck.id}
-          deck={editingDeck}
-          onClose={() => setEditingDeck(null)}
-          onSaved={handleSaved}
-        />
       )}
-    </>
+      {decks === null ? (
+        <p className="empty-hint">불러오는 중…</p>
+      ) : decks.length === 0 ? (
+        <p className="empty-hint" data-testid="library-empty">
+          아직 저장된 PPT가 없습니다.
+        </p>
+      ) : (
+        <div className="library-list" data-testid="library-list">
+          {decks.map((deck) => (
+            <LibraryEntryCard
+              key={deck.id}
+              deck={deck}
+              onEdit={onEdit}
+              onDeleted={(id) =>
+                setSnapshot((current) =>
+                  current ? { ...current, decks: current.decks.filter((candidate) => candidate.id !== id) } : current,
+                )
+              }
+            />
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }

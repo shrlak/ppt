@@ -95,6 +95,12 @@ interface Props {
   onContiInfoDetected?: (info: ContiInfo) => void;
   /** Fired with the raw uploaded conti PDF, so it can be archived alongside a saved deck. */
   onContiFileLoaded?: (file: { name: string; data: ArrayBuffer }) => void;
+  /** Bumped when a 라이브러리 deck is reopened, to load its songs back in. */
+  restoreVersion?: number;
+  /** Songs saved with that deck; they replace the current list as-is. */
+  restoreSongs?: Song[] | null;
+  /** Its archived 콘티 PDF, re-parsed when the entry predates saved songs. */
+  restoreConti?: { name: string; data: ArrayBuffer } | null;
 }
 
 export default function LyricsGenerator({
@@ -102,6 +108,9 @@ export default function LyricsGenerator({
   onDateDetected,
   onContiInfoDetected,
   onContiFileLoaded,
+  restoreVersion = 0,
+  restoreSongs = null,
+  restoreConti = null,
 }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
@@ -671,6 +680,35 @@ export default function LyricsGenerator({
   useEffect(() => {
     onSongsChange(songs);
   }, [songs, onSongsChange]);
+
+  /**
+   * Reopen a 라이브러리 deck in this step. Songs saved with the deck are
+   * authoritative and load as-is — no re-parsing, no recognition, so the
+   * lyrics come back exactly as they were downloaded. An entry saved before
+   * snapshots existed has only its archived 콘티 PDF, which is re-parsed the
+   * same way a fresh upload is.
+   */
+  useEffect(() => {
+    if (restoreVersion === 0) return;
+    if (restoreSongs) {
+      docRef.current?.destroy();
+      docRef.current = null;
+      infoRef.current = null;
+      setInfo(null);
+      setSongs(restoreSongs.map((song) => structuredClone(song)));
+      setPageImages({});
+      setRecog({});
+      setEdited(false);
+      autoAttemptedRef.current.clear();
+      scanCancelledRef.current.clear();
+      return;
+    }
+    if (restoreConti) {
+      void handleFile(new File([restoreConti.data], restoreConti.name, { type: 'application/pdf' }));
+    }
+    // Only a version bump restores; the payload props changing identity must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreVersion]);
 
   /** Manual "save to library" button press — same as auto-save, but confirms with a toast. */
   const handleSaveToLibrary = useCallback(

@@ -15,7 +15,10 @@ export interface SavedFile {
   data: ArrayBuffer;
 }
 
-export type SavedFileKind = 'pptx' | 'contiPdf' | 'sermonPptx';
+export type SavedFileKind = 'pptx' | 'contiPdf' | 'sermonPptx' | 'source';
+
+/** Every kind travels the same chunked upload/download path. */
+export const SAVED_FILE_KINDS: SavedFileKind[] = ['pptx', 'contiPdf', 'sermonPptx', 'source'];
 
 export interface SavedDeck {
   id: string;
@@ -26,6 +29,12 @@ export interface SavedDeck {
   /** Source files the deck was built from, kept for reference (optional). */
   contiPdf: SavedFile | null;
   sermonPptx: SavedFile | null;
+  /**
+   * The wizard inputs this deck was generated from (see deckSource.ts), so
+   * 편집 can reopen it in the five-step editor. Null for entries saved before
+   * snapshots existed — those restore only from the files above.
+   */
+  source: SavedFile | null;
   slideCount: number;
   songTitles: string[];
   savedAt: string;
@@ -55,6 +64,7 @@ export interface SavedDeckSummary {
   pptx: SavedFileSummary;
   contiPdf: SavedFileSummary | null;
   sermonPptx: SavedFileSummary | null;
+  source: SavedFileSummary | null;
   slideCount: number;
   songTitles: string[];
   savedAt: string;
@@ -76,6 +86,7 @@ interface RemoteDeckMetadata {
     pptx: SavedFileSummary;
     contiPdf: SavedFileSummary | null;
     sermonPptx: SavedFileSummary | null;
+    source: SavedFileSummary | null;
   };
   slideCount: number;
   songTitles: string[];
@@ -121,6 +132,8 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
 function normalizeLocalDeck(deck: SavedDeck): SavedDeck {
   return {
     ...deck,
+    // Records written before inputs snapshots existed have no `source` key.
+    source: deck.source ?? null,
     updatedAt: deck.updatedAt || deck.savedAt,
   };
 }
@@ -168,6 +181,7 @@ function filesForDeck(deck: SavedDeck): RemoteDeckMetadata['files'] {
     pptx: descriptor(deck.pptx),
     contiPdf: deck.contiPdf ? descriptor(deck.contiPdf) : null,
     sermonPptx: deck.sermonPptx ? descriptor(deck.sermonPptx) : null,
+    source: deck.source ? descriptor(deck.source) : null,
   };
 }
 
@@ -178,6 +192,8 @@ function summaryFromRemote(deck: RemoteDeckMetadata, syncPending = false): Saved
     pptx: deck.files.pptx,
     contiPdf: deck.files.contiPdf,
     sermonPptx: deck.files.sermonPptx,
+    // A deck uploaded by an older build has no snapshot descriptor at all.
+    source: deck.files.source ?? null,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
     savedAt: deck.savedAt,
@@ -194,6 +210,7 @@ export function summarizeSavedDeck(deck: SavedDeck): SavedDeckSummary {
     pptx: files.pptx,
     contiPdf: files.contiPdf,
     sermonPptx: files.sermonPptx,
+    source: files.source,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
     savedAt: deck.savedAt,
@@ -214,7 +231,7 @@ async function inBatches<T>(items: T[], run: (item: T) => Promise<void>): Promis
 
 async function uploadDeckToCloud(deck: SavedDeck): Promise<RemoteDeckMetadata> {
   const files = filesForDeck(deck);
-  const totalBytes = files.pptx.size + (files.contiPdf?.size ?? 0) + (files.sermonPptx?.size ?? 0);
+  const totalBytes = SAVED_FILE_KINDS.reduce((sum, kind) => sum + (files[kind]?.size ?? 0), 0);
   if (files.pptx.size === 0) throw new Error('빈 PPTX 파일은 동기화할 수 없습니다.');
   if (totalBytes > MAX_PPT_LIBRARY_BYTES) {
     throw new Error('PPT와 원본 파일의 합계가 공유 라이브러리의 항목당 100MB 한도를 초과합니다.');
@@ -228,7 +245,7 @@ async function uploadDeckToCloud(deck: SavedDeck): Promise<RemoteDeckMetadata> {
   }, true);
 
   const chunks: { kind: SavedFileKind; index: number; data: ArrayBuffer }[] = [];
-  for (const kind of ['pptx', 'contiPdf', 'sermonPptx'] as const) {
+  for (const kind of SAVED_FILE_KINDS) {
     const file = fileForKind(deck, kind);
     if (!file) continue;
     const count = Math.max(1, Math.ceil(file.data.byteLength / PPT_LIBRARY_CHUNK_BYTES));
@@ -302,10 +319,11 @@ async function downloadRemoteFile(deck: RemoteDeckMetadata, kind: SavedFileKind)
 }
 
 async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDeck> {
-  const [pptx, contiPdf, sermonPptx] = await Promise.all([
+  const [pptx, contiPdf, sermonPptx, source] = await Promise.all([
     downloadRemoteFile(metadata, 'pptx'),
     downloadRemoteFile(metadata, 'contiPdf'),
     downloadRemoteFile(metadata, 'sermonPptx'),
+    downloadRemoteFile(metadata, 'source'),
   ]);
   if (!pptx) throw new Error('공유 라이브러리에서 PPTX 파일을 찾지 못했습니다.');
   const deck: SavedDeck = {
@@ -314,6 +332,7 @@ async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDe
     pptx,
     contiPdf,
     sermonPptx,
+    source,
     slideCount: metadata.slideCount,
     songTitles: metadata.songTitles,
     savedAt: metadata.savedAt,
@@ -381,19 +400,25 @@ export async function inspectDeckBytes(data: ArrayBuffer): Promise<{ slideCount:
 /**
  * Save a generated deck. Saving under a name the library already holds replaces
  * that entry — same ID, new bytes — instead of leaving two copies behind.
+ *
+ * `replaceId` targets one specific entry regardless of its name, which is how
+ * 편집 writes a reopened deck back: the entry keeps its identity even when the
+ * edit renamed it, and any other entry now sharing that name gives way.
  */
-export async function saveDeckToLibrary(entry: SavedDeckInput): Promise<SavedDeckResult> {
-  const [existing, ...superseded] = decksWithSameName(await knownDecks(), entry.name);
+export async function saveDeckToLibrary(entry: SavedDeckInput, replaceId?: string): Promise<SavedDeckResult> {
+  const sameName = decksWithSameName(await knownDecks(), entry.name, replaceId);
+  const [existing, ...rest] = sameName;
+  const superseded = replaceId ? sameName : rest;
   const now = new Date().toISOString();
   let saved: SavedDeck = {
     ...entry,
-    id: existing?.id ?? crypto.randomUUID(),
+    id: replaceId ?? existing?.id ?? crypto.randomUUID(),
     savedAt: now,
     updatedAt: now,
   };
   await putLocalDeck(saved);
   await removeSupersededDecks(superseded);
-  const replaced = existing ? superseded.length + 1 : 0;
+  const replaced = replaceId ? sameName.length : existing ? rest.length + 1 : 0;
   if (!hasCloudLibrary()) return { deck: saved, replaced };
   try {
     const remote = await uploadDeckToCloud(saved);
@@ -403,27 +428,6 @@ export async function saveDeckToLibrary(entry: SavedDeckInput): Promise<SavedDec
   }
   await putLocalDeck(saved);
   return { deck: saved, replaced };
-}
-
-/**
- * Overwrite an existing entry in place, locally first and then in the cloud. A
- * rename onto another entry's name replaces that entry too, so the library
- * never ends up with two decks under one name.
- */
-export async function updateSavedDeck(deck: SavedDeck): Promise<SavedDeckResult> {
-  let updated: SavedDeck = { ...deck, updatedAt: new Date().toISOString(), syncPending: false };
-  await putLocalDeck(updated);
-  const superseded = decksWithSameName(await knownDecks(), updated.name, updated.id);
-  await removeSupersededDecks(superseded);
-  if (!hasCloudLibrary()) return { deck: updated, replaced: superseded.length };
-  try {
-    const remote = await uploadDeckToCloud(updated);
-    updated = { ...updated, updatedAt: remote.updatedAt, syncPending: false };
-  } catch {
-    updated = { ...updated, syncPending: true };
-  }
-  await putLocalDeck(updated);
-  return { deck: updated, replaced: superseded.length };
 }
 
 /**

@@ -5,7 +5,9 @@
 export const PPT_CHUNK_BYTES = 1024 * 1024;
 export const MAX_PPT_LIBRARY_BYTES = 100 * 1024 * 1024;
 export const MAX_PPT_LIBRARY_DECKS = 250;
-export const PPT_FILE_KINDS = ['pptx', 'contiPdf', 'sermonPptx'];
+// 'source' carries the wizard inputs a deck was generated from, so another
+// device can reopen it for editing. Opaque bytes here, like every other kind.
+export const PPT_FILE_KINDS = ['pptx', 'contiPdf', 'sermonPptx', 'source'];
 
 const MAX_LYRICS_ENTRIES = 2000;
 const MAX_LYRIC_SECTIONS = 50;
@@ -93,10 +95,12 @@ export function sanitizePptFiles(raw) {
   const pptx = sanitizePptFileDescriptor(raw.pptx, true);
   const contiPdf = sanitizePptFileDescriptor(raw.contiPdf);
   const sermonPptx = sanitizePptFileDescriptor(raw.sermonPptx);
+  const source = sanitizePptFileDescriptor(raw.source);
   if (!pptx) return null;
   if (raw.contiPdf != null && !contiPdf) return null;
   if (raw.sermonPptx != null && !sermonPptx) return null;
-  const files = { pptx, contiPdf, sermonPptx };
+  if (raw.source != null && !source) return null;
+  const files = { pptx, contiPdf, sermonPptx, source };
   const totalBytes = PPT_FILE_KINDS.reduce((sum, kind) => sum + (files[kind]?.size ?? 0), 0);
   return totalBytes <= MAX_PPT_LIBRARY_BYTES ? files : null;
 }
