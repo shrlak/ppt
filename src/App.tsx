@@ -22,7 +22,8 @@ import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
 import UsagePanel from './components/UsagePanel';
 import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
-import { inspectDeckBytes, saveDeckToLibrary } from './lib/storage/pptLibrary';
+import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck } from './lib/storage/pptLibrary';
+import { decodeDeckSource, encodeDeckSource } from './lib/storage/deckSource';
 import { showToast } from './lib/utils/toast';
 
 // Debounce before the 편집기 view regenerates the whole deck + re-renders
@@ -120,6 +121,21 @@ export default function App() {
     verseInput: '',
     sermonTitle: '',
   });
+  // The 라이브러리 entry currently open for editing. Saving writes back to this
+  // exact entry (by id, so a rename still updates it instead of adding a copy).
+  const [editingDeck, setEditingDeck] = useState<{ id: string; name: string } | null>(null);
+  // Set when the deck name is typed in or restored, replacing the date-derived
+  // suggestion until it is cleared.
+  const [nameOverride, setNameOverride] = useState<string | null>(null);
+  // Inputs pushed back into the 찬양/성경 말씀 steps when a saved deck is
+  // reopened. Those steps own their state, so a version bump is what tells
+  // them a restore happened (the same idiom the 콘티 auto-fill above uses).
+  const [restore, setRestore] = useState<{
+    version: number;
+    songs: Song[] | null;
+    conti: { name: string; data: ArrayBuffer } | null;
+    bible: Omit<BibleGeneratorState, 'customTemplate'> | null;
+  }>({ version: 0, songs: null, conti: null, bible: null });
   const [editorDeck, setEditorDeck] = useState<{ overview: DeckOverviewItem[]; slides: RenderedSlide[] } | null>(null);
   const [editorLoading, setEditorLoading] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -159,7 +175,7 @@ export default function App() {
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
-  const fileName = suggestFileName(contiDate);
+  const fileName = nameOverride ?? suggestFileName(contiDate);
 
   // 편집기 view: 찬양 가사, 성경 말씀(설교 제목·본문), 설교 PPT 업로드, and 광고 all stay
   // the SAME mounted LyricsGenerator/BibleSlideGenerator/SermonUploadSection/
@@ -345,16 +361,36 @@ export default function App() {
       const { merged } = await buildMergedDeck();
       const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
       const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      const { deck: saved, replaced } = await saveDeckToLibrary({
-        name: savedName,
-        pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
-        contiPdf: contiFile,
-        sermonPptx: sermonFile ? { name: sermonFile.name, data: sermonFile.data } : null,
-        slideCount,
-        songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
-      });
-      const message =
-        replaced > 0
+      const { deck: saved, replaced } = await saveDeckToLibrary(
+        {
+          name: savedName,
+          pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
+          contiPdf: contiFile,
+          sermonPptx: sermonFile ? { name: sermonFile.name, data: sermonFile.data } : null,
+          // Archive the inputs too, so 편집 can reopen this deck in these steps.
+          source: encodeDeckSource({
+            contiDate,
+            songs,
+            bible: {
+              verseInput: bibleState.verseInput,
+              sermonTitle: bibleState.sermonTitle,
+              translations: bibleState.translations,
+              versesPerSlide: bibleState.versesPerSlide,
+            },
+            announcementText,
+          }),
+          slideCount,
+          songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
+        },
+        editingDeck?.id,
+      );
+      // A plain save stays unattached, so the next one still matches by name
+      // and the file name keeps following the conti date. Only a deck opened
+      // with 편집 is bound to an entry, and it keeps that binding across a rename.
+      if (editingDeck) setEditingDeck({ id: saved.id, name: savedName });
+      const message = editingDeck
+        ? `'${savedName}'을(를) 수정했습니다.`
+        : replaced > 0
           ? `같은 이름의 기존 PPT를 덮어쓰고 '${savedName}'을(를) 라이브러리에 저장했습니다.`
           : `'${savedName}'을(를) 라이브러리에 저장했습니다.`;
       showToast(
@@ -441,6 +477,43 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  /**
+   * 라이브러리 → 편집: reopen a saved deck in the five wizard steps with the
+   * inputs it was generated from, so it is edited the same way it was built
+   * and re-saved over the same entry. Entries saved before inputs snapshots
+   * existed still restore their archived 콘티 PDF and 설교 PPT — the 콘티 is
+   * re-parsed by the 찬양 step exactly as a fresh upload would be.
+   */
+  function openSavedDeck(deck: SavedDeck) {
+    const source = decodeDeckSource(deck.source);
+    setLibraryOpen(false);
+    setViewMode('wizard');
+    setDirection('back');
+    setActiveStep(0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    setEditingDeck({ id: deck.id, name: deck.name });
+    setNameOverride(deck.name);
+    setContiFile(deck.contiPdf);
+    setSermonFile(deck.sermonPptx);
+    setAnnouncementText(source?.announcementText ?? '');
+    setContiDate(source?.contiDate);
+    setRestore((previous) => ({
+      version: previous.version + 1,
+      songs: source?.songs ?? null,
+      // Only fall back to re-parsing the 콘티 when no song list was saved.
+      conti: source ? null : deck.contiPdf,
+      bible: source?.bible ?? null,
+    }));
+
+    showToast(
+      source
+        ? `'${deck.name}'을(를) 불러왔습니다. 내용을 수정한 뒤 다시 저장하면 같은 항목이 갱신됩니다.`
+        : `'${deck.name}'은(는) 입력 내용이 함께 저장되기 전에 만들어져 콘티 PDF와 설교 PPT만 복원했습니다. 광고와 가사 수정은 다시 입력해 주세요.`,
+      source ? 'notice' : 'warn',
+    );
+  }
+
   return (
     <>
       <header className={`header${scrolled ? ' header-scrolled' : ''}`}>
@@ -499,7 +572,7 @@ export default function App() {
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} onDeckChange={handleDeckChange} />}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
-      {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} />}
+      {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} onEdit={openSavedDeck} />}
 
       <div className={`app${viewMode === 'editor' ? ' app-editor-mode' : ''}`}>
         {viewMode === 'wizard' && (
@@ -561,6 +634,9 @@ export default function App() {
                 onDateDetected={handleDateDetected}
                 onContiInfoDetected={handleContiInfoDetected}
                 onContiFileLoaded={setContiFile}
+                restoreVersion={restore.version}
+                restoreSongs={restore.songs}
+                restoreConti={restore.conti}
               />
               {viewMode === 'wizard' && <WizardNavigation step={0} onMove={moveToStep} />}
             </section>
@@ -580,6 +656,8 @@ export default function App() {
                 autoFillVersion={contiBibleAutoFill.version}
                 autoVerseInput={contiBibleAutoFill.verseInput}
                 autoSermonTitle={contiBibleAutoFill.sermonTitle}
+                restoreVersion={restore.version}
+                restoreState={restore.bible}
               />
               {viewMode === 'wizard' && <WizardNavigation step={1} onMove={moveToStep} />}
             </section>
@@ -623,6 +701,25 @@ export default function App() {
                 <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
               </div>
               <section className="card download-card">
+                {editingDeck && (
+                  <div className="banner" data-testid="editing-deck-banner">
+                    라이브러리의 &lsquo;{editingDeck.name}&rsquo;을(를) 편집하고 있습니다. 저장하면 같은
+                    항목이 갱신됩니다.{' '}
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      data-testid="editing-deck-detach"
+                      onClick={() => {
+                        // Release the name too, or the "new" entry would save
+                        // straight back onto the one just detached from.
+                        setEditingDeck(null);
+                        setNameOverride(null);
+                      }}
+                    >
+                      새 항목으로 저장
+                    </button>
+                  </div>
+                )}
                 {allWarnings.length > 0 && (
                   <div className="banner banner-warn">
                     일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
@@ -634,9 +731,18 @@ export default function App() {
                 </p>
                 <div className="generate-row">
                   <label htmlFor="filename-input">
-                    자동 파일명
-                    <input id="filename-input" data-testid="filename-input" value={fileName} readOnly />
-                    <span className="input-hint">콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.</span>
+                    파일명
+                    <input
+                      id="filename-input"
+                      data-testid="filename-input"
+                      value={fileName}
+                      onChange={(e) => setNameOverride(e.target.value)}
+                    />
+                    <span className="input-hint">
+                      {nameOverride === null
+                        ? '콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.'
+                        : '직접 입력한 이름을 사용합니다. 라이브러리에도 이 이름으로 저장됩니다.'}
+                    </span>
                   </label>
                   <div className="slide-count" data-testid="slide-count">
                     총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}

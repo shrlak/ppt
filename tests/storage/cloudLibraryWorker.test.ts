@@ -45,6 +45,7 @@ describe('shared PPT library validation', () => {
       pptx: { name: '0719.pptx', size: 10, chunkCount: 1 },
       contiPdf: null,
       sermonPptx: null,
+      source: { name: 'deck-source.json', size: 40, chunkCount: 1 },
     };
     expect(
       sanitizePptDeckMetadata(
@@ -61,6 +62,35 @@ describe('shared PPT library validation', () => {
       ),
     ).toMatchObject({ id: 'deck-1', uploadId: 'upload-1', updatedAt: now.toISOString() });
     expect(samePptFiles(files, structuredClone(files))).toBe(true);
+  });
+
+  it('keeps the wizard inputs snapshot alongside the deck files', () => {
+    const metadata = sanitizePptDeckMetadata({
+      id: 'deck-1',
+      uploadId: 'upload-1',
+      name: '0726.pptx',
+      files: {
+        pptx: { name: '0726.pptx', size: 10, chunkCount: 1 },
+        contiPdf: null,
+        sermonPptx: null,
+        source: { name: 'deck-source.json', size: 128, chunkCount: 1 },
+      },
+      slideCount: 32,
+      savedAt: new Date().toISOString(),
+    });
+    expect(metadata?.files.source).toEqual({ name: 'deck-source.json', size: 128, chunkCount: 1 });
+  });
+
+  it('accepts a deck uploaded by a client that has no inputs snapshot', () => {
+    const metadata = sanitizePptDeckMetadata({
+      id: 'deck-1',
+      uploadId: 'upload-1',
+      name: '0719.pptx',
+      files: { pptx: { name: '0719.pptx', size: 10, chunkCount: 1 }, contiPdf: null, sermonPptx: null },
+      slideCount: 32,
+      savedAt: new Date().toISOString(),
+    });
+    expect(metadata?.files.source).toBeNull();
   });
 
   it('rejects an entry whose combined files exceed 100 MB', () => {

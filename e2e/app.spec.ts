@@ -328,58 +328,69 @@ test('saving the same file name twice overwrites the library entry instead of ad
   await expect(page.getByTestId('library-entry')).toHaveCount(1);
 });
 
-test('PPT library entries can be renamed and trimmed, and the saved file reflects the edit', async ({ page }, testInfo) => {
+test('library 편집 reopens a saved deck in the five-step wizard and re-saves over the same entry', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);
-  await moveFromLyricsToDownload(page);
+  const savedSongTitle = await page
+    .getByTestId('song-card')
+    .first()
+    .getByTestId('song-title-input')
+    .inputValue();
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  await page.getByTestId('wizard-next-bible').click();
+  await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('announcement-input').fill('1. <저장 전 광고>\n첫 번째 내용입니다.');
+  await page.getByTestId('wizard-next-announcement').click();
 
   await page.getByTestId('save-to-library').click();
-  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible();
+  // Building the deck loads translation data and re-zips every piece.
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+  // Reload first, so what comes back is read from storage rather than state
+  // the wizard still happens to be holding.
+  await page.reload();
+  await expect(page.getByTestId('announcement-input')).toHaveValue('');
 
   await page.getByTestId('library-open').click();
   const entry = page.getByTestId('library-entry');
-  await expect(entry).toBeVisible();
-
-  const originalName = (await entry.locator('.library-entry-name').innerText()).trim();
-  expect(originalName).toMatch(/\.pptx$/);
-
+  const savedName = (await entry.locator('.library-entry-name').innerText()).trim();
+  expect(savedName).toMatch(/\.pptx$/);
   await entry.getByTestId('library-entry-edit').click();
-  const editDialog = page.getByRole('dialog').filter({ hasText: 'PPT 편집' });
-  const nameInput = page.getByTestId('library-edit-name');
-  // Pre-filled with the deck's current name, not blank.
-  await expect(nameInput).toHaveValue(originalName);
 
-  // At least the front (4) + back (21) + prayer (2) + generated slides, well
-  // above 1 — plenty of room to drop one slide without hitting the "keep at
-  // least one" floor.
-  const countBefore = Number((await page.getByTestId('library-edit-slide-count').innerText()).replace('장', ''));
-  expect(countBefore).toBeGreaterThan(1);
-  await expect(page.getByTestId('library-edit-slide-row')).toHaveCount(countBefore);
+  // The library modal gives way to the wizard, back on its first step, with
+  // every input restored — no slide list, no second editor.
+  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+  await expect(page.getByTestId('song-card').first().getByTestId('song-title-input')).toHaveValue(
+    savedSongTitle,
+  );
 
-  await page.getByTestId('library-edit-slide-remove').first().click();
-  await expect(page.getByTestId('library-edit-slide-count')).toHaveText(`${countBefore - 1}장`);
-  await expect(page.getByTestId('library-edit-slide-row')).toHaveCount(countBefore - 1);
+  await page.getByTestId('wizard-tab-bible').click();
+  await expect(page.getByTestId('bible-verse-input')).toHaveValue('요3:16');
+  await page.getByTestId('wizard-tab-announcement').click();
+  await expect(page.getByTestId('announcement-input')).toHaveValue(/저장 전 광고/);
 
-  await nameInput.fill('Edited Deck');
-  await page.getByTestId('library-edit-save').click();
-  await expect(page.getByText(/'Edited Deck\.pptx'을\(를\) 수정했습니다/)).toBeVisible();
+  await page.getByTestId('wizard-tab-download').click();
+  await expect(page.getByTestId('editing-deck-banner')).toContainText(savedName);
+  await expect(page.getByTestId('filename-input')).toHaveValue(savedName);
 
-  await editDialog.getByRole('button', { name: '닫기' }).click();
-  await expect(entry).toContainText('Edited Deck.pptx');
-  await expect(entry).toContainText(`${countBefore - 1}장`);
+  // Editing and saving updates the entry that was opened instead of adding one.
+  await page.getByTestId('wizard-tab-announcement').click();
+  await page.getByTestId('announcement-input').fill('1. <수정된 광고>\n두 번째 내용입니다.');
+  await page.getByTestId('wizard-tab-download').click();
+  await page.getByTestId('save-to-library').click();
+  await expect(page.getByText(/수정했습니다/)).toBeVisible({ timeout: PARSE_TIMEOUT });
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    entry.getByRole('button', { name: 'PPTX 다운로드' }).click(),
-  ]);
-  expect(download.suggestedFilename()).toBe('Edited Deck.pptx');
-  const zip = await loadPptx(download, testInfo.outputPath('edited.pptx'));
-  expect(slideFileNames(zip)).toHaveLength(countBefore - 1);
-
-  // The entry survives a reload with its edits intact — real IndexedDB, not in-memory state.
-  await page.reload();
   await page.getByTestId('library-open').click();
-  await expect(page.getByTestId('library-entry')).toContainText('Edited Deck.pptx');
+  await expect(page.getByTestId('library-entry')).toHaveCount(1);
+
+  // And the edit is what a second 편집 brings back.
+  await page.getByTestId('library-entry').getByTestId('library-entry-edit').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await page.getByTestId('wizard-tab-announcement').click();
+  await expect(page.getByTestId('announcement-input')).toHaveValue(/수정된 광고/);
 });
 
 test('admin panel lists the complete concurrent recognition model pool', async ({ page }) => {

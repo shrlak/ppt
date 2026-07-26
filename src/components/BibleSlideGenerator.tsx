@@ -20,6 +20,9 @@ interface Props {
   autoFillVersion?: number;
   autoVerseInput?: string;
   autoSermonTitle?: string;
+  /** Bumped when a 라이브러리 deck is reopened, to push its saved inputs back in. */
+  restoreVersion?: number;
+  restoreState?: Omit<BibleGeneratorState, 'customTemplate'> | null;
 }
 
 export default function BibleSlideGenerator({
@@ -27,6 +30,8 @@ export default function BibleSlideGenerator({
   autoFillVersion = 0,
   autoVerseInput = '',
   autoSermonTitle = '',
+  restoreVersion = 0,
+  restoreState = null,
 }: Props) {
   const [verseInput, setVerseInput] = useState('');
   const [sermonTitle, setSermonTitle] = useState('');
@@ -46,6 +51,23 @@ export default function BibleSlideGenerator({
     setSermonTitle(autoSermonTitle);
     showToast('찬양 콘티의 본문과 설교 제목을 자동으로 채웠습니다.');
   }, [autoFillVersion, autoVerseInput, autoSermonTitle]);
+
+  // Reopening a saved deck replaces every input this step owns. The custom
+  // template is not restored — it is a per-session override, so a reopened
+  // deck falls back to the standard 성경 template.
+  useEffect(() => {
+    if (restoreVersion === 0 || !restoreState) return;
+    setVerseInput(restoreState.verseInput);
+    setSermonTitle(restoreState.sermonTitle);
+    const ko = restoreState.translations.find((id) => KO_TRANSLATIONS.some((t) => t.id === id));
+    const en = restoreState.translations.find((id) => EN_TRANSLATIONS.some((t) => t.id === id));
+    if (ko) setKoTranslation(ko);
+    setEnTranslation(en ?? null);
+    setVersesPerSlide(Math.max(1, restoreState.versesPerSlide));
+    setCustomTemplate(null);
+    // Only a version bump restores; `restoreState` alone changing identity must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreVersion]);
 
   useEffect(() => {
     onStateChange({ verseInput, sermonTitle, translations, versesPerSlide, customTemplate });
