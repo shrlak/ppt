@@ -6,6 +6,10 @@ import { parseAnnouncements, buildAnnouncementDeck } from '../../src/lib/utils/a
 
 const serviceTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'service-template.pptx'));
 const sampleText = readFileSync(join(__dirname, '..', 'fixtures', 'announcements-sample.txt'), 'utf-8');
+const markdownSampleText = readFileSync(
+  join(__dirname, '..', 'fixtures', 'announcements-markdown-sample.txt'),
+  'utf-8',
+);
 
 describe('parseAnnouncements', () => {
   it('parses the real sample text into 5 items with titles', () => {
@@ -40,6 +44,41 @@ describe('parseAnnouncements', () => {
     expect(prayer.bodyLines).toContainEqual('- 화요기도회');
     expect(prayer.bodyLines).toContainEqual('- 예배전 중보기도모임');
     expect(prayer.bodyLines.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('parses the Markdown-formatted sample, stripping the bold title markers', () => {
+    const items = parseAnnouncements(markdownSampleText);
+    expect(items).toHaveLength(3);
+    expect(items.map((i) => i.title)).toEqual(['새가족 환영', '아르헨티나 선교', '중보기도 모임']);
+  });
+
+  it('keeps the bold markers out of the body of a Markdown item', () => {
+    const items = parseAnnouncements(markdownSampleText);
+    expect(items[0].bodyLines).toEqual([
+      '오늘 처음 오신 분들을 진심으로 환영합니다! 예배 후 로비 뒷편에서 새가족팀장과 목사님을 만나 주세요.',
+    ]);
+    for (const item of items) {
+      for (const line of item.bodyLines) expect(line).not.toContain('*');
+    }
+  });
+
+  it('flattens nested sub-bullets of a Markdown item', () => {
+    const prayer = parseAnnouncements(markdownSampleText)[2];
+    expect(prayer.bodyLines[0]).toBe('- 화요기도회');
+    expect(prayer.bodyLines).toContainEqual('- 예배전 중보기도모임');
+    expect(prayer.bodyLines).toHaveLength(5);
+  });
+
+  it('accepts inline emphasis and Markdown bullet characters in the body', () => {
+    const items = parseAnnouncements('1. **<공지 제목>**\n* *중요* 안내입니다.\n---\n- `문의`: 담당자');
+    expect(items).toEqual([
+      { title: '공지 제목', bodyLines: ['- 중요 안내입니다.', '- 문의: 담당자'] },
+    ]);
+  });
+
+  it('accepts emphasis inside the angle brackets and around the whole line', () => {
+    expect(parseAnnouncements('**1. <새가족 환영>**\n본문').map((i) => i.title)).toEqual(['새가족 환영']);
+    expect(parseAnnouncements('1. <**새가족 환영**>\n본문').map((i) => i.title)).toEqual(['새가족 환영']);
   });
 
   it('returns an empty array for text with no numbered items', () => {

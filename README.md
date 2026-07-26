@@ -227,7 +227,8 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 3. **Sermon** — an uploaded `.pptx` from the pastor is inserted verbatim right after the scripture
    slides.
 4. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split
-   into one slide per item.
+   into one slide per item. Markdown pasted from a notes app works too: bold/italic markers around
+   the title (`1. **<title>**`) or inside the body are stripped, and `*`/`•` bullets become `-`.
 
 Everything runs client-side (no backend) — Vite + React + TypeScript, deployed to GitHub Pages via
 GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). `src/lib/pptxMerge.ts`
