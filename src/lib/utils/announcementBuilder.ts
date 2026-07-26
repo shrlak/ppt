@@ -14,12 +14,38 @@ export interface AnnouncementItem {
   bodyLines: string[];
 }
 
-const ITEM_MARKER = /(\d+)\s*\.\s*<\s*([\s\S]+?)\s*>/g;
+// Titles may be wrapped in Markdown emphasis when the text is pasted from a
+// note-taking app (e.g. "1. **<새가족 환영>**"), so the delimiters around the
+// "<...>" are matched and swallowed here rather than leaking into the body.
+const ITEM_MARKER = /(\d+)\s*\.\s*[*_~`]*\s*<\s*([\s\S]+?)\s*>[*_~`]*/g;
+
+/** Remove Markdown emphasis/code delimiters, keeping the text they wrap. */
+function stripEmphasis(text: string): string {
+  return text
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*\s][^*]*)\*/g, '$1')
+    .replace(/___([^_]+)___/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
+}
+
+/** Normalize one body line: Markdown bullets become "- ", emphasis is dropped. */
+function cleanBodyLine(line: string): string {
+  return stripEmphasis(line.trim().replace(/^[*+•·]\s+/, '- ')).trim();
+}
+
+/** A line with no text left once bullets, emphasis and rules are removed. */
+function isBlankLine(line: string): boolean {
+  return line.length === 0 || /^[-*_~`\s]+$/.test(line);
+}
 
 /**
  * Parse freeform announcement text into items. Anything before the first
  * "N. <title>" marker (e.g. a "7/5 주일광고:" header line) is discarded —
- * only the numbered items become slides.
+ * only the numbered items become slides. Markdown formatting around titles
+ * and body lines is accepted and stripped.
  */
 export function parseAnnouncements(text: string): AnnouncementItem[] {
   const markers = [...text.matchAll(ITEM_MARKER)];
@@ -28,14 +54,14 @@ export function parseAnnouncements(text: string): AnnouncementItem[] {
   const items: AnnouncementItem[] = [];
   for (let i = 0; i < markers.length; i++) {
     const marker = markers[i];
-    const title = marker[2].replace(/\s+/g, ' ').trim();
+    const title = stripEmphasis(marker[2].replace(/\s+/g, ' ').trim()).trim();
     const start = marker.index! + marker[0].length;
     const end = i + 1 < markers.length ? markers[i + 1].index! : text.length;
     const bodyLines = text
       .slice(start, end)
       .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+      .map(cleanBodyLine)
+      .filter((line) => !isBlankLine(line));
     if (title) items.push({ title, bodyLines });
   }
   return items;

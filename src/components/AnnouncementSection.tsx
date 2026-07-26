@@ -14,7 +14,8 @@ export default function AnnouncementSection({ value, onChange }: Props) {
       <h2>광고</h2>
       <p className="tool-intro" style={{ margin: '0 0 14px' }}>
         공지 내용을 <code>1. &lt;제목&gt;</code> 형식으로 붙여넣으면 번호를 다시 매겨 항목별로
-        슬라이드를 만들어 드립니다 (선택).
+        슬라이드를 만들어 드립니다 (선택). <code>1. **&lt;제목&gt;**</code> 처럼 마크다운 서식이
+        섞여 있어도 그대로 붙여넣으시면 됩니다.
       </p>
       <textarea
         className="announcement-textarea"
