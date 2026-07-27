@@ -276,6 +276,59 @@ body {
 .slide-overview-error {
   margin: 0 0 12px;
 }
+
+/* Auto-save status line — quiet by design; it sits under the save buttons in
+   both the 다운로드 단계 card and the 편집기 toolbar. */
+.auto-save-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+.slide-overview .auto-save-status {
+  margin: 0 0 12px;
+}
+.auto-save-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-faint);
+}
+.auto-save-pending .auto-save-dot,
+.auto-save-saving .auto-save-dot {
+  background: var(--accent);
+  animation: auto-save-pulse 1.2s var(--ease) infinite;
+}
+.auto-save-saved {
+  color: var(--accent-dark);
+}
+.auto-save-saved .auto-save-dot {
+  background: var(--accent);
+}
+.auto-save-error {
+  color: var(--danger-ink);
+}
+.auto-save-error .auto-save-dot {
+  background: var(--danger-ink);
+}
+@keyframes auto-save-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auto-save-pending .auto-save-dot,
+  .auto-save-saving .auto-save-dot {
+    animation: none;
+  }
+}
 @media (max-width: 900px) {
   .app-editor-mode .app-body {
     grid-template-columns: 1fr;
