@@ -14,6 +14,8 @@ const PLACEHOLDER_FRONT_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'place
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
 const PARSE_TIMEOUT = 30_000;
+// Auto-save waits out its debounce and then rebuilds the whole deck.
+const AUTO_SAVE_TIMEOUT = 60_000;
 
 async function uploadExamplePdf(page: Page): Promise<void> {
   await expect(page.getByTestId('upload-dropzone')).toBeVisible();
@@ -262,11 +264,12 @@ test('PPT library saves a generated deck with its source files and can re-downlo
   page,
 }) => {
   await page.goto('./');
-  await uploadExamplePdf(page);
-
+  // Check the library is empty before there is anything to auto-save.
   await page.getByTestId('library-open').click();
   await expect(page.getByTestId('library-empty')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+
+  await uploadExamplePdf(page);
 
   await page.getByTestId('wizard-tab-download').click();
   await page.getByTestId('save-to-library').click();
@@ -324,6 +327,49 @@ test('saving the same file name twice overwrites the library entry instead of ad
   // Still one entry after a reload — the first copy was replaced in storage,
   // not just hidden from the list.
   await page.reload();
+  await page.getByTestId('library-open').click();
+  await expect(page.getByTestId('library-entry')).toHaveCount(1);
+});
+
+test('every edit auto-saves into the library, always updating the same entry', async ({ page }) => {
+  // Each auto-save rebuilds and stores the whole deck, and this test waits
+  // through several of them.
+  test.slow();
+  await page.goto('./');
+  await uploadExamplePdf(page);
+
+  // No save button is ever pressed here: parsing the conti is itself an edit,
+  // so the deck lands in the library on its own.
+  const status = page.getByTestId('auto-save-status');
+  await expect(status).toHaveAttribute('data-state', 'saved', { timeout: AUTO_SAVE_TIMEOUT });
+
+  await page.getByTestId('library-open').click();
+  const entry = page.getByTestId('library-entry');
+  await expect(entry).toHaveCount(1);
+  const savedName = (await entry.locator('.library-entry-name').innerText()).trim();
+  await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+
+  // A later edit updates that same entry rather than adding one per edit.
+  await page.getByTestId('wizard-tab-announcement').click();
+  await page.getByTestId('announcement-input').fill('1. <자동 저장 광고>\n자동으로 저장된 내용입니다.');
+  await expect(status).toHaveAttribute('data-state', 'pending');
+  await expect(status).toHaveAttribute('data-state', 'saved', { timeout: AUTO_SAVE_TIMEOUT });
+
+  await page.getByTestId('library-open').click();
+  await expect(page.getByTestId('library-entry')).toHaveCount(1);
+  await expect(page.getByTestId('library-entry')).toContainText(savedName);
+  await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+
+  // The auto-saved entry is real storage, and reopening it restores the edit —
+  // and stays idle, because re-saving the inputs it just restored is not an edit.
+  await page.reload();
+  await page.getByTestId('library-open').click();
+  await page.getByTestId('library-entry').getByTestId('library-entry-edit').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await page.getByTestId('wizard-tab-announcement').click();
+  await expect(page.getByTestId('announcement-input')).toHaveValue(/자동 저장 광고/);
+  await expect(status).toHaveAttribute('data-state', 'idle', { timeout: AUTO_SAVE_TIMEOUT });
+
   await page.getByTestId('library-open').click();
   await expect(page.getByTestId('library-entry')).toHaveCount(1);
 });

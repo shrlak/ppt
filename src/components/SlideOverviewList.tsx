@@ -4,9 +4,12 @@
 // are clickable and scroll the right-hand editor to that exact section; the
 // rest (front/prayer/back) are informational, since they come from fixed
 // templates rather than being edited here. A toolbar above the list lets the
-// whole deck be downloaded or saved to the 라이브러리 without leaving this view.
+// whole deck be downloaded or saved to the 라이브러리 without leaving this view,
+// with the auto-save status right below it.
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { RenderedSlide } from '../lib/pptx/pptxRenderer';
+import type { AutoSaveStatus } from '../lib/storage/deckAutoSave';
+import AutoSaveIndicator from './AutoSaveIndicator';
 import SlideThumbnail from './SlideThumbnail';
 
 const KIND_ICON: Record<DeckOverviewItem['kind'], string> = {
@@ -38,6 +41,7 @@ interface Props {
   onSaveToLibrary: () => void;
   downloading: boolean;
   savingToLibrary: boolean;
+  autoSaveStatus: AutoSaveStatus;
 }
 
 export default function SlideOverviewList({
@@ -53,6 +57,7 @@ export default function SlideOverviewList({
   onSaveToLibrary,
   downloading,
   savingToLibrary,
+  autoSaveStatus,
 }: Props) {
   return (
     <aside className="slide-overview" data-testid="slide-overview">
@@ -79,6 +84,7 @@ export default function SlideOverviewList({
           </button>
         </div>
       </div>
+      <AutoSaveIndicator status={autoSaveStatus} testId="editor-auto-save-status" />
       {error && <p className="banner banner-warn slide-overview-error">{error}</p>}
       {overview.length === 0 && !loading ? (
         <p className="empty-hint">콘티나 광고를 입력하면 여기에 슬라이드 목록이 표시됩니다.</p>

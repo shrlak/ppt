@@ -21,9 +21,17 @@ import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from './li
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
 import UsagePanel from './components/UsagePanel';
+import AutoSaveIndicator from './components/AutoSaveIndicator';
 import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
-import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck } from './lib/storage/pptLibrary';
+import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck, type SavedDeckResult } from './lib/storage/pptLibrary';
 import { decodeDeckSource, encodeDeckSource } from './lib/storage/deckSource';
+import {
+  AUTO_SAVE_BUSY_POLL_MS,
+  AUTO_SAVE_DEBOUNCE_MS,
+  AUTO_SAVE_RETRY_MS,
+  deckFingerprint,
+  type AutoSaveStatus,
+} from './lib/storage/deckAutoSave';
 import { showToast } from './lib/utils/toast';
 
 // Debounce before the 편집기 view regenerates the whole deck + re-renders
@@ -141,6 +149,27 @@ export default function App() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const editorSlidesRef = useRef<RenderedSlide[]>([]);
 
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>({ state: 'idle' });
+  // Fingerprint of the inputs the 라이브러리 already holds; auto-save skips any
+  // edit that leaves it unchanged (see deckAutoSave.ts).
+  const savedFingerprintRef = useRef<string | null>(null);
+  // The entry auto-save keeps writing to, so a later rename updates that entry
+  // instead of leaving the pre-rename copy behind. 편집 sets it too; 새 항목으로
+  // 저장 clears it.
+  const autoSaveTargetRef = useRef<string | null>(null);
+  // Set while a saved deck is being restored: the first settled fingerprint
+  // after that is what the entry already holds, so it is adopted rather than
+  // written straight back.
+  const adoptFingerprintRef = useRef(false);
+  // One save at a time — a manual save and an auto-save must never build and
+  // upload the same deck concurrently.
+  const savingRef = useRef(false);
+  const autoSaveRetryRef = useRef(0);
+  // The fingerprint whose auto-save already failed and was retried once.
+  const autoSaveFailedRef = useRef<string | null>(null);
+  // Bumped to re-arm the auto-save timer after a failure.
+  const [autoSaveRetry, setAutoSaveRetry] = useState(0);
+
   const handleSongsChange = useCallback((next: Song[]) => setSongs(next), []);
   const handleDateDetected = useCallback((date: string | undefined) => setContiDate(date), []);
   const handleBibleStateChange = useCallback((state: BibleGeneratorState) => setBibleState(state), []);
@@ -208,6 +237,26 @@ export default function App() {
 
   const lyricsSlideCount = planAllSlides(songs).length;
   const hasAnyContent = songs.length > 0 || bibleRefs.length > 0 || sermonFile !== null || announcementItems.length > 0;
+
+  // Recomputed every render, but cheap next to rebuilding the deck: it is what
+  // tells auto-save whether this render actually changed the generated file.
+  const fingerprint = deckFingerprint({
+    name: fileName,
+    contiDate,
+    songs,
+    bible: {
+      verseInput: bibleState.verseInput,
+      sermonTitle: bibleState.sermonTitle,
+      translations: bibleState.translations,
+      versesPerSlide: bibleState.versesPerSlide,
+    },
+    bibleTemplate: bibleState.customTemplate,
+    announcementText,
+    sermonFile,
+    contiFile,
+    frontDeck: customDecks.front,
+    backDeck: customDecks.back,
+  });
 
   /**
    * Build the complete merged deck, plus its real per-slide overview (in the
@@ -351,43 +400,66 @@ export default function App() {
     }
   }
 
+  const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
+
+  /**
+   * Build the current deck and write it into the 라이브러리 under `savedName`,
+   * archiving the conti PDF, the 설교 PPT and the wizard inputs alongside it.
+   * Shared by the 라이브러리에 저장 buttons and by auto-save, so both always
+   * store exactly the same thing.
+   */
+  async function writeToLibrary(replaceId?: string): Promise<SavedDeckResult> {
+    const { merged } = await buildMergedDeck();
+    const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
+    return saveDeckToLibrary(
+      {
+        name: savedName,
+        pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
+        contiPdf: contiFile,
+        sermonPptx: sermonFile ? { name: sermonFile.name, data: sermonFile.data } : null,
+        // Archive the inputs too, so 편집 can reopen this deck in these steps.
+        source: encodeDeckSource({
+          contiDate,
+          songs,
+          bible: {
+            verseInput: bibleState.verseInput,
+            sermonTitle: bibleState.sermonTitle,
+            translations: bibleState.translations,
+            versesPerSlide: bibleState.versesPerSlide,
+          },
+          announcementText,
+        }),
+        slideCount,
+        songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
+      },
+      replaceId,
+    );
+  }
+
   async function saveCurrentToLibrary() {
     if (!hasAnyContent) {
       showToast('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSavingToLibrary(true);
     try {
-      const { merged } = await buildMergedDeck();
-      const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
-      const savedName = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
-      const { deck: saved, replaced } = await saveDeckToLibrary(
-        {
-          name: savedName,
-          pptx: { name: savedName, data: merged.buffer as ArrayBuffer },
-          contiPdf: contiFile,
-          sermonPptx: sermonFile ? { name: sermonFile.name, data: sermonFile.data } : null,
-          // Archive the inputs too, so 편집 can reopen this deck in these steps.
-          source: encodeDeckSource({
-            contiDate,
-            songs,
-            bible: {
-              verseInput: bibleState.verseInput,
-              sermonTitle: bibleState.sermonTitle,
-              translations: bibleState.translations,
-              versesPerSlide: bibleState.versesPerSlide,
-            },
-            announcementText,
-          }),
-          slideCount,
-          songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
-        },
-        editingDeck?.id,
-      );
+      const { deck: saved, replaced } = await writeToLibrary(editingDeck?.id);
       // A plain save stays unattached, so the next one still matches by name
       // and the file name keeps following the conti date. Only a deck opened
       // with 편집 is bound to an entry, and it keeps that binding across a rename.
       if (editingDeck) setEditingDeck({ id: saved.id, name: savedName });
+      // Auto-save now owns this entry: it has the bytes this save just wrote,
+      // so the next auto-save updates it instead of adding a second copy.
+      autoSaveTargetRef.current = saved.id;
+      savedFingerprintRef.current = fingerprint;
+      adoptFingerprintRef.current = false;
+      setAutoSaveStatus({
+        state: 'saved',
+        at: new Date().toISOString(),
+        syncPending: Boolean(saved.syncPending),
+      });
       const message = editingDeck
         ? `'${savedName}'을(를) 수정했습니다.`
         : replaced > 0
@@ -401,6 +473,44 @@ export default function App() {
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
+      savingRef.current = false;
+      setSavingToLibrary(false);
+    }
+  }
+
+  /**
+   * Write the current inputs into the 라이브러리 without a button press, once
+   * an edit has settled. Unlike the manual save this reports through the
+   * status line rather than a toast, and it always targets the entry this
+   * session is already writing to (the 편집 entry, or whatever the last save
+   * created) so a rename moves that entry instead of forking it.
+   */
+  async function autoSaveNow(current: string) {
+    savingRef.current = true;
+    setAutoSaveStatus({ state: 'saving' });
+    setSavingToLibrary(true);
+    try {
+      const { deck: saved } = await writeToLibrary(editingDeck?.id ?? autoSaveTargetRef.current ?? undefined);
+      savedFingerprintRef.current = current;
+      autoSaveTargetRef.current = saved.id;
+      autoSaveFailedRef.current = null;
+      if (editingDeck && editingDeck.name !== savedName) setEditingDeck({ id: saved.id, name: savedName });
+      setAutoSaveStatus({
+        state: 'saved',
+        at: new Date().toISOString(),
+        syncPending: Boolean(saved.syncPending),
+      });
+    } catch (e) {
+      setAutoSaveStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+      // Retry these exact inputs once; after that the next edit is the trigger,
+      // so a deck that cannot be built never rebuilds itself forever.
+      if (autoSaveFailedRef.current !== current) {
+        autoSaveFailedRef.current = current;
+        window.clearTimeout(autoSaveRetryRef.current);
+        autoSaveRetryRef.current = window.setTimeout(() => setAutoSaveRetry((n) => n + 1), AUTO_SAVE_RETRY_MS);
+      }
+    } finally {
+      savingRef.current = false;
       setSavingToLibrary(false);
     }
   }
@@ -454,6 +564,49 @@ export default function App() {
   // Release any still-live thumbnail object URLs when the app itself unmounts.
   useEffect(() => () => revokeRenderedSlides(editorSlidesRef.current), []);
 
+  /**
+   * Auto-save: every edit that changes the deck is written back to the PPT
+   * 라이브러리 once typing settles, so work is never lost to a closed tab and
+   * the entry on every device stays current without pressing 저장. Same entry
+   * throughout — this rewrites the deck it is already bound to rather than
+   * piling up one entry per edit.
+   */
+  useEffect(() => {
+    if (!hasAnyContent) return;
+    if (fingerprint === savedFingerprintRef.current) return;
+    setAutoSaveStatus((previous) => (previous.state === 'saving' ? previous : { state: 'pending' }));
+
+    let cancelled = false;
+    let timer = 0;
+    const run = () => {
+      if (cancelled) return;
+      // Wait out a manual save (or the previous auto-save) rather than
+      // building and uploading the same deck twice at once.
+      if (savingRef.current) {
+        timer = window.setTimeout(run, AUTO_SAVE_BUSY_POLL_MS);
+        return;
+      }
+      if (adoptFingerprintRef.current) {
+        // A deck just reopened from 라이브러리: what settled here is what the
+        // entry already holds, so take it as the baseline and save nothing.
+        adoptFingerprintRef.current = false;
+        savedFingerprintRef.current = fingerprint;
+        setAutoSaveStatus({ state: 'idle' });
+        return;
+      }
+      void autoSaveNow(fingerprint);
+    };
+    timer = window.setTimeout(run, AUTO_SAVE_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fingerprint, hasAnyContent, autoSaveRetry]);
+
+  // Drop a scheduled retry if the app goes away first.
+  useEffect(() => () => window.clearTimeout(autoSaveRetryRef.current), []);
+
   const allWarnings = songs
     .map((s) => ({ title: s.title, tokens: unmatchedTokens(s) }))
     .filter((w) => w.tokens.length > 0);
@@ -494,6 +647,13 @@ export default function App() {
 
     setEditingDeck({ id: deck.id, name: deck.name });
     setNameOverride(deck.name);
+    // Auto-save writes back to this entry, and the restored inputs are already
+    // what it holds — adopt them as the baseline instead of re-saving them.
+    autoSaveTargetRef.current = deck.id;
+    savedFingerprintRef.current = null;
+    adoptFingerprintRef.current = true;
+    autoSaveFailedRef.current = null;
+    setAutoSaveStatus({ state: 'idle' });
     setContiFile(deck.contiPdf);
     setSermonFile(deck.sermonPptx);
     setAnnouncementText(source?.announcementText ?? '');
@@ -508,7 +668,7 @@ export default function App() {
 
     showToast(
       source
-        ? `'${deck.name}'을(를) 불러왔습니다. 내용을 수정한 뒤 다시 저장하면 같은 항목이 갱신됩니다.`
+        ? `'${deck.name}'을(를) 불러왔습니다. 내용을 수정하면 같은 항목이 자동으로 갱신됩니다.`
         : `'${deck.name}'은(는) 입력 내용이 함께 저장되기 전에 만들어져 콘티 PDF와 설교 PPT만 복원했습니다. 광고와 가사 수정은 다시 입력해 주세요.`,
       source ? 'notice' : 'warn',
     );
@@ -616,6 +776,7 @@ export default function App() {
               onSaveToLibrary={() => void saveCurrentToLibrary()}
               downloading={generating}
               savingToLibrary={savingToLibrary}
+              autoSaveStatus={autoSaveStatus}
             />
           )}
           <main data-direction={direction}>
@@ -714,6 +875,9 @@ export default function App() {
                         // straight back onto the one just detached from.
                         setEditingDeck(null);
                         setNameOverride(null);
+                        // Auto-save must let go of the entry as well, so the
+                        // next one creates the new item instead of renaming it.
+                        autoSaveTargetRef.current = null;
                       }}
                     >
                       새 항목으로 저장
@@ -767,6 +931,7 @@ export default function App() {
                     {savingToLibrary ? '저장 중…' : '📚 라이브러리에 저장'}
                   </button>
                 </div>
+                <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
               </section>
               <WizardNavigation step={4} onMove={moveToStep} />
             </section>
