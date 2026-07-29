@@ -116,7 +116,7 @@ describe('parseUsageSnapshot', () => {
       models: [
         {
           provider: 'openrouter',
-          model: 'google/gemma-3-27b-it:free',
+          model: 'google/gemma-4-26b-a4b-it:free',
           period: 'day',
           periodKey: '2026-07-15',
           requests: 0,
@@ -131,7 +131,7 @@ describe('parseUsageSnapshot', () => {
     });
 
     expect(snapshot.models[0]).toMatchObject({
-      model: 'google/gemma-3-27b-it:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       requests: 0,
       used: 0,
       limit: 50,
