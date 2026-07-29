@@ -8,7 +8,7 @@ import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
 import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
 import { isTransientRecognitionError } from './recognitionError';
-import { sortSectionsByOrder } from '../utils/slidePlanner';
+import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
  * Base URL of the optional shared recognition proxy (see worker/), baked into
@@ -297,8 +297,15 @@ function replaceFamily(score: ParsedScore, family: string, split: Section[]): Pa
     sections.push(...split.map((s) => ({ label: s.label, lines: [...s.lines] })));
   }
 
+  // Only add an order token for a label the printed 진행 순서 cannot already
+  // reach. Resolution goes through the slide planner's own V↔V1 aliasing, so a
+  // page that printed "V1" already reaches a bare "V" — re-inserting it would
+  // put a token in 진행 순서 that the score never had.
   const order = [...score.order];
-  const missing = split.map((s) => s.label).filter((label) => !order.includes(label));
+  const reached = new Set(
+    order.map((token) => findSection(sections, token)?.label).filter((label): label is string => !!label),
+  );
+  const missing = split.map((s) => s.label).filter((label) => !reached.has(label));
   if (missing.length > 0) {
     const anchor = order.findIndex((token) => partFamily(token) === family);
     if (anchor === -1) order.push(...missing);

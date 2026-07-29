@@ -287,6 +287,37 @@ describe('concurrent batch recognition', () => {
     expect(out.scores[0].order).toEqual(['I', 'V', 'V2', 'C']);
   });
 
+  it('does not add an order token the printed 진행 순서 already reaches by alias', async () => {
+    // The page printed I-V1-V2-C and the winner read that order correctly; the
+    // adopted split labels its first verse bare ("V"). V is already reachable
+    // as V1, so 진행 순서 must be left exactly as printed.
+    const merged: ParsedScore = {
+      order: ['I', 'V1', 'V2', 'C'],
+      sections: [
+        { label: 'V', lines: ['첫 절 가사', '둘째 절 가사'] },
+        { label: 'C', lines: ['후렴 가사'] },
+      ],
+    };
+    const split: ParsedScore = {
+      order: ['I', 'V1', 'V2', 'C'],
+      sections: [
+        { label: 'V', lines: ['첫 절 가사'] },
+        { label: 'V2', lines: ['둘째 절 가사'] },
+        { label: 'C', lines: ['후렴 가사'] },
+      ],
+    };
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [merged];
+      throw new Error('down');
+    });
+    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([split]);
+
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+
+    expect(out.scores[0].sections).toEqual(split.sections);
+    expect(out.scores[0].order).toEqual(['I', 'V1', 'V2', 'C']);
+  });
+
   it('keeps the winning reading when another model split a genuinely different part', async () => {
     const winner: ParsedScore = {
       order: ['I', 'V'],
