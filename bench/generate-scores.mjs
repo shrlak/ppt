@@ -3,11 +3,13 @@
 // order, sections) laid out like a scanned worship score: heading with the
 // key, the 진행 순서 line, then five-line staves with note heads and the
 // lyric syllables hyphenated underneath — exactly the structures the AI has
-// to read back. The generator is deterministic (seeded per song index), so a
-// trial is reproducible, and it writes a manifest.json with the ground truth
-// every page was rendered from.
+// to read back, including parts that repeat being printed as stacked,
+// verse-numbered lyric rows under one shared staff. The generator is
+// deterministic (seeded per song index), so a trial is reproducible, and it
+// writes a manifest.json with the ground truth every page was rendered from.
 //
 // Usage: node bench/generate-scores.mjs [--count 50] [--out bench/out] [--width 1240]
+//        [--style scan|clean] [--stacked on|off]
 // Requires a Korean font (Noto Sans KR / Noto Sans CJK KR) and the
 // repo-configured Playwright Chromium.
 import { createRequire } from 'node:module';
@@ -28,6 +30,11 @@ const WIDTH = Number(args.width ?? 1240);
 // rotation, and scan noise. 'clean' keeps the pristine white render used by
 // the first benchmark trials.
 const STYLE = args.style ?? 'scan';
+// 'on' (default) prints parts that repeat (V/V2, C/C2) as stacked, verse-
+// numbered lyric rows under shared staves — the real-world layout the
+// recognition pipeline used to merge into one verse. 'off' restores the
+// one-row-per-staff layout the first benchmark trials used.
+const STACKED = args.stacked ?? 'on';
 
 const CHORDS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bm', 'Em', 'Am', 'F#m', 'G/B', 'Dm7', 'Am7', 'C/E', 'Gsus4', 'D7'];
 
@@ -105,6 +112,30 @@ function noiseOverlay(seed) {
     </svg>`;
 }
 
+/**
+ * Group the parts that a real score would print as stacked lyric rows under
+ * shared staves: consecutive sections of the same family (V/V2/V3, C/C2…) with
+ * the same number of lines. This is the layout the recognition pipeline gets
+ * wrong most often — reading the rows left-to-right merges 1절 into 2절 — so
+ * the benchmark has to contain it or it cannot see the regression.
+ * Disable with --stacked off to reproduce the older one-row-per-staff trials.
+ */
+function groupStackedSections(sections) {
+  if (STACKED === 'off') return sections.map((section) => [section]);
+  const family = (label) => label.trim().toUpperCase().replace(/\d+$/, '');
+  const groups = [];
+  for (const section of sections) {
+    const last = groups[groups.length - 1];
+    const sameShape =
+      last &&
+      family(last[0].label) === family(section.label) &&
+      last[0].lines.length === section.lines.length;
+    if (sameShape) last.push(section);
+    else groups.push([section]);
+  }
+  return groups;
+}
+
 function pageHtml(song, seed, width) {
   const rand = mulberry32(seed);
   const bodyFont = 18 + Math.floor(rand() * 4);
@@ -117,20 +148,33 @@ function pageHtml(song, seed, width) {
     : "'Noto Sans KR', 'Noto Sans CJK KR', sans-serif";
   const rotation = scan ? (rand() - 0.5) * 0.8 : 0;
   const paper = scan ? '#fcfbf6' : '#fff';
-  const sections = song.sections
-    .map((section) => {
-      const rows = section.lines
-        .map(
-          (line) => `
+  const sections = groupStackedSections(song.sections)
+    .map((group) => {
+      // One staff per line position, with every verse's line for that position
+      // stacked underneath it — the layout real scores use for 1절/2절.
+      const rowCount = Math.max(...group.map((section) => section.lines.length));
+      const rows = Array.from({ length: rowCount }, (_, row) => {
+        const stacked = group
+          .map((section, verse) =>
+            section.lines[row] === undefined
+              ? ''
+              : `<div class="lyric">${
+                  group.length > 1 ? `<span class="verse-no">${verse + 1}.</span> ` : ''
+                }${escapeHtml(hyphenate(section.lines[row]))}</div>`,
+          )
+          .join('');
+        return `
             <div class="staff-row">
               ${staffSvg(rand, staffWidth)}
-              <div class="lyric">${escapeHtml(hyphenate(line))}</div>
-            </div>`,
-        )
-        .join('');
+              ${stacked}
+            </div>`;
+      }).join('');
+      // Stacked groups carry no printed part label — the reader has to infer
+      // the verses from the stacking itself, exactly as on a real 악보.
+      const label = group.length > 1 ? '' : escapeHtml(group[0].label);
       return `
         <div class="section">
-          <div class="section-label">${escapeHtml(section.label)}</div>
+          <div class="section-label">${label}</div>
           <div class="section-body">${rows}</div>
         </div>`;
     })
@@ -150,6 +194,7 @@ function pageHtml(song, seed, width) {
     .section-label { width: 44px; font-size: 21px; font-weight: 700; padding-top: 30px; }
     .section-body { flex: 1; }
     .staff-row { margin-bottom: 4px; }
+    .verse-no { font-weight: 700; }
     .lyric { font-size: ${bodyFont}px; margin: 0 0 8px 42px; letter-spacing: 0.5px; }
   </style></head><body>
     <div class="page">

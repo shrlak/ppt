@@ -249,6 +249,68 @@ describe('concurrent batch recognition', () => {
     expect(out.scores[0].sections).toEqual([{ label: 'V1', lines: ['가사 한 줄'] }]);
   });
 
+  it('recovers stacked verses the winning model merged into one part', async () => {
+    // Gemini read the page left-to-right and ran 1절 into 2절; a supporting
+    // model kept the stacked rows apart. The split is the true reading of the
+    // score, so it must survive even though Gemini won the page.
+    const merged: ParsedScore = {
+      title: '주 사랑이 나를 숨쉬게 해',
+      lyricRowCount: 2,
+      order: ['I', 'V', 'C'],
+      sections: [
+        {
+          label: 'V',
+          lines: ['주 사랑이 나를 숨쉬게 해', '주 사랑이 나를 이끄시네', '세상 그 어떤 어려움 속에도', '내가 갈 수 없는 그 곳으로'],
+        },
+        { label: 'C', lines: ['주님만이 내 아픔 아시며'] },
+      ],
+    };
+    const split: ParsedScore = {
+      title: '주 사랑이 나를 숨쉬게 해',
+      order: ['I', 'V', 'V2', 'C'],
+      sections: [
+        { label: 'V', lines: ['주 사랑이 나를 숨쉬게 해', '세상 그 어떤 어려움 속에도'] },
+        { label: 'V2', lines: ['주 사랑이 나를 이끄시네', '내가 갈 수 없는 그 곳으로'] },
+        { label: 'C', lines: ['주님만이 내 아픔 아시며'] },
+      ],
+    };
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [merged];
+      throw new Error('down');
+    });
+    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([split]);
+
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+
+    expect(out.scores[0].sections).toEqual(split.sections);
+    // 진행 순서 has to learn the recovered label, or the slides never reach it.
+    expect(out.scores[0].order).toEqual(['I', 'V', 'V2', 'C']);
+  });
+
+  it('keeps the winning reading when another model split a genuinely different part', async () => {
+    const winner: ParsedScore = {
+      order: ['I', 'V'],
+      sections: [{ label: 'V', lines: ['주님만이 내 아픔 아시며'] }],
+    };
+    const unrelated: ParsedScore = {
+      order: ['I', 'V', 'V2'],
+      sections: [
+        { label: 'V', lines: ['전혀 다른 노래의 가사입니다'] },
+        { label: 'V2', lines: ['이 페이지와 상관없는 두 번째 절'] },
+      ],
+    };
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-2.5-flash') return [winner];
+      throw new Error('down');
+    });
+    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([unrelated]);
+
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+
+    expect(out.scores[0].sections).toEqual(winner.sections);
+    expect(out.scores[0].order).toEqual(['I', 'V']);
+  });
+
   it('never fills lyric fields from a model that disagrees with a non-score verdict', async () => {
     const nonScore: ParsedScore = {
       pageType: 'non_score',

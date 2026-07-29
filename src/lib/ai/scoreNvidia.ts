@@ -3,6 +3,7 @@
 // here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
 // travel as data: URLs in an OpenAI-compatible chat-completions request.
 import { RecognitionError } from './recognitionError';
+import { basePrompt } from './scorePrompt';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -24,35 +25,9 @@ function trimTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
-const BASE_PROMPT = [
-  '이 이미지는 한국어 찬양 콘티 PDF의 한 페이지이며, 악보가 아닐 수도 있습니다.',
-  '먼저 오선과 음표가 실제로 보이는지 확인해 페이지 종류를 분류하세요.',
-  '다음을 읽어 JSON으로만 답하세요:',
-  '- pageType: 오선과 음표가 있는 악보 페이지면 "score", 아니면 "non_score".',
-  '- sermonTitle: non_score 페이지에 명시된 설교 제목. 없으면 빈 문자열.',
-  '- scripture: non_score 페이지에 명시된 본문 성경 구절/범위. 없으면 빈 문자열.',
-  'pageType이 "score"일 때만 아래 찬양 필드를 읽으세요:',
-  '- title: 곡 제목',
-  '- key: 조성(예: E, F, F#m). 안 보이면 빈 문자열.',
-  '- order: 악보 맨 위의 진행 순서. 보통 I(간주)로 시작합니다. 예: ["I","V","V2","PC","C","C"]. 없으면 빈 배열.',
-  '- sections: 가사를 파트별로 나눈 배열. 각 원소는 {label, lines}.',
-  '  label은 V(절), PC(프리코러스), C(후렴), B(브릿지), O(아웃트로) 등입니다.',
-  '  같은 파트가 한 번뿐이면 번호 없이 그대로 쓰고(V, PC, C, B, O), 여러 번 있을 때만 두 번째부터',
-  '  번호를 붙이세요(V, V2, V3… / C, C2, C3… 등). 콘티에 1, 2 구분이 없는데 임의로 1을 붙이지 마세요.',
-  '  lines는 그 파트의 가사를 한 줄씩 담은 문자열 배열입니다.',
-  '악보에 보이는 가사를 빠짐없이 모두 읽으세요. 도돌이표와 1., 2. 괄호(볼타) 안의 가사도 포함하세요.',
-  '악보의 코드 기호(C, G, Am7, G/B 등)와 반복 기호는 가사가 아닙니다. lines에 절대 포함하지 마세요.',
-  '한 줄의 음표 아래 가사가 여러 줄로 쌓여 있으면 그 파트가 여러 번(절뿐 아니라 후렴·프리코러스·',
-  '브릿지·아웃트로 등 어떤 파트든 동일) 반복된다는 뜻입니다.',
-  '맨 윗줄부터 차례로 번호를 붙여 나누어 읽으세요: 절이면 V, V2…, 후렴이면 C, C2…,',
-  '프리코러스면 PC, PC2…, 브릿지면 B, B2…, 아웃트로면 O, O2… 순서로 라벨을 매기세요 (첫 줄은 번호 없이).',
-  '가사는 음절을 나누는 하이픈(-)이나 붙임표 없이 단어를 자연스럽게 이어서 적으세요',
-  '(예: "Ce-le-brate" → "Celebrate", "찬-양-해" → "찬양해").',
-  '가사에 없는 내용을 지어내지 말고, 확신이 없는 글자도 보이는 대로 최대한 읽으세요.',
-  'pageType이 "non_score"이면 title과 key는 빈 문자열, order와 sections는 빈 배열로 반환하세요.',
-  'non_score 페이지에서는 다른 안내문을 추측하지 말고 설교 제목과 본문만 옮기세요.',
+const BASE_PROMPT = basePrompt(
   '반드시 유효한 JSON 객체 하나만 출력하고, 다른 설명이나 마크다운(```)은 넣지 마세요.',
-].join('\n');
+);
 
 /** Ensure the image is a data: URL, as the chat-completions API expects. */
 export function toImageDataUrl(image: string): string {
