@@ -113,27 +113,53 @@ function noiseOverlay(seed) {
 }
 
 /**
+ * How many lyric rows a real 악보 will stack under one staff. Hymn-style scores
+ * go up to four verses; past that the stanzas are printed as separate labeled
+ * blocks instead. Capping keeps a 7-verse song from being rendered as seven
+ * rows crammed under every staff, which no printed score does and which would
+ * make the benchmark harder than the pages this pipeline actually sees.
+ */
+const MAX_STACKED_ROWS = 4;
+
+/**
  * Group the parts that a real score would print as stacked lyric rows under
  * shared staves: consecutive sections of the same family (V/V2/V3, C/C2…) with
- * the same number of lines. This is the layout the recognition pipeline gets
- * wrong most often — reading the rows left-to-right merges 1절 into 2절 — so
- * the benchmark has to contain it or it cannot see the regression.
+ * the same number of lines, up to MAX_STACKED_ROWS per block. This is the
+ * layout the recognition pipeline gets wrong most often — reading the rows
+ * left-to-right merges 1절 into 2절 — so the benchmark has to contain it or it
+ * cannot see the regression.
  * Disable with --stacked off to reproduce the older one-row-per-staff trials.
  */
 function groupStackedSections(sections) {
   if (STACKED === 'off') return sections.map((section) => [section]);
-  const family = (label) => label.trim().toUpperCase().replace(/\d+$/, '');
   const groups = [];
   for (const section of sections) {
     const last = groups[groups.length - 1];
     const sameShape =
       last &&
-      family(last[0].label) === family(section.label) &&
-      last[0].lines.length === section.lines.length;
+      partFamily(last[0].label) === partFamily(section.label) &&
+      last[0].lines.length === section.lines.length &&
+      last.length < MAX_STACKED_ROWS;
     if (sameShape) last.push(section);
     else groups.push([section]);
   }
   return groups;
+}
+
+function partFamily(label) {
+  return label.trim().toUpperCase().replace(/\d+$/, '');
+}
+
+/**
+ * What a stacked block prints in the left label column. Numbered verses carry
+ * their number on each row instead, so the column stays empty — but a repeated
+ * chorus or bridge keeps its label, which is how printed scores mark where one
+ * stacked block ends and the next begins. Leaving every block unlabeled removed
+ * that cue and made two adjacent blocks visually identical.
+ */
+function blockLabel(group) {
+  if (group.length === 1) return group[0].label;
+  return partFamily(group[0].label) === 'V' ? '' : partFamily(group[0].label);
 }
 
 function pageHtml(song, seed, width) {
@@ -169,9 +195,7 @@ function pageHtml(song, seed, width) {
               ${stacked}
             </div>`;
       }).join('');
-      // Stacked groups carry no printed part label — the reader has to infer
-      // the verses from the stacking itself, exactly as on a real 악보.
-      const label = group.length > 1 ? '' : escapeHtml(group[0].label);
+      const label = escapeHtml(blockLabel(group));
       return `
         <div class="section">
           <div class="section-label">${label}</div>
