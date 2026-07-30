@@ -47,6 +47,22 @@ function benchSettings(): AiSettings {
   };
 }
 
+/**
+ * Tell a spent daily budget apart from a burst limit.
+ *
+ * Both arrive as 429. Waiting out a per-minute limit works; retrying a daily
+ * free-tier cap just spends more of a budget that is already gone — which is
+ * how one trial burned all 20 of the day's gemini-2.5-flash requests on
+ * retries and still measured nothing.
+ */
+function isDailyQuotaExhausted(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /free_tier_requests|PerDay|per day/i.test(message);
+}
+
+/** Set once the day's quota is gone, so the remaining batches don't retry. */
+let quotaExhausted = false;
+
 async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise<ParsedScore[]> {
   let attempt = 0;
   for (;;) {
@@ -58,6 +74,10 @@ async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise
       }
       return await recognizeBatchWithGemini(dataUrls, API_KEY, MODELS[0], 'full', USE_SEARCH);
     } catch (error) {
+      if (isDailyQuotaExhausted(error)) {
+        quotaExhausted = true;
+        throw error;
+      }
       attempt += 1;
       const status = error instanceof RecognitionError ? error.status : undefined;
       const transient = status === 429 || status === 503 || (status !== undefined && status >= 500) || ENSEMBLE;
@@ -146,6 +166,12 @@ async function main() {
   const reports: SongReport[] = [];
   for (let start = 0; start < songs.length; start += BATCH) {
     const group = songs.slice(start, start + BATCH);
+    if (quotaExhausted) {
+      // Every remaining call would fail the same way. Record the songs as
+      // unanswered and stop, so the rest of the budget survives for a re-run.
+      for (const truth of group) reports.push(scoreSong(undefined, truth, 'daily quota exhausted'));
+      continue;
+    }
     const dataUrls = group.map((song) => {
       // Synthetic pages are PNG; the real-악보 corpus is mostly JPEG scans.
       const mime = /\.jpe?g$/i.test(song.file) ? 'image/jpeg' : 'image/png';
