@@ -138,7 +138,10 @@ export function scoreSong(parsed: ParsedScore | undefined, truth: TruthSong, err
 }
 
 export interface BenchSummary {
+  /** Songs the models actually answered — the population every mean is over. */
   songs: number;
+  /** Songs whose provider call failed outright (quota, retired model, 5xx). */
+  failed: number;
   meanOverall: number;
   meanTitle: number;
   meanOrder: number;
@@ -147,16 +150,28 @@ export interface BenchSummary {
   below90: SongReport[];
 }
 
+/**
+ * Summarize a trial, counting songs the provider never answered separately
+ * from songs it answered badly.
+ *
+ * Averaging a failed call in as 0% makes an exhausted quota look exactly like
+ * a catastrophic quality regression: a run where 46 of 50 songs never reached
+ * the model reported 17.6% "accuracy", which reads as a broken pipeline rather
+ * than a broken trial. Failures are a fact about the run, not about the code
+ * under test, so they are reported and never averaged.
+ */
 export function summarize(reports: SongReport[]): BenchSummary {
+  const scored = reports.filter((report) => !report.error);
   const mean = (select: (r: SongReport) => number) =>
-    reports.length === 0 ? 0 : reports.reduce((sum, r) => sum + select(r), 0) / reports.length;
+    scored.length === 0 ? 0 : scored.reduce((sum, r) => sum + select(r), 0) / scored.length;
   return {
-    songs: reports.length,
+    songs: scored.length,
+    failed: reports.length - scored.length,
     meanOverall: mean((r) => r.overall),
     meanTitle: mean((r) => r.titleScore),
     meanOrder: mean((r) => r.orderScore),
     meanLyrics: mean((r) => r.lyricsScore),
-    perfectTitles: reports.filter((r) => r.titleScore >= 0.999).length,
-    below90: reports.filter((r) => r.overall < 0.9).sort((a, b) => a.overall - b.overall),
+    perfectTitles: scored.filter((r) => r.titleScore >= 0.999).length,
+    below90: scored.filter((r) => r.overall < 0.9).sort((a, b) => a.overall - b.overall),
   };
 }

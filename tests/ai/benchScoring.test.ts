@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { levenshtein, lyricsSimilarity, orderSimilarity, scoreSong, summarize, textSimilarity } from '../../bench/scoring';
-import type { TruthSong } from '../../bench/scoring';
+import type { SongReport, TruthSong } from '../../bench/scoring';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
 const truth: TruthSong = {
@@ -93,5 +93,57 @@ describe('bench scoring', () => {
     expect(summary.meanOverall).toBeCloseTo(0.675);
     expect(summary.below90.map((r) => r.index)).toEqual([1]);
     expect(summary.perfectTitles).toBe(1);
+  });
+});
+
+describe('trials that lost songs to the provider', () => {
+  const ok = (index: number, overall: number): SongReport => ({
+    index,
+    title: `곡 ${index}`,
+    titleScore: 1,
+    orderScore: 1,
+    lyricsScore: overall,
+    overall,
+  });
+  const dead = (index: number): SongReport => ({
+    index,
+    title: `곡 ${index}`,
+    titleScore: 0,
+    orderScore: 0,
+    lyricsScore: 0,
+    overall: 0,
+    error: 'Gemini 일괄 호출 실패: quota exceeded',
+  });
+
+  it('averages only the songs a model actually answered', () => {
+    // Averaging the dead songs in as 0% reported 17.6% for a run whose four
+    // answered songs were all fine — a broken trial reading as a broken pipeline.
+    const summary = summarize([ok(0, 0.9), ok(1, 0.94), dead(2), dead(3), dead(4)]);
+    expect(summary.songs).toBe(2);
+    expect(summary.failed).toBe(3);
+    expect(summary.meanOverall).toBeCloseTo(0.92);
+  });
+
+  it('keeps failed songs out of the below-90 list and the perfect-title count', () => {
+    const summary = summarize([ok(0, 0.99), dead(1)]);
+    expect(summary.below90).toEqual([]);
+    expect(summary.perfectTitles).toBe(1);
+  });
+
+  it('reports zeros rather than dividing by nothing when every song failed', () => {
+    const summary = summarize([dead(0), dead(1)]);
+    expect(summary.songs).toBe(0);
+    expect(summary.failed).toBe(2);
+    expect(summary.meanOverall).toBe(0);
+  });
+
+  it('still counts a genuinely empty answer as a scored zero', () => {
+    // The model replied, it just read nothing — that is a quality result and
+    // belongs in the mean, unlike a call that never happened.
+    const empty: SongReport = { index: 0, title: '곡', titleScore: 0, orderScore: 0, lyricsScore: 0, overall: 0 };
+    const summary = summarize([empty, ok(1, 1)]);
+    expect(summary.songs).toBe(2);
+    expect(summary.failed).toBe(0);
+    expect(summary.meanOverall).toBeCloseTo(0.5);
   });
 });
