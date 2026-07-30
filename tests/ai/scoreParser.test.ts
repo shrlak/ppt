@@ -4,6 +4,7 @@ import {
   coerceParsedScore,
   coerceParsedScoreBatch,
   parseScoreText,
+  splitNumberedVerses,
 } from '../../src/lib/ai/scoreParser';
 
 describe('page classification metadata', () => {
@@ -119,5 +120,63 @@ describe('parseScoreText', () => {
     const parsed = parseScoreText('그냥 제목 같은 줄\n가사 한 줄');
     expect(parsed.order).toEqual([]);
     expect(parsed.sections.map((s) => s.label)).toEqual(['V', 'C']);
+  });
+});
+
+describe('stacked verses printed under one staff', () => {
+  it('splits a section the model returned with the verse numbers still attached', () => {
+    expect(
+      splitNumberedVerses({
+        label: 'V',
+        lines: ['1. 주 사랑이 나를 숨쉬게 해', '2. 주 사랑이 나를 이끄시네', '1. 세상 그 어떤 어려움 속에도', '2. 내가 갈 수 없는 그 곳으로'],
+      }),
+    ).toEqual([
+      { label: 'V', lines: ['주 사랑이 나를 숨쉬게 해', '세상 그 어떤 어려움 속에도'] },
+      { label: 'V2', lines: ['주 사랑이 나를 이끄시네', '내가 갈 수 없는 그 곳으로'] },
+    ]);
+  });
+
+  it('numbers any part family, not just verses, and keeps the first one bare', () => {
+    expect(
+      splitNumberedVerses({ label: 'C', lines: ['1) 첫 후렴', '2) 둘째 후렴', '3) 셋째 후렴'] }),
+    ).toEqual([
+      { label: 'C', lines: ['첫 후렴'] },
+      { label: 'C2', lines: ['둘째 후렴'] },
+      { label: 'C3', lines: ['셋째 후렴'] },
+    ]);
+  });
+
+  it('strips a lone verse number instead of splitting on it', () => {
+    expect(splitNumberedVerses({ label: 'V', lines: ['1. 한 절뿐인 노래', '이어지는 줄'] })).toEqual([
+      { label: 'V', lines: ['한 절뿐인 노래', '이어지는 줄'] },
+    ]);
+  });
+
+  it('leaves an already numbered label alone — that model split it itself', () => {
+    expect(splitNumberedVerses({ label: 'V2', lines: ['1. 가사 하나', '2. 가사 둘'] })).toEqual([
+      { label: 'V2', lines: ['가사 하나', '가사 둘'] },
+    ]);
+  });
+
+  it('keeps lines printed before the first number with the first verse', () => {
+    expect(splitNumberedVerses({ label: 'V', lines: ['앞선 줄', '1. 첫 절', '2. 둘째 절'] })).toEqual([
+      { label: 'V', lines: ['앞선 줄', '첫 절'] },
+      { label: 'V2', lines: ['둘째 절'] },
+    ]);
+  });
+
+  it('applies the split while coercing a model payload, and reads lyricRowCount', () => {
+    const parsed = coerceParsedScore({
+      pageType: 'score',
+      title: '주 사랑이 나를 숨쉬게 해',
+      lyricRowCount: 2,
+      order: ['I', 'V', 'V2'],
+      sections: [{ label: 'V', lines: ['1. 첫 절 가사', '2. 둘째 절 가사'] }],
+    });
+    expect(parsed.lyricRowCount).toBe(2);
+    expect(parsed.sections).toEqual([
+      { label: 'V', lines: ['첫 절 가사'] },
+      { label: 'V2', lines: ['둘째 절 가사'] },
+    ]);
   });
 });

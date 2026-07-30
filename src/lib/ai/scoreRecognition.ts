@@ -1,14 +1,14 @@
 // Orchestrates score recognition: given the chosen engine, turn a rendered score
 // image into a draft song and merge it onto an existing Song without clobbering
 // anything the user has already typed.
-import type { Song } from '../utils/types';
-import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
+import type { Section, Song } from '../utils/types';
+import { partFamily, type BatchRecognitionMode, type ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionAttempt, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
 import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
 import { isTransientRecognitionError } from './recognitionError';
-import { sortSectionsByOrder } from '../utils/slidePlanner';
+import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
  * Base URL of the optional shared recognition proxy (see worker/), baked into
@@ -206,18 +206,220 @@ export async function recognizeScore(dataUrl: string, settings: AiSettings): Pro
  */
 function fillScoreGaps(winner: ParsedScore, candidates: ParsedScore[]): ParsedScore {
   const merged: ParsedScore = { ...winner, order: [...winner.order], sections: [...winner.sections] };
+  const usable: ParsedScore[] = [];
   for (const candidate of candidates) {
     if (merged.pageType && candidate.pageType && candidate.pageType !== merged.pageType) continue;
+    usable.push(candidate);
     if (!merged.title && candidate.title) merged.title = candidate.title;
     if (!merged.key && candidate.key) merged.key = candidate.key;
     if (merged.order.length === 0 && candidate.order.length > 0) merged.order = [...candidate.order];
     if (merged.sections.length === 0 && candidate.sections.length > 0) {
       merged.sections = candidate.sections.map((section) => ({ label: section.label, lines: [...section.lines] }));
     }
+    if (!merged.lyricRowCount && candidate.lyricRowCount) merged.lyricRowCount = candidate.lyricRowCount;
     if (!merged.sermonTitle && candidate.sermonTitle) merged.sermonTitle = candidate.sermonTitle;
     if (!merged.scripture && candidate.scripture) merged.scripture = candidate.scripture;
   }
-  return merged;
+  return adoptLineConsensus(adoptTruncatedTails(adoptSplitVerses(merged, usable), usable), usable);
+}
+
+/**
+ * Put back lines the winning model stopped short of.
+ *
+ * Several songs lose their last line or two rather than misreading them: on
+ * 그리스도의 계절 the winner ended V at 「그리스도의 계절이」 and dropped
+ * 「오게 하소서 오게 하소서」, and on 주만 바라볼찌라 it ended the 후렴 at
+ * 「주를 향하고」. The asymmetry that makes this safe is the same one behind
+ * verse splitting: a model that stops early is common, a model that invents an
+ * extra printed line is not.
+ *
+ * Only a candidate whose reading *starts with* the winner's — same lines, in
+ * the same order — may extend it, and only the extra tail is taken. The
+ * winner's own wording is never replaced, so a fuller but sloppier reading
+ * contributes its missing lines without importing its misreadings.
+ */
+function adoptTruncatedTails(score: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  if (candidates.length === 0) return score;
+  let touched = false;
+  const sections = score.sections.map((section) => {
+    let best: string[] | undefined;
+    for (const candidate of candidates) {
+      const other = findSection(candidate.sections, section.label);
+      if (!other || other.lines.length <= section.lines.length) continue;
+      const continues = section.lines.every(
+        (line, index) => lineSimilarity(line, other.lines[index] ?? '') >= SAME_LINE_THRESHOLD,
+      );
+      if (!continues) continue;
+      if (!best || other.lines.length > best.length) best = other.lines;
+    }
+    if (!best) return section;
+    touched = true;
+    return { label: section.label, lines: [...section.lines, ...best.slice(section.lines.length)] };
+  });
+  return touched ? { ...score, sections } : score;
+}
+
+/** Comparison key for two readings of the same lyric line. */
+function lineKey(line: string): string {
+  return line.replace(/[^0-9a-zㄱ-ㆎ가-힣]/gi, '').toLowerCase();
+}
+
+/** Character-bag overlap of two lines, used to tell "the same line, misread"
+ * apart from "a line from somewhere else entirely". */
+function lineSimilarity(a: string, b: string): number {
+  const bag = (line: string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const char of lineKey(line)) counts.set(char, (counts.get(char) ?? 0) + 1);
+    return counts;
+  };
+  return bagSimilarity(bag(a), bag(b));
+}
+
+/** Two readings must look like the same line before one replaces the other. */
+const SAME_LINE_THRESHOLD = 0.6;
+
+/**
+ * Let the models outvote each other line by line.
+ *
+ * Most of what recognition still gets wrong is not structural — it is a
+ * syllable or two inside an otherwise correct line (실력 read as 능력, 이야기 as
+ * 이끄심). Those slips are independent per model, so when two other models read
+ * a line the same way and the winner reads it differently, the agreement is
+ * more likely to be the page. Priority still decides everything else; this only
+ * replaces individual lines, and only when the outvoting readings look like the
+ * same line rather than a different one.
+ *
+ * A vote needs at least two other readings to beat the winner's one, so this is
+ * inert for a single-model pool and for a pool of two.
+ */
+function adoptLineConsensus(score: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  if (candidates.length < 2) return score;
+  let touched = false;
+  const sections = score.sections.map((section) => {
+    // Only sections the candidate read with the same number of lines can be
+    // aligned line-for-line; anything else would compare across a shifted part.
+    const aligned = candidates
+      .map((candidate) => findSection(candidate.sections, section.label))
+      .filter((found): found is Section => !!found && found.lines.length === section.lines.length);
+    if (aligned.length < 2) return section;
+
+    let replaced = false;
+    const lines = section.lines.map((line, index) => {
+      const votes = new Map<string, { text: string; count: number }>();
+      const add = (text: string) => {
+        if (!text.trim()) return;
+        const key = lineKey(text);
+        const seen = votes.get(key);
+        if (seen) seen.count += 1;
+        else votes.set(key, { text, count: 1 });
+      };
+      add(line);
+      for (const other of aligned) add(other.lines[index]);
+
+      const own = votes.get(lineKey(line))?.count ?? 0;
+      const best = [...votes.values()].sort((a, b) => b.count - a.count)[0];
+      if (!best || best.count <= own) return line;
+      if (lineSimilarity(best.text, line) < SAME_LINE_THRESHOLD) return line;
+      replaced = true;
+      return best.text;
+    });
+
+    if (!replaced) return section;
+    touched = true;
+    return { label: section.label, lines };
+  });
+  return touched ? { ...score, sections } : score;
+}
+
+/** Word bag of a section list, for comparing two readings of the same lyrics. */
+function wordCounts(sections: Section[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const section of sections) {
+    for (const line of section.lines) {
+      for (const word of line.toLowerCase().split(/[^0-9a-zㄱ-ㆎ가-힣]+/)) {
+        if (word) counts.set(word, (counts.get(word) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
+}
+
+/** Multiset overlap (0–1) between two readings — order-insensitive, so it holds
+ * up whether the merged text ran verse-after-verse or staff-by-staff. */
+function bagSimilarity(a: Map<string, number>, b: Map<string, number>): number {
+  let shared = 0;
+  for (const [word, count] of a) shared += Math.min(count, b.get(word) ?? 0);
+  const total = Math.max(
+    [...a.values()].reduce((sum, n) => sum + n, 0),
+    [...b.values()].reduce((sum, n) => sum + n, 0),
+  );
+  return total === 0 ? 0 : shared / total;
+}
+
+/** The winner and a candidate must be reading the same lyrics for a structural
+ * correction to be safe — anything less is two models reading different pages. */
+const SAME_LYRICS_THRESHOLD = 0.75;
+
+/**
+ * Put stacked verses back when the winning model merged them.
+ *
+ * A page that prints 1절 above 2절 under shared staves is the one structure
+ * models reliably get wrong: the merged reading is a single V holding both
+ * verses. It is never wrong in the other direction — no model invents a 2절
+ * that isn't printed — so when another model split the same part family into
+ * numbered sections covering the same words, that split is the true reading.
+ * Adopting it also has to teach 진행 순서 about the new labels, otherwise the
+ * slide planner would never reach the recovered verse.
+ */
+function adoptSplitVerses(winner: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  const families = new Map<string, Section[]>();
+  for (const section of winner.sections) {
+    const family = partFamily(section.label);
+    families.set(family, [...(families.get(family) ?? []), section]);
+  }
+
+  let result = winner;
+  for (const [family, own] of families) {
+    if (own.length !== 1) continue; // already split, or absent
+    const better = candidates
+      .map((candidate) => candidate.sections.filter((section) => partFamily(section.label) === family))
+      .filter((split) => split.length > own.length)
+      .filter((split) => bagSimilarity(wordCounts(split), wordCounts(own)) >= SAME_LYRICS_THRESHOLD)
+      // Prefer the finest split that still reads as the same lyrics.
+      .sort((a, b) => b.length - a.length)[0];
+    if (!better) continue;
+    result = replaceFamily(result, family, better);
+  }
+  return result;
+}
+
+/** Swap a family's single merged section for the split one, in place, and make
+ * sure every recovered label is reachable from 진행 순서. */
+function replaceFamily(score: ParsedScore, family: string, split: Section[]): ParsedScore {
+  const sections: Section[] = [];
+  for (const section of score.sections) {
+    if (partFamily(section.label) !== family) {
+      sections.push(section);
+      continue;
+    }
+    sections.push(...split.map((s) => ({ label: s.label, lines: [...s.lines] })));
+  }
+
+  // Only add an order token for a label the printed 진행 순서 cannot already
+  // reach. Resolution goes through the slide planner's own V↔V1 aliasing, so a
+  // page that printed "V1" already reaches a bare "V" — re-inserting it would
+  // put a token in 진행 순서 that the score never had.
+  const order = [...score.order];
+  const reached = new Set(
+    order.map((token) => findSection(sections, token)?.label).filter((label): label is string => !!label),
+  );
+  const missing = split.map((s) => s.label).filter((label) => !reached.has(label));
+  if (missing.length > 0) {
+    const anchor = order.findIndex((token) => partFamily(token) === family);
+    if (anchor === -1) order.push(...missing);
+    else order.splice(anchor + 1, 0, ...missing);
+  }
+  return { ...score, sections, order };
 }
 
 /**

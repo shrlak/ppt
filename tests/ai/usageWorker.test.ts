@@ -145,7 +145,11 @@ describe('AI proxy usage records', () => {
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-2.5-flash' });
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-2.0-flash' });
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-31b-it:free' });
-    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-3-27b-it:free' });
+    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' });
+    expect(pairs).toContainEqual({
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    });
     expect(pairs).toContainEqual({ provider: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' });
     // A Hugging Face model override follows the proxy's actual pin.
     expect(usageCatalogModels({ HUGGINGFACE_MODEL: 'other/model' })).toContainEqual({
@@ -169,7 +173,7 @@ describe('AI proxy usage records', () => {
     expect(snapshot.models).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
     expect(snapshot.models.find((model) => model.model === 'gemini-2.5-flash')).toMatchObject({ used: 1 });
     // Untouched models still appear, as explicit zero rows.
-    expect(snapshot.models.find((model) => model.model === 'google/gemma-3-27b-it:free')).toMatchObject({
+    expect(snapshot.models.find((model) => model.model === 'google/gemma-4-26b-a4b-it:free')).toMatchObject({
       provider: 'openrouter',
       requests: 0,
       used: 0,
@@ -180,6 +184,8 @@ describe('AI proxy usage records', () => {
       requests: 0,
       used: 0,
     });
-    expect(snapshot.models.filter((model) => model.provider === 'openrouter')).toHaveLength(3);
+    expect(snapshot.models.filter((model) => model.provider === 'openrouter')).toHaveLength(
+      RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length,
+    );
   });
 });

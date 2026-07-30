@@ -23,14 +23,16 @@ export const RECOGNITION_MODEL_CATALOG = [
   { engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' },
   { engine: 'gemini', model: 'gemini-2.0-flash' },
   { engine: 'nvidia', model: 'google/gemma-4-31b-it:free' },
-  { engine: 'nvidia', model: 'google/gemma-3-27b-it:free' },
+  { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
+  { engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' },
   { engine: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' },
 ];
 
 const OPENROUTER_MODEL_ALIASES = new Map([
   [DEFAULT_NVIDIA_MODEL, OPENROUTER_NEMOTRON_MODEL],
   ['google/gemma-4-31b-it:free', 'google/gemma-4-31b-it:free'],
-  ['google/gemma-3-27b-it:free', 'google/gemma-3-27b-it:free'],
+  ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
+  ['google/gemma-4-26b-a4b-it:free', 'google/gemma-4-26b-a4b-it:free'],
 ]);
 
 export const DEFAULT_EXCLUDED_TITLES = ['공동체 고백송', '예배 전 준비 찬양'];

@@ -1,6 +1,6 @@
 {
   "model": "gemini-2.5-flash",
   "count": "50",
-  "batch": "10",
+  "batch": "25",
   "search": "0"
 }

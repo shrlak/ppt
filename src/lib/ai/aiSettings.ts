@@ -64,9 +64,15 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
   },
   {
     engine: 'nvidia',
-    model: 'google/gemma-3-27b-it:free',
-    label: 'OpenRouter Gemma 3 27B · Free',
-    note: '보조 모델 — 140개 이상 언어를 지원하는 다국어 비전 모델, 한국어 가사 예비 인식',
+    model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    label: 'NVIDIA Nemotron 3 Nano Omni 30B (reasoning) · Free',
+    note: '보조 모델 — 추론형 멀티모달, 1절·2절이 겹쳐 적힌 악보의 구조 판단에 강합니다',
+  },
+  {
+    engine: 'nvidia',
+    model: 'google/gemma-4-26b-a4b-it:free',
+    label: 'OpenRouter Gemma 4 26B A4B · Free',
+    note: '보조 모델 — 별도 무료 한도를 가진 경량 Gemma 4, 한국어 가사 예비 인식',
   },
   {
     engine: 'huggingface',

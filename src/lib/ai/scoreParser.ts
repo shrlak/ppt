@@ -18,6 +18,12 @@ export interface ParsedScore {
   key?: string;
   /** Normalized play-order tokens, e.g. ["I","V1","V2","PC","C","C"] */
   order: string[];
+  /**
+   * How many rows of lyrics the page stacks under a single staff — 2 when 1절
+   * and 2절 share the notes. Reported by the model so the merge step can tell
+   * "this page really has one verse" apart from "this model merged the verses".
+   */
+  lyricRowCount?: number;
   sections: Section[];
 }
 
@@ -56,6 +62,9 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
   const orderTokens = Array.isArray(obj.order) ? obj.order.filter((t): t is string => typeof t === 'string') : [];
   const order = parseOrder(orderTokens.join('-'));
 
+  const rowCount = Number(obj.lyricRowCount);
+  const lyricRowCount = Number.isFinite(rowCount) && rowCount > 0 ? Math.floor(rowCount) : undefined;
+
   const rawSections = Array.isArray(obj.sections) ? (obj.sections as SectionLike[]) : [];
   const sections: Section[] = [];
   for (const s of rawSections) {
@@ -67,10 +76,62 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
           .map((l) => cleanLyricLine(l))
           .filter((l) => l.length > 0)
       : [];
-    sections.push({ label, lines });
+    sections.push(...splitNumberedVerses({ label, lines }));
   }
 
-  return { pageType, sermonTitle, scripture, title, key, order, sections };
+  return { pageType, sermonTitle, scripture, title, key, order, lyricRowCount, sections };
+}
+
+/** A verse number printed at the start of a lyric row: "1.", "2)", "3 ". */
+const VERSE_NUMBER_PREFIX = /^([1-9])\s*[.)]\s*(?=\S)/;
+
+/** The part family a label belongs to: V2 → V, C3 → C, PC → PC. */
+export function partFamily(label: string): string {
+  return label.trim().toUpperCase().replace(/\d+$/, '');
+}
+
+/** Label for the n-th repeat of a part family — the first one stays bare. */
+function numberedLabel(family: string, n: number): string {
+  return n <= 1 ? family : `${family}${n}`;
+}
+
+/**
+ * Split a section whose lines still carry printed verse numbers.
+ *
+ * Scores that stack 1절/2절 under shared staves number the rows ("1. …" above
+ * "2. …"). A model that read the rows correctly but dropped them all into one
+ * section leaves those numbers in the text, which is enough to put each verse
+ * back where it belongs. Requires at least two distinct numbers — a lone "1."
+ * is just a prefix to strip, not a reason to split — and leaves an already
+ * numbered label (V2) alone, since that model did its own splitting.
+ */
+export function splitNumberedVerses(section: Section): Section[] {
+  const stripped = section.lines.map((line) => VERSE_NUMBER_PREFIX.exec(line));
+  const numbers = new Set(stripped.filter((m): m is RegExpExecArray => !!m).map((m) => Number(m[1])));
+  const clean = (line: string) => line.replace(VERSE_NUMBER_PREFIX, '').trim();
+  if (numbers.size < 2 || /\d$/.test(section.label.trim())) {
+    return [{ label: section.label, lines: section.lines.map(clean).filter(Boolean) }];
+  }
+
+  const family = partFamily(section.label);
+  const groups = new Map<number, string[]>();
+  let current = 0;
+  section.lines.forEach((line, index) => {
+    const match = stripped[index];
+    if (match) current = Number(match[1]);
+    // Any line printed before the first number still belongs to the first verse.
+    if (current === 0) current = 1;
+    const text = clean(line);
+    if (!text) return;
+    const lines = groups.get(current) ?? [];
+    lines.push(text);
+    groups.set(current, lines);
+  });
+
+  const split = [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([n, lines]) => ({ label: numberedLabel(family, n), lines }));
+  return split.length > 0 ? split : [{ label: section.label, lines: section.lines.map(clean).filter(Boolean) }];
 }
 
 /**

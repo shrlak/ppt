@@ -47,6 +47,22 @@ function benchSettings(): AiSettings {
   };
 }
 
+/**
+ * Tell a spent daily budget apart from a burst limit.
+ *
+ * Both arrive as 429. Waiting out a per-minute limit works; retrying a daily
+ * free-tier cap just spends more of a budget that is already gone — which is
+ * how one trial burned all 20 of the day's gemini-2.5-flash requests on
+ * retries and still measured nothing.
+ */
+function isDailyQuotaExhausted(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /free_tier_requests|PerDay|per day/i.test(message);
+}
+
+/** Set once the day's quota is gone, so the remaining batches don't retry. */
+let quotaExhausted = false;
+
 async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise<ParsedScore[]> {
   let attempt = 0;
   for (;;) {
@@ -58,6 +74,10 @@ async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise
       }
       return await recognizeBatchWithGemini(dataUrls, API_KEY, MODELS[0], 'full', USE_SEARCH);
     } catch (error) {
+      if (isDailyQuotaExhausted(error)) {
+        quotaExhausted = true;
+        throw error;
+      }
       attempt += 1;
       const status = error instanceof RecognitionError ? error.status : undefined;
       const transient = status === 429 || status === 503 || (status !== undefined && status >= 500) || ENSEMBLE;
@@ -67,6 +87,45 @@ async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise
       await delay(wait);
     }
   }
+}
+
+/**
+ * Check every requested model actually exists before spending anything.
+ *
+ * ListModels does not draw on the generate_content quota, so this is a free
+ * guard against the failure that wasted a trial: `gemini-2.5-flash-lite` has
+ * been retired for new users, and the run only found out one dead batch at a
+ * time, after the retries had eaten the day's budget.
+ */
+async function assertModelsExist(models: string[]): Promise<void> {
+  let usable: Set<string>;
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(API_KEY)}`,
+    );
+    if (!response.ok) {
+      console.warn(`preflight: could not list models (HTTP ${response.status}) — continuing anyway`);
+      return;
+    }
+    const payload = (await response.json()) as {
+      models?: { name: string; supportedGenerationMethods?: string[] }[];
+    };
+    usable = new Set(
+      (payload.models ?? [])
+        .filter((model) => (model.supportedGenerationMethods ?? []).includes('generateContent'))
+        .map((model) => model.name.replace(/^models\//, '')),
+    );
+  } catch (error) {
+    console.warn(`preflight: model list unavailable (${String(error)}) — continuing anyway`);
+    return;
+  }
+
+  console.log(`preflight: ${usable.size} models callable with this key`);
+  console.log(`  ${[...usable].sort().join('\n  ')}`);
+  const missing = models.filter((model) => !usable.has(model));
+  if (missing.length === 0) return;
+  console.error(`::error::unknown or unavailable model(s): ${missing.join(', ')}`);
+  process.exit(2);
 }
 
 /** Compact per-section diff so CI logs show WHAT was misread, not just scores. */
@@ -96,6 +155,7 @@ async function main() {
     console.error('GEMINI_API_KEY is not set — cannot run the benchmark.');
     process.exit(2);
   }
+  await assertModelsExist(MODELS);
   const manifest = JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8')) as TruthSong[];
   const limit = Number(process.env.BENCH_COUNT ?? manifest.length);
   const songs = manifest.slice(0, limit);
@@ -106,9 +166,17 @@ async function main() {
   const reports: SongReport[] = [];
   for (let start = 0; start < songs.length; start += BATCH) {
     const group = songs.slice(start, start + BATCH);
-    const dataUrls = group.map(
-      (song) => `data:image/png;base64,${readFileSync(join(OUT, song.file)).toString('base64')}`,
-    );
+    if (quotaExhausted) {
+      // Every remaining call would fail the same way. Record the songs as
+      // unanswered and stop, so the rest of the budget survives for a re-run.
+      for (const truth of group) reports.push(scoreSong(undefined, truth, 'daily quota exhausted'));
+      continue;
+    }
+    const dataUrls = group.map((song) => {
+      // Synthetic pages are PNG; the real-악보 corpus is mostly JPEG scans.
+      const mime = /\.jpe?g$/i.test(song.file) ? 'image/jpeg' : 'image/png';
+      return `data:${mime};base64,${readFileSync(join(OUT, song.file)).toString('base64')}`;
+    });
     const startedAt = Date.now();
     try {
       const parsed = await recognizeBatch(dataUrls, settings);
@@ -134,10 +202,19 @@ async function main() {
   }
 
   const summary = summarize(reports);
+  const attempted = reports.length;
   const lines = [
     `# Recognition benchmark — ${label}${USE_SEARCH ? ' + search' : ''}`,
     '',
-    `- Songs: **${summary.songs}**`,
+    ...(summary.failed > 0
+      ? [
+          `> ⚠️ **${summary.failed} of ${attempted} songs never reached a model** (quota, retired model, or`,
+          '> provider error) and are excluded from the means below. Compare this trial with others only',
+          '> if that count is 0 — a partial trial measures a different set of songs.',
+          '',
+        ]
+      : []),
+    `- Songs scored: **${summary.songs}**${summary.failed > 0 ? ` (of ${attempted} attempted)` : ''}`,
     `- Mean overall accuracy: **${(summary.meanOverall * 100).toFixed(1)}%**`,
     `- Mean title: ${(summary.meanTitle * 100).toFixed(1)}% (exact: ${summary.perfectTitles}/${summary.songs})`,
     `- Mean order: ${(summary.meanOrder * 100).toFixed(1)}%`,
@@ -160,6 +237,18 @@ async function main() {
   writeFileSync(join(OUT, 'summary.md'), lines.join('\n') + '\n');
   console.log('\n' + lines.join('\n'));
   console.log(`\nMEAN_OVERALL=${(summary.meanOverall * 100).toFixed(2)}`);
+  console.log(`BENCH_FAILED=${summary.failed}/${attempted}`);
+
+  // A trial that lost a fifth of its songs is not a measurement. Say so loudly
+  // and exit non-zero so it cannot be quoted as a result by mistake; the
+  // workflow still publishes the summary and artifacts.
+  if (summary.failed > attempted * 0.2) {
+    console.error(
+      `::error::benchmark inconclusive — ${summary.failed}/${attempted} songs never reached a model. ` +
+        'Re-run when the provider quota has reset, one trial at a time.',
+    );
+    process.exitCode = 3;
+  }
 }
 
 await main();
