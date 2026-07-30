@@ -24,7 +24,13 @@ const ONLY = args.only;
 const CONCURRENCY = 8;
 
 const sources = JSON.parse(readFileSync('bench/corpus/sources.json', 'utf8'));
+// A benchmark run only needs the pages that have verified ground truth — 20 of
+// 1,401 — so --truth keeps CI from pulling ~190 MB it will not score.
+const truthFiles = args.truth
+  ? new Set(JSON.parse(readFileSync('bench/corpus/truth.json', 'utf8')).map((song) => song.file))
+  : undefined;
 const wanted = sources
+  .filter((entry) => (truthFiles ? truthFiles.has(entry.file) : true))
   .filter((entry) => (SOURCE ? entry.source === SOURCE : true))
   .filter((entry) => (ONLY ? entry.stem.includes(ONLY) : true))
   .slice(0, LIMIT);

@@ -71,9 +71,10 @@ jobs:
       - name: Resolve trial parameters
         id: params
         run: |
-          MODEL="$BENCH_MODEL_INPUT"; COUNT="$BENCH_COUNT_INPUT"; BATCH="$BENCH_BATCH_INPUT"; SEARCH="$BENCH_SEARCH_INPUT"
+          MODEL="$BENCH_MODEL_INPUT"; COUNT="$BENCH_COUNT_INPUT"; BATCH="$BENCH_BATCH_INPUT"; SEARCH="$BENCH_SEARCH_INPUT"; CORPUS="synthetic"
           if [ -f bench/trial-config.json ]; then
             MODEL=$(node -p "JSON.parse(require('fs').readFileSync('bench/trial-config.json','utf8')).model ?? '$MODEL'")
+            CORPUS=$(node -p "JSON.parse(require('fs').readFileSync('bench/trial-config.json','utf8')).corpus ?? '$CORPUS'")
             COUNT=$(node -p "JSON.parse(require('fs').readFileSync('bench/trial-config.json','utf8')).count ?? '$COUNT'")
             BATCH=$(node -p "JSON.parse(require('fs').readFileSync('bench/trial-config.json','utf8')).batch ?? '$BATCH'")
             SEARCH=$(node -p "JSON.parse(require('fs').readFileSync('bench/trial-config.json','utf8')).search ?? '$SEARCH'")
@@ -82,10 +83,22 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "batch=$BATCH" >> "$GITHUB_OUTPUT"
           echo "search=$SEARCH" >> "$GITHUB_OUTPUT"
-          echo "trial: model=$MODEL count=$COUNT batch=$BATCH search=$SEARCH"
+          echo "corpus=$CORPUS" >> "$GITHUB_OUTPUT"
+          echo "trial: model=$MODEL count=$COUNT batch=$BATCH search=$SEARCH corpus=$CORPUS"
 
+      # 'synthetic' renders pages from library.json; 'real' scores the
+      # hand-verified scans in bench/corpus/truth.json instead. The real corpus
+      # is both the honest measurement and by far the cheaper one — 20 pages is
+      # a single request at batch 25.
       - name: Generate score pages
+        if: steps.params.outputs.corpus == 'synthetic'
         run: node bench/generate-scores.mjs --count ${{ steps.params.outputs.count }}
+
+      - name: Fetch the real 악보 corpus
+        if: steps.params.outputs.corpus == 'real'
+        run: |
+          node bench/corpus/fetch-corpus.mjs --truth true
+          node bench/corpus/build-manifest.mjs --out bench/out
 
       - name: Run benchmark
         env:
