@@ -106,9 +106,11 @@ async function main() {
   const reports: SongReport[] = [];
   for (let start = 0; start < songs.length; start += BATCH) {
     const group = songs.slice(start, start + BATCH);
-    const dataUrls = group.map(
-      (song) => `data:image/png;base64,${readFileSync(join(OUT, song.file)).toString('base64')}`,
-    );
+    const dataUrls = group.map((song) => {
+      // Synthetic pages are PNG; the real-악보 corpus is mostly JPEG scans.
+      const mime = /\.jpe?g$/i.test(song.file) ? 'image/jpeg' : 'image/png';
+      return `data:${mime};base64,${readFileSync(join(OUT, song.file)).toString('base64')}`;
+    });
     const startedAt = Date.now();
     try {
       const parsed = await recognizeBatch(dataUrls, settings);

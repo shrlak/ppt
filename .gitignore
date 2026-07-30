@@ -10,3 +10,7 @@ desktop/src-tauri/target
 desktop/src-tauri/gen/schemas
 public/back-slides.pptx
 bench/out/
+
+# Real-악보 benchmark corpus — fetched on demand, never committed (see bench/corpus/README.md)
+bench/corpus/pages/
+bench/real/
