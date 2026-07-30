@@ -220,7 +220,79 @@ function fillScoreGaps(winner: ParsedScore, candidates: ParsedScore[]): ParsedSc
     if (!merged.sermonTitle && candidate.sermonTitle) merged.sermonTitle = candidate.sermonTitle;
     if (!merged.scripture && candidate.scripture) merged.scripture = candidate.scripture;
   }
-  return adoptSplitVerses(merged, usable);
+  return adoptLineConsensus(adoptSplitVerses(merged, usable), usable);
+}
+
+/** Comparison key for two readings of the same lyric line. */
+function lineKey(line: string): string {
+  return line.replace(/[^0-9a-zㄱ-ㆎ가-힣]/gi, '').toLowerCase();
+}
+
+/** Character-bag overlap of two lines, used to tell "the same line, misread"
+ * apart from "a line from somewhere else entirely". */
+function lineSimilarity(a: string, b: string): number {
+  const bag = (line: string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const char of lineKey(line)) counts.set(char, (counts.get(char) ?? 0) + 1);
+    return counts;
+  };
+  return bagSimilarity(bag(a), bag(b));
+}
+
+/** Two readings must look like the same line before one replaces the other. */
+const SAME_LINE_THRESHOLD = 0.6;
+
+/**
+ * Let the models outvote each other line by line.
+ *
+ * Most of what recognition still gets wrong is not structural — it is a
+ * syllable or two inside an otherwise correct line (실력 read as 능력, 이야기 as
+ * 이끄심). Those slips are independent per model, so when two other models read
+ * a line the same way and the winner reads it differently, the agreement is
+ * more likely to be the page. Priority still decides everything else; this only
+ * replaces individual lines, and only when the outvoting readings look like the
+ * same line rather than a different one.
+ *
+ * A vote needs at least two other readings to beat the winner's one, so this is
+ * inert for a single-model pool and for a pool of two.
+ */
+function adoptLineConsensus(score: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  if (candidates.length < 2) return score;
+  let touched = false;
+  const sections = score.sections.map((section) => {
+    // Only sections the candidate read with the same number of lines can be
+    // aligned line-for-line; anything else would compare across a shifted part.
+    const aligned = candidates
+      .map((candidate) => findSection(candidate.sections, section.label))
+      .filter((found): found is Section => !!found && found.lines.length === section.lines.length);
+    if (aligned.length < 2) return section;
+
+    let replaced = false;
+    const lines = section.lines.map((line, index) => {
+      const votes = new Map<string, { text: string; count: number }>();
+      const add = (text: string) => {
+        if (!text.trim()) return;
+        const key = lineKey(text);
+        const seen = votes.get(key);
+        if (seen) seen.count += 1;
+        else votes.set(key, { text, count: 1 });
+      };
+      add(line);
+      for (const other of aligned) add(other.lines[index]);
+
+      const own = votes.get(lineKey(line))?.count ?? 0;
+      const best = [...votes.values()].sort((a, b) => b.count - a.count)[0];
+      if (!best || best.count <= own) return line;
+      if (lineSimilarity(best.text, line) < SAME_LINE_THRESHOLD) return line;
+      replaced = true;
+      return best.text;
+    });
+
+    if (!replaced) return section;
+    touched = true;
+    return { label: section.label, lines };
+  });
+  return touched ? { ...score, sections } : score;
 }
 
 /** Word bag of a section list, for comparing two readings of the same lyrics. */

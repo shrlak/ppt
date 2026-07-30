@@ -456,3 +456,69 @@ describe('applyScoreToSong', () => {
     expect(next.sections.map((s) => s.label)).toEqual(['V1', 'V2', 'C']);
   });
 });
+
+describe('line-level consensus across the model pool', () => {
+  /** Winner (top-priority Gemini) plus two supporting readings of one page. */
+  const pool = (winner: ParsedScore, second: ParsedScore, third: ParsedScore) => {
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
+      model === 'gemini-2.5-flash' ? [winner] : [second],
+    );
+    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([third]);
+    vi.mocked(recognizeBatchWithHuggingFace).mockResolvedValue([third]);
+  };
+  const one = (lines: string[]): ParsedScore => ({
+    title: '믿음과 삶',
+    order: ['I', 'V'],
+    sections: [{ label: 'V', lines }],
+  });
+
+  it('lets two agreeing models outvote the winner on a misread line', async () => {
+    // The slips that dominate what is left are a syllable or two inside an
+    // otherwise correct line, and they differ per model — so agreement wins.
+    pool(
+      one(['믿음과 삶을 살아내는 능력이', '자신없는 내 모습']),
+      one(['믿음과 삶을 살아내는 실력이', '자신없는 내 모습']),
+      one(['믿음과 삶을 살아내는 실력이', '자신없는 내 모습']),
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines[0]).toBe('믿음과 삶을 살아내는 실력이');
+    // The line every model agreed on is left exactly as the winner had it.
+    expect(out.scores[0].sections[0].lines[1]).toBe('자신없는 내 모습');
+  });
+
+  it('keeps the winner when the others do not agree with each other', async () => {
+    pool(one(['주의 이야기 되네']), one(['주의 이끄심 되네']), one(['주의 이야기 되네']));
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines[0]).toBe('주의 이야기 되네');
+  });
+
+  it('never swaps in a line that reads as different lyrics altogether', async () => {
+    // Two models agreeing on a line from elsewhere on the page must not be
+    // able to overwrite a line the winner read from the right place.
+    pool(
+      one(['하나님의 사랑을 사모하는 자']),
+      one(['어두움에 밝은 빛을 비춰주시고']),
+      one(['어두움에 밝은 빛을 비춰주시고']),
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines[0]).toBe('하나님의 사랑을 사모하는 자');
+  });
+
+  it('skips a supporting reading whose part has a different number of lines', async () => {
+    // Line n of a shorter section is not line n of the winner's — comparing
+    // them would vote across a shifted part.
+    pool(one(['첫 줄 능력이', '둘째 줄']), one(['첫 줄 실력이']), one(['첫 줄 실력이']));
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines[0]).toBe('첫 줄 능력이');
+  });
+
+  it('is inert for a pool of two, where one vote can never beat the winner', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
+      model === 'gemini-2.5-flash' ? [one(['능력이'])] : [one(['실력이'])],
+    );
+    vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithHuggingFace).mockRejectedValue(new Error('down'));
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines[0]).toBe('능력이');
+  });
+});
