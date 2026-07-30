@@ -220,7 +220,43 @@ function fillScoreGaps(winner: ParsedScore, candidates: ParsedScore[]): ParsedSc
     if (!merged.sermonTitle && candidate.sermonTitle) merged.sermonTitle = candidate.sermonTitle;
     if (!merged.scripture && candidate.scripture) merged.scripture = candidate.scripture;
   }
-  return adoptLineConsensus(adoptSplitVerses(merged, usable), usable);
+  return adoptLineConsensus(adoptTruncatedTails(adoptSplitVerses(merged, usable), usable), usable);
+}
+
+/**
+ * Put back lines the winning model stopped short of.
+ *
+ * Several songs lose their last line or two rather than misreading them: on
+ * 그리스도의 계절 the winner ended V at 「그리스도의 계절이」 and dropped
+ * 「오게 하소서 오게 하소서」, and on 주만 바라볼찌라 it ended the 후렴 at
+ * 「주를 향하고」. The asymmetry that makes this safe is the same one behind
+ * verse splitting: a model that stops early is common, a model that invents an
+ * extra printed line is not.
+ *
+ * Only a candidate whose reading *starts with* the winner's — same lines, in
+ * the same order — may extend it, and only the extra tail is taken. The
+ * winner's own wording is never replaced, so a fuller but sloppier reading
+ * contributes its missing lines without importing its misreadings.
+ */
+function adoptTruncatedTails(score: ParsedScore, candidates: ParsedScore[]): ParsedScore {
+  if (candidates.length === 0) return score;
+  let touched = false;
+  const sections = score.sections.map((section) => {
+    let best: string[] | undefined;
+    for (const candidate of candidates) {
+      const other = findSection(candidate.sections, section.label);
+      if (!other || other.lines.length <= section.lines.length) continue;
+      const continues = section.lines.every(
+        (line, index) => lineSimilarity(line, other.lines[index] ?? '') >= SAME_LINE_THRESHOLD,
+      );
+      if (!continues) continue;
+      if (!best || other.lines.length > best.length) best = other.lines;
+    }
+    if (!best) return section;
+    touched = true;
+    return { label: section.label, lines: [...section.lines, ...best.slice(section.lines.length)] };
+  });
+  return touched ? { ...score, sections } : score;
 }
 
 /** Comparison key for two readings of the same lyric line. */

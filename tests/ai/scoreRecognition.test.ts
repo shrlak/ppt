@@ -522,3 +522,60 @@ describe('line-level consensus across the model pool', () => {
     expect(out.scores[0].sections[0].lines[0]).toBe('능력이');
   });
 });
+
+describe('lines the winning model stopped short of', () => {
+  const winnerAnd = (winner: ParsedScore, other: ParsedScore) => {
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
+      model === 'gemini-2.5-flash' ? [winner] : [other],
+    );
+    vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithHuggingFace).mockRejectedValue(new Error('down'));
+  };
+
+  it('appends a dropped tail from a model that read further', async () => {
+    // 그리스도의 계절: the winner ended the verse mid-phrase and lost the last line.
+    winnerAnd(
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['민족의 가슴마다', '이 땅에 푸르고 푸른'] }] },
+      {
+        order: ['I', 'V'],
+        sections: [{ label: 'V', lines: ['민족의 가슴마다', '이 땅에 푸르고 푸른', '오게 하소서 오게 하소서'] }],
+      },
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines).toEqual([
+      '민족의 가슴마다',
+      '이 땅에 푸르고 푸른',
+      '오게 하소서 오게 하소서',
+    ]);
+  });
+
+  it('keeps the winner’s wording for the lines it already had', async () => {
+    // The fuller reading is not necessarily the better one — take its tail, not its text.
+    winnerAnd(
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['살아내는 실력이'] }] },
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['살아내는 능력이', '자신없는 내 모습'] }] },
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines).toEqual(['살아내는 실력이', '자신없는 내 모습']);
+  });
+
+  it('refuses to extend a reading that diverges before the tail', async () => {
+    // Different lines in the shared positions means the two models are not
+    // reading the same part, so the "extra" lines are not a dropped tail.
+    winnerAnd(
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['하나님의 사랑을 사모하는 자'] }] },
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['어두움에 밝은 빛을', '너의 작은 신음에도'] }] },
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines).toEqual(['하나님의 사랑을 사모하는 자']);
+  });
+
+  it('never shortens a section when another model read less', async () => {
+    winnerAnd(
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['첫 줄', '둘째 줄', '셋째 줄'] }] },
+      { order: ['I', 'V'], sections: [{ label: 'V', lines: ['첫 줄'] }] },
+    );
+    const out = await recognizeScoreBatch(['image-1'], settings, 'full');
+    expect(out.scores[0].sections[0].lines).toHaveLength(3);
+  });
+});
