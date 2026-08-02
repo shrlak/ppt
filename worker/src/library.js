@@ -71,6 +71,30 @@ export function validLibraryId(value, maxLength = 160) {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength && /^[A-Za-z0-9_-]+$/.test(value);
 }
 
+// Chunk routes are built from PPT_FILE_KINDS rather than spelled out, so a new
+// kind is transferable the moment it is declared. A kind the routes reject is
+// worse than one that is missing: the client uploads every declared file, and
+// a rejected chunk fails the whole deck upload rather than that one file.
+const CHUNK_ROUTE_KINDS = PPT_FILE_KINDS.join('|');
+const UPLOAD_CHUNK_ROUTE = new RegExp(
+  `^/libraries/ppt/uploads/([A-Za-z0-9_-]+)/files/(${CHUNK_ROUTE_KINDS})/chunks/(\\d{1,9})$`,
+);
+const DECK_CHUNK_ROUTE = new RegExp(
+  `^/libraries/ppt/([A-Za-z0-9_-]+)/files/(${CHUNK_ROUTE_KINDS})/chunks/(\\d{1,9})$`,
+);
+
+/** `PUT /libraries/ppt/uploads/:uploadId/files/:kind/chunks/:index` */
+export function matchUploadChunkRoute(pathname) {
+  const match = UPLOAD_CHUNK_ROUTE.exec(pathname);
+  return match ? { uploadId: match[1], kind: match[2], index: Number(match[3]) } : null;
+}
+
+/** `GET /libraries/ppt/:deckId/files/:kind/chunks/:index` */
+export function matchDeckChunkRoute(pathname) {
+  const match = DECK_CHUNK_ROUTE.exec(pathname);
+  return match ? { deckId: match[1], kind: match[2], index: Number(match[3]) } : null;
+}
+
 export function sanitizePptFileDescriptor(raw, required = false) {
   if (raw == null && !required) return null;
   if (!raw || typeof raw !== 'object') return null;

@@ -23,6 +23,8 @@ Everyone ◀──GET /libraries/lyrics── shared user-added lyrics
 Admin    ──PUT/DELETE /libraries/lyrics── save or delete lyrics
 Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
 Admin    ──POST/DELETE /libraries/ppt── save, edit, or delete PPT entries
+Cron     ──Sun 5 PM ET────────▶  wipe every PPT entry and its files
+Admin    ──POST /libraries/ppt/purge── run that wipe now
 ```
 
 `GET/POST /settings` is what makes 관리자 설정 changes apply to **every
@@ -35,13 +37,49 @@ only forwards allowlisted catalog models to the shared key.
 
 The same Durable Object is also the source of truth for both user-facing
 libraries. Existing `localStorage` lyrics and IndexedDB PPT records are merged
-automatically the first time a browser connects. PPTX, PDF, and source PPTX
-files are transferred and stored in 1 MiB chunks, then fetched only when the
-user downloads or edits that entry. Each PPT-library entry is capped at 100 MB
-across all three files, and the shared library accepts up to 250 PPT entries.
+automatically the first time a browser connects. Every file on an entry — the
+generated PPTX, the 콘티 PDF, the 설교 PPTX, and the JSON snapshot of the
+wizard inputs that 편집 reopens — is transferred and stored in 1 MiB chunks,
+then fetched only when the user downloads or edits that entry. The chunk
+routes are generated from `PPT_FILE_KINDS` in `src/library.js`: the client
+uploads every kind it declares and a rejected chunk fails the whole deck, so
+adding a kind there is all that a new file needs.
+Each PPT-library entry is capped at 100 MB
+across all its files, and the shared library accepts up to 250 PPT entries.
 Browser storage remains an offline cache, so a temporary Worker outage does
 not discard a newly generated presentation. Deletion tombstones keep an old
 device from restoring an item deleted elsewhere.
+
+### Weekly PPT purge (Sunday 5 PM)
+
+The shared PPT library holds one week of material at a time. A cron trigger
+deletes **every saved PPT entry and all of its files** each Sunday at 5 PM
+`PURGE_TIMEZONE` (default `America/New_York`), so the next week's 콘티 starts
+from an empty library. Half-finished uploads go with them. The 곡 (lyrics)
+library, shared settings, and usage counters are never touched.
+
+Cron triggers are UTC-only, so `wrangler.toml` fires the Worker at **both**
+UTC hours that can be 5 PM Eastern — `0 21 * * 0` (EDT) and `0 22 * * 0`
+(EST). `src/purge.js` compares the actual local time and records the local
+date of each purge, so exactly one firing per week does the work and DST
+never shifts the deletion off 5 PM. Changing `PURGE_TIMEZONE`, `PURGE_HOUR`,
+or `PURGE_WEEKDAY` means updating those cron hours (and the notice shown in
+the app's 라이브러리 panel) to match.
+
+Each deleted deck leaves a tombstone behind, so a browser that cached the
+deck drops its local copy on the next sync instead of uploading it back.
+Tombstones older than 90 days are swept during the purge.
+
+Check the schedule and the last run, or trigger a purge immediately:
+
+```bash
+curl https://<worker>.workers.dev/libraries/ppt/purge -H 'Origin: https://shrlak.github.io'
+curl -X POST https://<worker>.workers.dev/libraries/ppt/purge \
+  -H 'Origin: https://shrlak.github.io' -H 'Authorization: Bearer <ADMIN_PASSWORD>'
+```
+
+A manual purge deletes the same things but is not recorded as that week's
+scheduled run, so Sunday evening still wipes anything saved in between.
 
 Library reads are limited by the same origin allowlist as recognition. Library
 writes require the administrator credential used by `/settings`. This matches
@@ -177,3 +215,20 @@ This runs the Worker locally (default `http://localhost:8787`). Point
 `VITE_RECOGNITION_PROXY_URL` at that URL and add `http://localhost:4173` (or
 wherever `npm run preview` serves the app) to `ALLOWED_ORIGINS` for local
 end-to-end testing.
+
+To exercise the weekly purge without waiting for Sunday, `wrangler dev`
+exposes the cron trigger on its scheduled endpoint. `time` is a Unix
+timestamp in **milliseconds**, so any Sunday 5 PM local can be replayed:
+
+```bash
+# 2026-08-02 21:00Z = 5 PM EDT -> purges
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+21+*+*+0&time=1785704400000"
+# 2026-11-15 22:00Z = 5 PM EST -> purges; the 21:00Z firing that day does not
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+22+*+*+0&time=1794780000000"
+```
+
+That runs the same code path the real trigger does, including the local-time
+check; the decision and the deleted-file counts are logged to the `wrangler
+dev` console. `POST /libraries/ppt/purge` skips the schedule entirely. The
+pure schedule logic is unit tested in `tests/storage/pptLibraryPurge.test.ts`
+(`npm test` in the repo root).

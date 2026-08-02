@@ -20,6 +20,19 @@ OPENROUTER_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free"
 OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
 HUGGINGFACE_USD_PER_SECOND = "0.00012"
+# Weekly wipe of the shared PPT library: every saved deck and its files are
+# deleted each Sunday at 5 PM in this timezone (the 곡 라이브러리 is kept).
+# PURGE_WEEKDAY (0 = Sunday) can override the day. Changing either of these
+# means changing the UTC cron hours below to match.
+PURGE_TIMEZONE = "America/New_York"
+PURGE_HOUR = "17"
+
+# Cron triggers are UTC-only, so the Worker wakes at both hours that can be
+# 5 PM Eastern — 21:00 UTC under EDT and 22:00 UTC under EST — and src/purge.js
+# runs the purge on whichever firing is actually 17:00 local. The other firing
+# sees the week already purged and does nothing, so DST never shifts the wipe.
+[triggers]
+crons = ["0 21 * * 0", "0 22 * * 0"]
 
 [[durable_objects.bindings]]
 name = "USAGE_TRACKER"

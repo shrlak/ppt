@@ -444,6 +444,19 @@ body {
   gap: 8px;
 }
 
+/* The weekly server wipe is the one thing in 라이브러리 that loses files on
+   its own, so it is called out above the list rather than left to the docs. */
+.library-purge-notice {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(180, 83, 9, 0.25);
+  border-radius: 8px;
+  background: rgba(180, 83, 9, 0.07);
+  color: #b45309;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .library-list {
   display: flex;
   flex-direction: column;

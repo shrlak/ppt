@@ -4,6 +4,7 @@
 // deck and its source PDF/PPTX files never depend on browser storage alone.
 import JSZip from 'jszip';
 import { decksWithSameName } from './deckNames';
+import { SAVED_FILE_KINDS, type SavedFileKind } from './deckFileKinds';
 import {
   cloudLibraryJson,
   cloudLibraryRequest,
@@ -15,10 +16,8 @@ export interface SavedFile {
   data: ArrayBuffer;
 }
 
-export type SavedFileKind = 'pptx' | 'contiPdf' | 'sermonPptx' | 'source';
-
-/** Every kind travels the same chunked upload/download path. */
-export const SAVED_FILE_KINDS: SavedFileKind[] = ['pptx', 'contiPdf', 'sermonPptx', 'source'];
+export { SAVED_FILE_KINDS };
+export type { SavedFileKind };
 
 export interface SavedDeck {
   id: string;

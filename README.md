@@ -45,6 +45,23 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 - 저장에 실패하면 상태 줄에 이유가 표시되고 한 번 더 시도합니다. 그래도 실패하면 다음 편집 때
   다시 시도하며, **라이브러리에 저장** 버튼으로 즉시 저장할 수도 있습니다.
 - 서버 연결이 끊긴 동안에도 이 기기에는 저장되고, 다시 연결되면 자동으로 동기화됩니다.
+- 항목에 딸린 **모든 파일**(완성된 PPTX, 콘티 PDF, 설교 PPT, 입력 내용 스냅샷)이 함께 서버로
+  올라갑니다. 그래서 다른 기기에서 **편집**을 눌러도 저장할 때의 입력 내용이 그대로 열립니다.
+
+### 매주 일요일 오후 5시 자동 삭제
+
+공유 서버는 **한 주치 자료만** 보관합니다. 매주 **일요일 오후 5시(미 동부 시간)** 에 서버에 저장된
+**모든 PPT 항목과 딸린 파일**(PPTX·콘티 PDF·설교 PPT·입력 내용)이 자동으로 삭제되어, 다음 주 콘티를
+빈 라이브러리에서 시작합니다.
+
+- 계속 보관할 파일은 그 전에 **다운로드**해 두세요. 삭제된 파일은 되돌릴 수 없습니다.
+- **찬양 가사 라이브러리는 삭제되지 않습니다** — 곡 데이터베이스는 한 주치 자료가 아니라 계속
+  쌓이는 자산이라 그대로 남습니다. 관리자 설정과 사용량 기록도 그대로입니다.
+- 삭제될 때 각 항목에 삭제 표시가 남아, 브라우저에만 남아 있던 사본도 다음에 라이브러리를 열 때
+  함께 정리됩니다(오프라인 사본이 다시 올라가지 않습니다).
+- 삭제 이후에 저장하면 새 주의 항목으로 다시 쌓이기 시작합니다.
+- 삭제 시각·시간대는 Worker의 `PURGE_TIMEZONE`/`PURGE_HOUR` 설정으로 바꿀 수 있습니다
+  (`worker/README.md`의 *Weekly PPT purge* 참고).
 
 **편집**을 누르면 그 PPT를 만들 때의 입력 내용 그대로 찬양 → 성경 말씀 → 설교 → 광고 →
 다운로드 5단계가 다시 열립니다. 내용을 고치면 같은 항목이 자동으로 갱신되며, 파일명을
@@ -254,7 +271,13 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    into one slide per item. Markdown pasted from a notes app works too: bold/italic markers around
    the title (`1. **<title>**`) or inside the body are stripped, and `*`/`•` bullets become `-`.
 
-Everything runs client-side (no backend) — Vite + React + TypeScript, deployed to GitHub Pages via
+Generated decks are archived in a shared PPT library backed by a Cloudflare Worker, together with
+every file that produced them (conti PDF, sermon PPTX, and a snapshot of the wizard inputs), and
+auto-save keeps that server copy current while you edit. The server side of that library is wiped
+every **Sunday at 5 PM US Eastern** so each week starts from an empty shelf — download anything you
+want to keep before then. The song-lyrics library is never purged.
+
+Slide generation itself runs client-side — Vite + React + TypeScript, deployed to GitHub Pages via
 GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). `src/lib/pptxMerge.ts`
 stitches decks built from different templates into one file by renaming any colliding layout/
 master/theme/media parts. Local dev: `npm install && npm run dev`; e2e tests:
