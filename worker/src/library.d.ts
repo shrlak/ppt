@@ -38,6 +38,12 @@ export function normalizeLibraryTitle(value: unknown): string;
 export function sanitizeLyricsEntry(raw: unknown): LyricsLibraryEntry | null;
 export function sanitizeLyricsEntries(raw: unknown): LyricsLibraryEntry[];
 export function validLibraryId(value: unknown, maxLength?: number): value is string;
+export function matchUploadChunkRoute(
+  pathname: string,
+): { uploadId: string; kind: keyof PptFiles; index: number } | null;
+export function matchDeckChunkRoute(
+  pathname: string,
+): { deckId: string; kind: keyof PptFiles; index: number } | null;
 export function sanitizePptFileDescriptor(raw: unknown, required?: boolean): PptFileDescriptor | null;
 export function sanitizePptFiles(raw: unknown): PptFiles | null;
 export function sanitizePptUpload(raw: unknown): { uploadId: string; deckId: string; files: PptFiles } | null;

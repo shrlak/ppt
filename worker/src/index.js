@@ -16,6 +16,10 @@
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
 //   GET/PUT/DELETE /libraries/lyrics -> shared lyrics library
 //   GET/POST/DELETE /libraries/ppt   -> shared PPT library and chunk transfer
+//   GET/POST /libraries/ppt/purge    -> weekly purge status / run it now
+//
+// A cron trigger (see wrangler.toml) wipes the shared PPT library every
+// Sunday at 5 PM local time; src/purge.js owns that schedule.
 //
 // See worker/README.md for deployment instructions.
 
@@ -32,6 +36,8 @@ import {
   MAX_PPT_LIBRARY_DECKS,
   PPT_CHUNK_BYTES,
   PPT_FILE_KINDS,
+  matchDeckChunkRoute,
+  matchUploadChunkRoute,
   normalizeLibraryTitle,
   samePptFiles,
   sanitizeLyricsEntries,
@@ -40,6 +46,7 @@ import {
   sanitizePptUpload,
   validLibraryId,
 } from './library.js';
+import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -270,6 +277,71 @@ export class UsageTracker extends DurableObject {
     return (await this.ctx.storage.get(`library:ppt:chunk:${deck.uploadId}:${kind}:${index}`)) ?? null;
   }
 
+  /** Drop tombstones no offline device could still need (see purge.js). */
+  async prunePptTombstones(now) {
+    const tombstones = await this.ctx.storage.list({ prefix: 'library:ppt:deleted:' });
+    const stale = staleTombstoneKeys(tombstones, now);
+    for (let index = 0; index < stale.length; index += 128) {
+      await this.ctx.storage.delete(stale.slice(index, index + 128));
+    }
+    return stale.length;
+  }
+
+  async lastPptPurge() {
+    return (await this.ctx.storage.get('library:ppt:purge')) ?? null;
+  }
+
+  /**
+   * The weekly wipe: every saved deck, every file on it (PPTX, 콘티 PDF, 설교
+   * PPT and the inputs snapshot) and any half-finished upload. Each deck
+   * leaves a tombstone behind so a device holding a cached copy deletes it on
+   * the next sync instead of uploading it straight back. The 곡 라이브러리 is
+   * a song database rather than a week's material, so it is never touched.
+   */
+  async purgePptLibrary({ purgeKey = null, at = new Date().toISOString(), trigger = 'scheduled' } = {}) {
+    const now = new Date(at);
+    const timestamp = Number.isFinite(now.getTime()) ? now : new Date();
+    const decks = await this.ctx.storage.list({ prefix: 'library:ppt:meta:' });
+    let files = 0;
+    let bytes = 0;
+    for (const [key, deck] of decks) {
+      await this.cleanupPptUpload(deck.uploadId, deck.files);
+      await this.ctx.storage.delete(key);
+      await this.ctx.storage.put(`library:ppt:deleted:${deck.id}`, {
+        id: deck.id,
+        deletedAt: timestamp.toISOString(),
+        reason: 'weekly-purge',
+      });
+      for (const kind of PPT_FILE_KINDS) {
+        const descriptor = deck.files?.[kind];
+        if (!descriptor) continue;
+        files += 1;
+        bytes += descriptor.size;
+      }
+    }
+
+    const uploads = await this.ctx.storage.list({ prefix: 'library:ppt:upload:' });
+    for (const [key, manifest] of uploads) {
+      await this.cleanupPptUpload(manifest.uploadId, manifest.files);
+      await this.ctx.storage.delete(key);
+    }
+
+    const record = {
+      // Null for a manual run: forcing a purge on Sunday morning must not
+      // cancel that evening's scheduled one.
+      purgeKey,
+      trigger,
+      at: timestamp.toISOString(),
+      decks: decks.size,
+      files,
+      bytes,
+      uploads: uploads.size,
+      prunedTombstones: await this.prunePptTombstones(timestamp),
+    };
+    await this.ctx.storage.put('library:ppt:purge', record);
+    return record;
+  }
+
   async deletePptDeck(id) {
     if (!validLibraryId(id, 100)) throw new Error('invalid PPT library ID');
     const deck = await this.getPptDeck(id);
@@ -354,7 +426,47 @@ function providerComputeSeconds(response, wallSeconds) {
   };
 }
 
+/**
+ * Cron entry point for the weekly wipe. wrangler.toml fires this at both UTC
+ * hours that can be 5 PM local, and purgeDecision() lets exactly one of them
+ * through per week.
+ */
+async function runScheduledPurge(env, now) {
+  const tracker = usageTracker(env);
+  if (!tracker) {
+    console.warn('weekly PPT purge skipped: shared library storage is not configured');
+    return null;
+  }
+  const last = await tracker.lastPptPurge();
+  const decision = purgeDecision(now, last?.purgeKey ?? null, env);
+  if (!decision.purge) {
+    console.log(`weekly PPT purge skipped at ${decision.localTime}: ${decision.reason}`);
+    return null;
+  }
+  const result = await tracker.purgePptLibrary({
+    purgeKey: decision.purgeKey,
+    at: now.toISOString(),
+    trigger: 'scheduled',
+  });
+  console.log(
+    `weekly PPT purge at ${decision.localTime}: removed ${result.decks} deck(s), ` +
+      `${result.files} file(s), ${result.bytes} byte(s), ${result.uploads} pending upload(s)`,
+  );
+  return result;
+}
+
 export default {
+  async scheduled(controller, env, ctx) {
+    const now = new Date(controller?.scheduledTime ?? Date.now());
+    ctx.waitUntil(
+      runScheduledPurge(env, Number.isFinite(now.getTime()) ? now : new Date()).catch((error) => {
+        // A failed purge must not retry-loop the cron; the next firing (an
+        // hour later, or next Sunday) tries again on its own.
+        console.error('weekly PPT purge failed:', error instanceof Error ? error.message : String(error));
+      }),
+    );
+  },
+
   async fetch(request, env) {
     const headers = corsHeaders(request, env);
 
@@ -427,33 +539,57 @@ export default {
       }
     }
 
-    const chunkUpload = url.pathname.match(
-      /^\/libraries\/ppt\/uploads\/([A-Za-z0-9_-]+)\/files\/(pptx|contiPdf|sermonPptx)\/chunks\/(\d+)$/,
-    );
+    const chunkUpload = matchUploadChunkRoute(url.pathname);
     if (chunkUpload && request.method === 'PUT') {
       if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
       const tracker = usageTracker(env);
       if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
       try {
-        await tracker.putPptChunk(chunkUpload[1], chunkUpload[2], Number(chunkUpload[3]), await request.arrayBuffer());
+        await tracker.putPptChunk(chunkUpload.uploadId, chunkUpload.kind, chunkUpload.index, await request.arrayBuffer());
         return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
       } catch (error) {
         return libraryError(error, headers);
       }
     }
 
-    const pptChunk = url.pathname.match(
-      /^\/libraries\/ppt\/([A-Za-z0-9_-]+)\/files\/(pptx|contiPdf|sermonPptx)\/chunks\/(\d+)$/,
-    );
+    const pptChunk = matchDeckChunkRoute(url.pathname);
     if (pptChunk && request.method === 'GET') {
       const tracker = usageTracker(env);
       if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
-      const chunk = await tracker.getPptChunk(pptChunk[1], pptChunk[2], Number(pptChunk[3]));
+      const chunk = await tracker.getPptChunk(pptChunk.deckId, pptChunk.kind, pptChunk.index);
       if (!(chunk instanceof ArrayBuffer)) return libraryError('file chunk not found', headers, 404);
       return new Response(chunk, {
         status: 200,
         headers: { ...headers, 'Content-Type': 'application/octet-stream', 'Cache-Control': 'private, max-age=300' },
       });
+    }
+
+    // Ahead of the /libraries/ppt/:id deck route below, which would otherwise
+    // read "purge" as a deck ID.
+    if (url.pathname === '/libraries/ppt/purge') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      const schedule = purgeSchedule(env);
+      try {
+        if (request.method === 'GET') {
+          return jsonResponse({ schedule, last: await tracker.lastPptPurge() }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'POST') {
+          if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+          const now = new Date();
+          const purge = await tracker.purgePptLibrary({ at: now.toISOString(), trigger: 'manual' });
+          return jsonResponse({ schedule, localTime: zonedParts(now, schedule.timeZone), purge }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+      } catch (error) {
+        return libraryError(error, headers, 500);
+      }
+      return libraryError('not found', headers, 404);
     }
 
     const pptDeck = url.pathname.match(/^\/libraries\/ppt\/([A-Za-z0-9_-]+)$/);
