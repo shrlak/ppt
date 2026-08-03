@@ -59,12 +59,25 @@ from an empty library. Half-finished uploads go with them. The 곡 (lyrics)
 library, shared settings, and usage counters are never touched.
 
 Cron triggers are UTC-only, so `wrangler.toml` fires the Worker at **both**
-UTC hours that can be 5 PM Eastern — `0 21 * * 0` (EDT) and `0 22 * * 0`
-(EST). `src/purge.js` compares the actual local time and records the local
-date of each purge, so exactly one firing per week does the work and DST
-never shifts the deletion off 5 PM. Changing `PURGE_TIMEZONE`, `PURGE_HOUR`,
-or `PURGE_WEEKDAY` means updating those cron hours (and the notice shown in
-the app's 라이브러리 panel) to match.
+UTC hours that can be 5 PM Eastern — `crons = ["0 21,22 * * SUN"]`, i.e.
+21:00 UTC (EDT) and 22:00 UTC (EST). `src/purge.js` compares the actual local
+time and records the local date of each purge, so exactly one firing per week
+does the work and DST never shifts the deletion off 5 PM. Changing
+`PURGE_TIMEZONE`, `PURGE_HOUR`, or `PURGE_WEEKDAY` means updating that cron
+expression (and the notice shown in the app's 라이브러리 panel) to match.
+
+Two numbering traps live in that one line:
+
+- **Cloudflare weekdays run 1 = Sunday … 7 = Saturday**, unlike the usual cron
+  convention where Sunday is 0. Writing `0 21 * * 0` puts the weekday out of
+  range, and the deploy fails after uploading the script with `Some triggers
+  failed to deploy … /workers/scripts/<name>/schedules`. Use the three-letter
+  form (`SUN`) and the ambiguity disappears.
+- `PURGE_WEEKDAY`, in contrast, is read by `src/purge.js` and follows
+  JavaScript's `Date#getDay()` — **0 = Sunday**. It is not a cron field.
+
+Both hours ride a single expression rather than two array entries, so the
+purge costs one cron trigger. The Workers Free plan allows five per account.
 
 Each deleted deck leaves a tombstone behind, so a browser that cached the
 deck drops its local copy on the next sync instead of uploading it back.
@@ -222,9 +235,10 @@ timestamp in **milliseconds**, so any Sunday 5 PM local can be replayed:
 
 ```bash
 # 2026-08-02 21:00Z = 5 PM EDT -> purges
-curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+21+*+*+0&time=1785704400000"
-# 2026-11-15 22:00Z = 5 PM EST -> purges; the 21:00Z firing that day does not
-curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+22+*+*+0&time=1794780000000"
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+21,22+*+*+SUN&time=1785704400000"
+# 2026-11-15 21:00Z = 4 PM EST -> skipped; 22:00Z = 5 PM EST -> purges
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+21,22+*+*+SUN&time=1794776400000"
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=0+21,22+*+*+SUN&time=1794780000000"
 ```
 
 That runs the same code path the real trigger does, including the local-time
