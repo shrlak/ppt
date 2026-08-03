@@ -22,8 +22,9 @@ HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
 HUGGINGFACE_USD_PER_SECOND = "0.00012"
 # Weekly wipe of the shared PPT library: every saved deck and its files are
 # deleted each Sunday at 5 PM in this timezone (the 곡 라이브러리 is kept).
-# PURGE_WEEKDAY (0 = Sunday) can override the day. Changing either of these
-# means changing the UTC cron hours below to match.
+# PURGE_WEEKDAY overrides the day and follows JavaScript's Date#getDay()
+# (0 = Sunday) — NOT the cron weekday numbering below. Changing any of these
+# means changing the cron expression to match.
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"
 
@@ -31,8 +32,14 @@ PURGE_HOUR = "17"
 # 5 PM Eastern — 21:00 UTC under EDT and 22:00 UTC under EST — and src/purge.js
 # runs the purge on whichever firing is actually 17:00 local. The other firing
 # sees the week already purged and does nothing, so DST never shifts the wipe.
+#
+# Spelled SUN, not 0: Cloudflare's weekday field runs 1 = Sunday .. 7 =
+# Saturday, so the usual `* * * * 0` is out of range and the deploy fails with
+# "Some triggers failed to deploy ... /schedules". Both hours ride one
+# expression rather than two, which keeps this to a single trigger against the
+# free plan's cap of 5 per account.
 [triggers]
-crons = ["0 21 * * 0", "0 22 * * 0"]
+crons = ["0 21,22 * * SUN"]
 
 [[durable_objects.bindings]]
 name = "USAGE_TRACKER"
