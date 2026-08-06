@@ -118,7 +118,7 @@ describe('Gemini batch recognition', () => {
     const scores = await recognizeBatchWithGemini(
       ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND'],
       'key',
-      'gemini-2.5-flash',
+      'gemini-3.6-flash',
       'titles',
     );
 
@@ -196,7 +196,7 @@ describe('recognizeWithGemini', () => {
     const fetchSpy = vi.fn().mockResolvedValue(okResponse());
     vi.stubGlobal('fetch', fetchSpy);
 
-    await recognizeWithGemini('data:image/png;base64,ZZZ', 'my-key', 'gemini-2.5-flash', false, 'https://proxy.example');
+    await recognizeWithGemini('data:image/png;base64,ZZZ', 'my-key', 'gemini-3.6-flash', false, 'https://proxy.example');
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('generativelanguage.googleapis.com');
@@ -207,17 +207,17 @@ describe('recognizeWithGemini', () => {
     const fetchSpy = vi.fn().mockResolvedValue(okResponse());
     vi.stubGlobal('fetch', fetchSpy);
 
-    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-2.5-flash', false, 'https://proxy.example/');
+    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-3.6-flash', false, 'https://proxy.example/');
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://proxy.example/gemini/gemini-2.5-flash');
+    expect(url).toBe('https://proxy.example/gemini/gemini-3.6-flash');
   });
 
   it('calls Google directly (with an empty key) when the key is blank and no proxy is configured', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(okResponse());
     vi.stubGlobal('fetch', fetchSpy);
 
-    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-2.5-flash', false);
+    await recognizeWithGemini('data:image/png;base64,ZZZ', '', 'gemini-3.6-flash', false);
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('generativelanguage.googleapis.com');

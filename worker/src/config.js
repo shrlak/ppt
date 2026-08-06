@@ -14,23 +14,21 @@ import { DEFAULT_NVIDIA_MODEL } from './usage.js';
 export const OPENROUTER_NEMOTRON_MODEL = `${DEFAULT_NVIDIA_MODEL}:free`;
 
 // Order is priority order (earlier entries win a page when several models
-// answer it — see fillScoreGaps in src/lib/ai/scoreRecognition.ts). Gemini
-// 2.5 Flash and Nemotron Nano are the two PRIMARY models; everything after
-// them is a supporting/assistant model that only fills gaps the primary
-// pair's answers left. Mirrors src/lib/ai/aiSettings.ts exactly.
+// answer it — see fillScoreGaps in src/lib/ai/scoreRecognition.ts). The two
+// Gemini Flash entries are the PRIMARY models; everything after them is a
+// supporting/assistant model that only fills gaps the primary pair's answers
+// left. Only currently-best free vision models belong here — see the entry
+// bar documented in src/lib/ai/aiSettings.ts, which this mirrors exactly.
 export const RECOGNITION_MODEL_CATALOG = [
-  { engine: 'gemini', model: 'gemini-2.5-flash' },
+  { engine: 'gemini', model: 'gemini-3.6-flash' },
+  { engine: 'gemini', model: 'gemini-3.5-flash' },
   { engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' },
-  { engine: 'gemini', model: 'gemini-2.0-flash' },
-  { engine: 'nvidia', model: 'google/gemma-4-31b-it:free' },
   { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
   { engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' },
-  { engine: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' },
 ];
 
 const OPENROUTER_MODEL_ALIASES = new Map([
   [DEFAULT_NVIDIA_MODEL, OPENROUTER_NEMOTRON_MODEL],
-  ['google/gemma-4-31b-it:free', 'google/gemma-4-31b-it:free'],
   ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
   ['google/gemma-4-26b-a4b-it:free', 'google/gemma-4-26b-a4b-it:free'],
 ]);

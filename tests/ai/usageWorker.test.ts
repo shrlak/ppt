@@ -22,7 +22,7 @@ describe('AI proxy usage records', () => {
   it('accumulates requests and token metadata per exact Gemini model', () => {
     const first = mergeUsageRecord(undefined, {
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       success: true,
       timestamp: '2026-07-15T16:00:00.000Z',
       promptTokens: 100,
@@ -31,7 +31,7 @@ describe('AI proxy usage records', () => {
     });
     const second = mergeUsageRecord(first, {
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       success: false,
       timestamp: '2026-07-15T17:00:00.000Z',
       promptTokens: 50,
@@ -48,10 +48,10 @@ describe('AI proxy usage records', () => {
     expect(
       usageStorageKey({
         provider: 'gemini',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         timestamp: '2026-07-15T16:00:00.000Z',
       }),
-    ).toContain('gemini-2.5-flash');
+    ).toContain('gemini-3.6-flash');
   });
 
   it('accumulates OpenRouter requests per UTC day', () => {
@@ -79,7 +79,7 @@ describe('AI proxy usage records', () => {
     const now = new Date('2026-07-15T16:00:00.000Z');
     const gemini = mergeUsageRecord(undefined, {
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       success: true,
       timestamp: now,
       totalTokens: 500,
@@ -93,11 +93,13 @@ describe('AI proxy usage records', () => {
     });
     const openRouterGemma = mergeUsageRecord(undefined, {
       provider: 'openrouter',
-      model: 'google/gemma-4-31b-it:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       success: true,
       timestamp: now,
       totalTokens: 800,
     });
+    // Hugging Face is no longer in the model pool, but the proxy still exposes
+    // the route — a request made through it is still metered and shown.
     const huggingFace = mergeUsageRecord(undefined, {
       provider: 'huggingface',
       model: 'Qwen/Qwen2-VL-7B-Instruct',
@@ -120,9 +122,9 @@ describe('AI proxy usage records', () => {
     expect(snapshot.models).toHaveLength(4);
     expect(snapshot.models[0]).toMatchObject({ provider: 'gemini', used: 1, limit: 100 });
     expect(snapshot.models.filter((model) => model.provider === 'openrouter')).toHaveLength(2);
-    expect(snapshot.models.find((model) => model.model === 'google/gemma-4-31b-it:free')).toMatchObject({
+    expect(snapshot.models.find((model) => model.model === 'google/gemma-4-26b-a4b-it:free')).toMatchObject({
       provider: 'openrouter',
-      model: 'google/gemma-4-31b-it:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       metric: 'requests',
       used: 1,
       limit: 50,
@@ -142,27 +144,24 @@ describe('AI proxy usage records', () => {
     expect(pairs).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
     // The Nemotron slot meters as the exact :free slug the Worker forwards to.
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl:free' });
-    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-2.5-flash' });
-    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-2.0-flash' });
-    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-31b-it:free' });
+    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.6-flash' });
+    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.5-flash' });
+    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' });
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' });
     expect(pairs).toContainEqual({
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
-    expect(pairs).toContainEqual({ provider: 'huggingface', model: 'Qwen/Qwen2-VL-7B-Instruct' });
-    // A Hugging Face model override follows the proxy's actual pin.
-    expect(usageCatalogModels({ HUGGINGFACE_MODEL: 'other/model' })).toContainEqual({
-      provider: 'huggingface',
-      model: 'other/model',
-    });
+    // Only the strongest free vision models are in the pool now, so the
+    // Hugging Face lane contributes no catalog card at all.
+    expect(pairs.some((pair) => pair.provider === 'huggingface')).toBe(false);
   });
 
   it('shows a card for EVERY system model, including ones with no usage yet', () => {
     const now = new Date('2026-07-15T16:00:00.000Z');
     const onlyGemini = mergeUsageRecord(undefined, {
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       success: true,
       timestamp: now,
       totalTokens: 500,
@@ -171,7 +170,7 @@ describe('AI proxy usage records', () => {
     const snapshot = buildUsageSnapshot([onlyGemini], {}, now, usageCatalogModels({}));
 
     expect(snapshot.models).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
-    expect(snapshot.models.find((model) => model.model === 'gemini-2.5-flash')).toMatchObject({ used: 1 });
+    expect(snapshot.models.find((model) => model.model === 'gemini-3.6-flash')).toMatchObject({ used: 1 });
     // Untouched models still appear, as explicit zero rows.
     expect(snapshot.models.find((model) => model.model === 'google/gemma-4-26b-a4b-it:free')).toMatchObject({
       provider: 'openrouter',
@@ -179,7 +178,7 @@ describe('AI proxy usage records', () => {
       used: 0,
       limit: 50,
     });
-    expect(snapshot.models.find((model) => model.model === 'gemini-2.0-flash')).toMatchObject({
+    expect(snapshot.models.find((model) => model.model === 'gemini-3.5-flash')).toMatchObject({
       provider: 'gemini',
       requests: 0,
       used: 0,

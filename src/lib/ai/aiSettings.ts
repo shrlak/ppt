@@ -27,40 +27,43 @@ export interface RecognitionModelInfo extends RecognitionAttempt {
  * single source of truth: the concurrent model pool, the sanitizer, and the
  * proxy's OpenRouter allowlist all derive from it.
  *
- * Gemini 2.5 Flash and NVIDIA Nemotron Nano are the two PRIMARY models —
- * catalog order is priority order (earlier entries win a page when multiple
- * models answer it), so they lead the list. Every model after them is a
- * supporting/assistant model: it only fills in whatever the primary pair's
- * answers are missing (see fillScoreGaps in scoreRecognition.ts), never
- * overriding a primary model's answer for the same field.
+ * Catalog order is priority order (earlier entries win a page when multiple
+ * models answer it), so the two PRIMARY models lead the list. Every model
+ * after them is a supporting/assistant model: it only fills in whatever the
+ * primary pair's answers are missing (see fillScoreGaps in
+ * scoreRecognition.ts), never overriding a primary model's answer for the
+ * same field.
+ *
+ * ENTRY BAR: a model earns a slot only if it is (a) genuinely free — free API
+ * tier or an OpenRouter `:free` endpoint — and (b) currently among the
+ * strongest free vision models for this job, which is reading small Korean
+ * lyric type under a staff and recovering the part labels and 진행 순서 from
+ * the page. Weak or superseded models are removed rather than kept as a last
+ * resort: an extra answer that is usually wrong costs accuracy in the merge
+ * (line-level consensus lets models outvote each other) and burns free quota
+ * that a strong model could have spent.
  */
 export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
-  // The 50-song accuracy benchmark measured Flash at 97-98% on this task.
-  // Only Gemini models with a free API tier belong in
-  // this catalog; paid-only models deliberately stay out of the concurrent pool.
+  // Google's free tier carries Flash and Flash-Lite only (Pro models left it
+  // in April 2026), so the two strongest Flash releases are the primaries.
+  // They meter against separate quotas, so running both costs nothing extra.
   {
     engine: 'gemini',
-    model: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    note: '주 모델 — 벤치마크 정확도 97%+, 주 1회 콘티는 무료 한도로 충분합니다',
+    model: 'gemini-3.6-flash',
+    label: 'Gemini 3.6 Flash',
+    note: '주 모델 — 현재 무료 티어에서 가장 강력한 Gemini (10 RPM · 1,500 RPD)',
+  },
+  {
+    engine: 'gemini',
+    model: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    note: '주 모델 — 별도 무료 한도를 가진 상위 Gemini (15 RPM · 1,500 RPD)',
   },
   {
     engine: 'nvidia',
     model: 'nvidia/nemotron-nano-12b-v2-vl',
     label: 'NVIDIA Nemotron Nano 12B VL · OpenRouter Free',
-    note: '주 모델 — 문서·악보 OCR 특화 (입력과 출력이 공급자에 기록되는 시험용 무료 엔드포인트)',
-  },
-  {
-    engine: 'gemini',
-    model: 'gemini-2.0-flash',
-    label: 'Gemini 2.0 Flash',
-    note: '보조 모델 — 별도의 무료 한도를 가진 예비 Gemini',
-  },
-  {
-    engine: 'nvidia',
-    model: 'google/gemma-4-31b-it:free',
-    label: 'OpenRouter Gemma 4 31B · Free',
-    note: '보조 모델 — 강력한 대형 멀티모달 예비 모델, 이미지·텍스트 이해 및 구조화 출력',
+    note: '보조 모델 — 문서 OCR·표 인식 특화로 악보의 작은 가사 글씨에 강합니다',
   },
   {
     engine: 'nvidia',
@@ -72,13 +75,7 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
     engine: 'nvidia',
     model: 'google/gemma-4-26b-a4b-it:free',
     label: 'OpenRouter Gemma 4 26B A4B · Free',
-    note: '보조 모델 — 별도 무료 한도를 가진 경량 Gemma 4, 한국어 가사 예비 인식',
-  },
-  {
-    engine: 'huggingface',
-    model: 'Qwen/Qwen2-VL-7B-Instruct',
-    label: 'Hugging Face Qwen2-VL 7B',
-    note: '보조 모델 — 마지막 예비 엔진',
+    note: '보조 모델 — 26B MoE 멀티모달, 한국어 가사 판독 예비 모델',
   },
 ];
 
@@ -116,7 +113,7 @@ export interface AiSettings extends SharedRecognitionSettings {
   huggingfaceApiKey: string;
 }
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],

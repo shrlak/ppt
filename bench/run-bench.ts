@@ -5,10 +5,10 @@
 //   GEMINI_API_KEY=... npx vite-node bench/run-bench.ts
 //
 // Modes:
-//   BENCH_MODELS="gemini-2.5-flash,gemini-2.0-flash"  (default) — the app's
+//   BENCH_MODELS="gemini-3.6-flash,gemini-3.5-flash"  (default) — the app's
 //     ensemble path: all listed models read each batch AT ONCE and answers
 //     merge per song by priority (recognizeScoreBatchEnsemble).
-//   BENCH_MODEL="gemini-2.5-flash" — single-model direct engine call.
+//   BENCH_MODEL="gemini-3.6-flash" — single-model direct engine call.
 //
 // Other knobs: BENCH_BATCH (pages per request, default 10), BENCH_COUNT
 // (limit songs), BENCH_OUT (default bench/out), BENCH_SEARCH=1 for Google
@@ -25,7 +25,7 @@ import { normalizeText, scoreSong, summarize, type SongReport, type TruthSong } 
 
 const OUT = process.env.BENCH_OUT ?? 'bench/out';
 const SINGLE_MODEL = process.env.BENCH_MODEL ?? '';
-const MODELS = (process.env.BENCH_MODELS ?? (SINGLE_MODEL || 'gemini-2.5-flash,gemini-2.0-flash'))
+const MODELS = (process.env.BENCH_MODELS ?? (SINGLE_MODEL || 'gemini-3.6-flash,gemini-3.5-flash'))
   .split(',')
   .map((model) => model.trim())
   .filter(Boolean);
@@ -52,7 +52,7 @@ function benchSettings(): AiSettings {
  *
  * Both arrive as 429. Waiting out a per-minute limit works; retrying a daily
  * free-tier cap just spends more of a budget that is already gone — which is
- * how one trial burned all 20 of the day's gemini-2.5-flash requests on
+ * how one trial burned all 20 of the day's gemini-3.6-flash requests on
  * retries and still measured nothing.
  */
 function isDailyQuotaExhausted(error: unknown): boolean {
@@ -93,7 +93,7 @@ async function recognizeBatch(dataUrls: string[], settings: AiSettings): Promise
  * Check every requested model actually exists before spending anything.
  *
  * ListModels does not draw on the generate_content quota, so this is a free
- * guard against the failure that wasted a trial: `gemini-2.5-flash-lite` has
+ * guard against the failure that wasted a trial: `gemini-3.6-flash-lite` has
  * been retired for new users, and the run only found out one dead batch at a
  * time, after the retries had eaten the day's budget.
  */
