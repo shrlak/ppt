@@ -6,7 +6,7 @@
 // offline cache. There is no per-user settings screen — recognition works
 // out of the box with the defaults below.
 
-export type RecognitionEngine = 'gemini' | 'nvidia' | 'huggingface' | 'off';
+export type RecognitionEngine = 'gemini' | 'nvidia' | 'off';
 
 /** One recognition try: an engine and the exact model it should use. */
 export interface RecognitionAttempt {
@@ -71,12 +71,6 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
     label: 'NVIDIA Nemotron 3 Nano Omni 30B (reasoning) · Free',
     note: '보조 모델 — 추론형 멀티모달, 1절·2절이 겹쳐 적힌 악보의 구조 판단에 강합니다',
   },
-  {
-    engine: 'nvidia',
-    model: 'google/gemma-4-26b-a4b-it:free',
-    label: 'OpenRouter Gemma 4 26B A4B · Free',
-    note: '보조 모델 — 26B MoE 멀티모달, 한국어 가사 판독 예비 모델',
-  },
 ];
 
 /** Stable display/storage order; execution starts every entry concurrently. */
@@ -110,7 +104,6 @@ export interface AiSettings extends SharedRecognitionSettings {
   /** Cross-check recognized lyrics against the web via Gemini's Google Search grounding. */
   geminiUseSearch: boolean;
   openrouterApiKey: string;
-  huggingfaceApiKey: string;
 }
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
@@ -122,7 +115,6 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   geminiModel: DEFAULT_GEMINI_MODEL,
   geminiUseSearch: true,
   openrouterApiKey: '',
-  huggingfaceApiKey: '',
 };
 
 export function attemptKey(attempt: RecognitionAttempt): string {

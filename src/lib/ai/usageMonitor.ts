@@ -1,4 +1,4 @@
-export type UsageProvider = 'gemini' | 'openrouter' | 'nvidia' | 'huggingface';
+export type UsageProvider = 'gemini' | 'openrouter' | 'nvidia';
 export type UsageMetric = 'requests' | 'usd';
 
 export interface ModelUsage {
@@ -54,8 +54,7 @@ export function parseUsageSnapshot(raw: unknown): AiUsageSnapshot {
     if (
       provider !== 'gemini' &&
       provider !== 'openrouter' &&
-      provider !== 'nvidia' &&
-      provider !== 'huggingface'
+      provider !== 'nvidia'
     )
       throw new Error('알 수 없는 AI 공급자입니다.');
     if (metric !== 'requests' && metric !== 'usd') throw new Error('알 수 없는 사용량 단위입니다.');

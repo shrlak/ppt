@@ -93,68 +93,48 @@ describe('AI proxy usage records', () => {
     });
     const openRouterGemma = mergeUsageRecord(undefined, {
       provider: 'openrouter',
-      model: 'google/gemma-4-26b-a4b-it:free',
+      model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       success: true,
       timestamp: now,
       totalTokens: 800,
     });
-    // Hugging Face is no longer in the model pool, but the proxy still exposes
-    // the route — a request made through it is still metered and shown.
-    const huggingFace = mergeUsageRecord(undefined, {
-      provider: 'huggingface',
-      model: 'Qwen/Qwen2-VL-7B-Instruct',
-      success: true,
-      timestamp: now,
-      computeSeconds: 10,
-      computeSource: 'provider',
-    });
     const snapshot = buildUsageSnapshot(
-      [gemini, openRouter, openRouterGemma, huggingFace],
+      [gemini, openRouter, openRouterGemma],
       {
         GEMINI_DAILY_REQUEST_LIMIT: '100',
         OPENROUTER_DAILY_REQUEST_LIMIT: '50',
-        HUGGINGFACE_MONTHLY_CREDIT_USD: '0.10',
-        HUGGINGFACE_USD_PER_SECOND: '0.00012',
       },
       now,
     );
 
-    expect(snapshot.models).toHaveLength(4);
+    expect(snapshot.models).toHaveLength(3);
     expect(snapshot.models[0]).toMatchObject({ provider: 'gemini', used: 1, limit: 100 });
     expect(snapshot.models.filter((model) => model.provider === 'openrouter')).toHaveLength(2);
-    expect(snapshot.models.find((model) => model.model === 'google/gemma-4-26b-a4b-it:free')).toMatchObject({
+    expect(
+      snapshot.models.find((model) => model.model === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'),
+    ).toMatchObject({
       provider: 'openrouter',
-      model: 'google/gemma-4-26b-a4b-it:free',
+      model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       metric: 'requests',
       used: 1,
       limit: 50,
       estimated: false,
     });
-    const huggingFaceUsage = snapshot.models.find((model) => model.provider === 'huggingface');
-    expect(huggingFaceUsage).toMatchObject({
-      provider: 'huggingface',
-      limit: 0.1,
-      providerMeasuredRequests: 1,
-    });
-    expect(huggingFaceUsage?.used).toBeCloseTo(0.0012);
   });
 
   it('maps every catalog model to the provider/model pair it is metered under', () => {
-    const pairs = usageCatalogModels({});
+    const pairs = usageCatalogModels();
     expect(pairs).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
     // The Nemotron slot meters as the exact :free slug the Worker forwards to.
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl:free' });
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.6-flash' });
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.5-flash' });
-    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' });
-    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' });
     expect(pairs).toContainEqual({
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
-    // Only the strongest free vision models are in the pool now, so the
-    // Hugging Face lane contributes no catalog card at all.
-    expect(pairs.some((pair) => pair.provider === 'huggingface')).toBe(false);
+    // Only the four strongest free vision models are in the pool.
+    expect(pairs).toHaveLength(4);
   });
 
   it('shows a card for EVERY system model, including ones with no usage yet', () => {
@@ -167,12 +147,14 @@ describe('AI proxy usage records', () => {
       totalTokens: 500,
     });
 
-    const snapshot = buildUsageSnapshot([onlyGemini], {}, now, usageCatalogModels({}));
+    const snapshot = buildUsageSnapshot([onlyGemini], {}, now, usageCatalogModels());
 
     expect(snapshot.models).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
     expect(snapshot.models.find((model) => model.model === 'gemini-3.6-flash')).toMatchObject({ used: 1 });
     // Untouched models still appear, as explicit zero rows.
-    expect(snapshot.models.find((model) => model.model === 'google/gemma-4-26b-a4b-it:free')).toMatchObject({
+    expect(
+      snapshot.models.find((model) => model.model === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'),
+    ).toMatchObject({
       provider: 'openrouter',
       requests: 0,
       used: 0,

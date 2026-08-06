@@ -17,7 +17,7 @@
 import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from '../utils/types';
 import { normalizeKoreanLyricLines } from './koreanSpelling';
-import { sectionSimilarity } from './textSimilarity';
+import { lineSimilarity, sectionSimilarity } from './textSimilarity';
 import type { WebLyrics } from './webLyrics';
 
 /**
@@ -29,6 +29,16 @@ import type { WebLyrics } from './webLyrics';
  */
 const SAME_PART_THRESHOLD = 0.45;
 
+/** Two lines must look like the same line before the published one wins. */
+const SAME_LINE_THRESHOLD = 0.6;
+
+/**
+ * How far ahead in the published part to look for a recognized line's match.
+ * A small window keeps the alignment monotonic: a line the page also prints
+ * later (a repeated hook) must not drag the cursor past everything between.
+ */
+const ALIGN_LOOKAHEAD = 3;
+
 export interface WebLyricsMerge {
   score: ParsedScore;
   /** 'filled' — the web supplied lyrics the score had none of.
@@ -37,6 +47,63 @@ export interface WebLyricsMerge {
   outcome: 'filled' | 'corrected' | 'unused';
   /** Parts whose text the published version replaced. */
   correctedParts: number;
+}
+
+/**
+ * Cross-reference one recognized part against the published one, line by line.
+ *
+ * Swapping the whole part for the published text is too blunt: a page can
+ * print an arrangement this score does not use, and the score is what is
+ * actually being sung. So each recognized line is matched against the
+ * published lines in order, and a published line only replaces a recognized
+ * one when the two read as the same line — a spelling correction, not a
+ * substitution. A recognized line the page has no counterpart for is kept
+ * exactly as the models read it.
+ *
+ * Published lines left over after the last match are appended, but only once
+ * enough of the part has matched to be sure it is the same part: dropping the
+ * final line or two is a routine OCR failure, and that tail is the single
+ * most common thing missing from a recognized part.
+ */
+export function crossReferenceLines(
+  recognized: string[],
+  published: string[],
+): { lines: string[]; corrected: number } {
+  const lines: string[] = [];
+  let cursor = 0;
+  let matched = 0;
+  let corrected = 0;
+
+  for (const line of recognized) {
+    let bestIndex = -1;
+    let bestScore = 0;
+    for (let index = cursor; index < Math.min(published.length, cursor + ALIGN_LOOKAHEAD); index += 1) {
+      const score = lineSimilarity(line, published[index]);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+    if (bestIndex === -1 || bestScore < SAME_LINE_THRESHOLD) {
+      // Nothing on the page reads like this line — the score keeps its own.
+      lines.push(line);
+      continue;
+    }
+    matched += 1;
+    if (published[bestIndex] !== line) corrected += 1;
+    lines.push(published[bestIndex]);
+    cursor = bestIndex + 1;
+  }
+
+  // Only a part that genuinely lined up may contribute a tail, so an
+  // incidental single-line match can't append a stranger's verse.
+  const tail = published.slice(cursor);
+  if (tail.length > 0 && matched >= 2 && matched >= recognized.length / 2) {
+    lines.push(...tail);
+    corrected += tail.length;
+  }
+
+  return { lines, corrected };
 }
 
 /** Pair each recognized part with the published part that reads like it. A
@@ -102,10 +169,11 @@ export function mergeWebLyrics(score: ParsedScore, web: WebLyrics | null): WebLy
     const publishedIndex = pairs.get(index);
     if (publishedIndex === undefined) return section;
     const published = web.sections[publishedIndex];
-    if (published.lines.join('\n') === section.lines.join('\n')) return section;
+    const { lines, corrected } = crossReferenceLines(section.lines, published.lines);
+    if (corrected === 0) return section;
     correctedParts += 1;
     // The score's label and position are kept; only the words change.
-    return { label: section.label, lines: [...published.lines] };
+    return { label: section.label, lines };
   });
 
   // A part the 진행 순서 calls for but no model managed to read is a real gap

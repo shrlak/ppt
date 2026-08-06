@@ -38,9 +38,9 @@ describe('recognition model catalog', () => {
       configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
       upstreamModel: OPENROUTER_NEMOTRON_MODEL,
     });
-    expect(resolveOpenRouterRoute('google/gemma-4-26b-a4b-it:free')).toEqual({
-      configuredModel: 'google/gemma-4-26b-a4b-it:free',
-      upstreamModel: 'google/gemma-4-26b-a4b-it:free',
+    expect(resolveOpenRouterRoute('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')).toEqual({
+      configuredModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+      upstreamModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
     expect(resolveOpenRouterRoute('paid/or-made-up-model')).toEqual({
       configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
@@ -52,7 +52,7 @@ describe('recognition model catalog', () => {
 describe('sanitizeAttemptOrder', () => {
   it('keeps a valid custom order and appends the missing catalog models', () => {
     const custom = [
-      { engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' },
+      { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
       { engine: 'gemini', model: 'gemini-3.6-flash' },
     ];
     const order = sanitizeAttemptOrder(custom);
@@ -106,7 +106,7 @@ describe('sanitizeExcludedTitles', () => {
 describe('shared settings sanitizers (client vs proxy)', () => {
   it('produce identical results for the same raw payload', () => {
     const raw = {
-      attempts: [{ engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' }, 'gemini', { engine: 'x', model: 'y' }],
+      attempts: [{ engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' }, 'gemini', { engine: 'x', model: 'y' }],
       excludedTitles: [' 공동체 고백송 ', 42, '준비 찬양'],
     };
     expect(sanitizeSharedSettings(raw)).toEqual(workerSanitize(raw));

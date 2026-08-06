@@ -15,7 +15,6 @@ const PROVIDER_NAMES: Record<string, string> = {
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   nvidia: 'NVIDIA',
-  huggingface: 'Hugging Face',
 };
 
 function usagePercent(usage: ModelUsage): number {
@@ -40,10 +39,7 @@ function ModelUsageCard({ usage }: { usage: ModelUsage }) {
         ? '매일 자정(미 서부) 초기화'
         : '매일 초기화'
       : '매월 초기화';
-  const details =
-    usage.provider === 'huggingface'
-      ? `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 계산 ${usage.computeSeconds.toFixed(1)}초`
-      : `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 토큰 ${NUMBER_FORMAT.format(usage.totalTokens)}개`;
+  const details = `요청 ${NUMBER_FORMAT.format(usage.requests)}회 · 성공 ${NUMBER_FORMAT.format(usage.successfulRequests)}회 · 토큰 ${NUMBER_FORMAT.format(usage.totalTokens)}개`;
 
   return (
     <article className={`admin-usage-card usage-${level}`} data-testid={`admin-usage-${usage.provider}`}>
