@@ -8,6 +8,7 @@ import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
 import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
 import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from './scoreHuggingFace';
 import { isTransientRecognitionError } from './recognitionError';
+import { bagSimilarity, lineKey, lineSimilarity, wordCounts } from '../lyrics/textSimilarity';
 import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
@@ -259,22 +260,6 @@ function adoptTruncatedTails(score: ParsedScore, candidates: ParsedScore[]): Par
   return touched ? { ...score, sections } : score;
 }
 
-/** Comparison key for two readings of the same lyric line. */
-function lineKey(line: string): string {
-  return line.replace(/[^0-9a-zㄱ-ㆎ가-힣]/gi, '').toLowerCase();
-}
-
-/** Character-bag overlap of two lines, used to tell "the same line, misread"
- * apart from "a line from somewhere else entirely". */
-function lineSimilarity(a: string, b: string): number {
-  const bag = (line: string): Map<string, number> => {
-    const counts = new Map<string, number>();
-    for (const char of lineKey(line)) counts.set(char, (counts.get(char) ?? 0) + 1);
-    return counts;
-  };
-  return bagSimilarity(bag(a), bag(b));
-}
-
 /** Two readings must look like the same line before one replaces the other. */
 const SAME_LINE_THRESHOLD = 0.6;
 
@@ -329,31 +314,6 @@ function adoptLineConsensus(score: ParsedScore, candidates: ParsedScore[]): Pars
     return { label: section.label, lines };
   });
   return touched ? { ...score, sections } : score;
-}
-
-/** Word bag of a section list, for comparing two readings of the same lyrics. */
-function wordCounts(sections: Section[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const section of sections) {
-    for (const line of section.lines) {
-      for (const word of line.toLowerCase().split(/[^0-9a-zㄱ-ㆎ가-힣]+/)) {
-        if (word) counts.set(word, (counts.get(word) ?? 0) + 1);
-      }
-    }
-  }
-  return counts;
-}
-
-/** Multiset overlap (0–1) between two readings — order-insensitive, so it holds
- * up whether the merged text ran verse-after-verse or staff-by-staff. */
-function bagSimilarity(a: Map<string, number>, b: Map<string, number>): number {
-  let shared = 0;
-  for (const [word, count] of a) shared += Math.min(count, b.get(word) ?? 0);
-  const total = Math.max(
-    [...a.values()].reduce((sum, n) => sum + n, 0),
-    [...b.values()].reduce((sum, n) => sum + n, 0),
-  );
-  return total === 0 ? 0 : shared / total;
 }
 
 /** The winner and a candidate must be reading the same lyrics for a structural

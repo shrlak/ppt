@@ -27,6 +27,8 @@ import {
   recognizeScoreRaced,
 } from '../lib/ai/scoreRecognition';
 import type { ParsedScore } from '../lib/ai/scoreParser';
+import { fetchWebLyrics, hasWebLyricsLookup } from '../lib/lyrics/webLyrics';
+import { mergeWebLyrics } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
@@ -393,6 +395,61 @@ export default function LyricsGenerator({
           return next;
         });
       };
+
+      /**
+       * Songs the models read off the 악보 that are new to the library, with
+       * the engine that read them. They are shown immediately but held back
+       * from "done" and from auto-save until the web pass below has had its
+       * turn — otherwise the library would keep the uncorrected OCR wording.
+       */
+      const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
+
+      /** Commit a finished song: write the lyrics, allow auto-save, mark done. */
+      const applyRecognizedScore = (id: string, score: ParsedScore, engine: string) => {
+        pendingAutoSaveRef.current.add(id);
+        setSongs((current) =>
+          current.map((song) => (song.id === id && !isCancelled(id) ? applyScoreToSong(song, score) : song)),
+        );
+        markDone([id], engine);
+      };
+
+      /**
+       * Last stage: look each new song's published lyrics up on the web and
+       * reconcile them with the score (see mergeWebLyrics — the score keeps
+       * the part labels and 진행 순서, the web supplies the wording). Songs
+       * that came from the library never get here, so a saved song is never
+       * rewritten. Every lookup is best-effort: a failure just leaves the
+       * score's own reading in place, normalized to 한국어 맞춤법.
+       */
+      const runWebLyricsPass = async () => {
+        const pending = [...webQueue.entries()].filter(([id]) => !isCancelled(id));
+        if (pending.length === 0) return;
+
+        if (!hasWebLyricsLookup()) {
+          for (const [id, { score, engine }] of pending) {
+            applyRecognizedScore(id, mergeWebLyrics(score, null).score, engine);
+          }
+          return;
+        }
+
+        enterPhase('web', pending.map(([id]) => id));
+        await Promise.all(
+          pending.map(async ([id, { score, engine, title }]) => {
+            const web = title ? await fetchWebLyrics(title) : null;
+            if (isCancelled(id)) return;
+            const merged = mergeWebLyrics(score, web);
+            applyRecognizedScore(id, merged.score, engine);
+            if (web && merged.outcome !== 'unused') {
+              showToast(
+                merged.outcome === 'filled'
+                  ? `'${title}' 가사를 ${web.sourceHost}에서 가져왔습니다.`
+                  : `'${title}' 가사를 ${web.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
+              );
+            }
+          }),
+        );
+      };
+
       enterPhase('render', tracked.ids);
 
       try {
@@ -541,7 +598,8 @@ export default function LyricsGenerator({
         // being silently marked done while empty.
         const recognized = [...scoreById.entries()].filter(([, score]) => score.sections.length > 0);
         if (recognized.length > 0) {
-          for (const [id] of recognized) pendingAutoSaveRef.current.add(id);
+          // Show what the score said straight away, but hold the song open:
+          // the web pass still has to check the wording before it is saved.
           setSongs((current) =>
             current.map((song) => {
               const score = scoreById.get(song.id);
@@ -549,16 +607,27 @@ export default function LyricsGenerator({
               return applyScoreToSong(song, score);
             }),
           );
-          markDone(recognized.map(([id]) => id), lyricEngine);
+          for (const [id, score] of recognized) {
+            const fallback = remaining.find(({ song }) => song.id === id)?.song.title ?? '';
+            webQueue.set(id, {
+              score,
+              engine: lyricEngine,
+              title: (score.title || fallback).trim(),
+            });
+          }
         }
 
         const needRescue = remaining.filter(
           ({ song }) =>
             !isCancelled(song.id) &&
             !resolvedIds.has(song.id) &&
+            !webQueue.has(song.id) &&
             (scoreById.get(song.id)?.sections.length ?? 0) === 0,
         );
-        if (needRescue.length === 0) return;
+        if (needRescue.length === 0) {
+          await runWebLyricsPass();
+          return;
+        }
 
         enterPhase('rescue', needRescue.map(({ song }) => song.id));
         const failures = new Map<string, string>();
@@ -598,16 +667,22 @@ export default function LyricsGenerator({
                 failures.set(song.id, '가사를 읽지 못했습니다.');
                 return;
               }
-              pendingAutoSaveRef.current.add(song.id);
+              // Same as the batch path: show it now, finish it in the web pass.
               setSongs((current) =>
                 current.map((s) => (s.id === song.id && !isCancelled(song.id) ? applyScoreToSong(s, merged) : s)),
               );
-              markDone([song.id], single.engine);
+              webQueue.set(song.id, {
+                score: merged,
+                engine: single.engine,
+                title: (merged.title || song.title).trim(),
+              });
             } catch (error) {
               failures.set(song.id, error instanceof Error ? error.message : String(error));
             }
           }),
         );
+
+        await runWebLyricsPass();
 
         if (failures.size > 0) {
           setRecog((current) => {

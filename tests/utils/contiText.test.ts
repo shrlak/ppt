@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyPages,
   deriveSongsFromMusicPages,
+  looksLikeInfoPage,
   matchSongsToPages,
   parseCoverText,
   parseSermonInfoText,
@@ -12,6 +13,8 @@ import {
 import type { LibraryEntry } from '../../src/lib/utils/types';
 
 const coverText = readFileSync(join(__dirname, '..', 'fixtures', 'cover.txt'), 'utf-8');
+const coverTableText = readFileSync(join(__dirname, '..', 'fixtures', 'cover-table.txt'), 'utf-8');
+const continuationText = readFileSync(join(__dirname, '..', 'fixtures', 'cover-continuation.txt'), 'utf-8');
 const notesText = readFileSync(join(__dirname, '..', 'fixtures', 'notes.txt'), 'utf-8');
 
 describe('parseCoverText', () => {
@@ -38,6 +41,39 @@ describe('parseCoverText', () => {
   it('returns null for non-cover text', () => {
     expect(parseCoverText('그냥 아무 내용 없는 페이지')).toBeNull();
     expect(parseCoverText(notesText)).toBeNull();
+  });
+});
+
+describe('parseCoverText — 순서/찬양/키 table layout', () => {
+  const info = parseCoverText(coverTableText);
+
+  it('reads the service fields written as label | value rows', () => {
+    expect(info).not.toBeNull();
+    expect(info?.date).toBe('2026.08.09');
+    expect(info?.sermonTitle).toBe('청년의 때');
+    expect(info?.scripture).toBe('전도서 12 장 1-8 절');
+  });
+
+  it('reads every table row, keeping modulation chains as the key', () => {
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['매일매일', 'A'],
+      ['청년의 기도', 'F -> Gb'],
+      ['어려운 일 당할 때', 'F -> Ab -> G'],
+      ['입례', 'F -> G'],
+    ]);
+  });
+
+  it('attaches the bullet commentary to the song it describes', () => {
+    const daily = info?.songs.find((s) => s.title === '매일매일');
+    expect(daily?.description).toContain('청년의 때를 살아가는 지금');
+    // The wrapped second line of the description is kept with it.
+    expect(daily?.description).toContain('결단하여야 합니다');
+  });
+
+  it('never mistakes numbered 본문 prose for a table row', () => {
+    const titles = info?.songs.map((s) => s.title) ?? [];
+    expect(titles).toHaveLength(4);
+    expect(titles.some((t) => t.includes('전도자가'))).toBe(false);
   });
 });
 
@@ -68,6 +104,27 @@ describe('classifyPages', () => {
     expect(coverIndex).toBe(1);
     expect(notesIndex).toBe(2);
     expect(musicPages).toEqual([3, 4]);
+  });
+
+  it('keeps a typed cover continuation out of the score pages', () => {
+    // The 08.09.26 conti runs its write-up onto a second page. Left in
+    // musicPages it would be matched to 어려운 일 당할 때, then dropped as a
+    // non-score page — taking the song with it.
+    const { coverIndex, infoPages, musicPages } = classifyPages([
+      coverTableText,
+      continuationText,
+      'I - V - C - junk OCR',
+    ]);
+    expect(coverIndex).toBe(1);
+    expect(infoPages).toEqual([2]);
+    expect(musicPages).toEqual([3]);
+  });
+
+  it('leaves a score page with a lyric text layer alone', () => {
+    // Prose volume alone must not exclude a page — it needs a structural mark.
+    const lyricTextLayer = Array.from({ length: 40 }, () => '주님의 사랑이 나를 채우시네').join('\n');
+    expect(looksLikeInfoPage(lyricTextLayer)).toBe(false);
+    expect(looksLikeInfoPage(continuationText)).toBe(true);
   });
 });
 

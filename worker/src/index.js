@@ -47,6 +47,7 @@ import {
   validLibraryId,
 } from './library.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
+import { fetchWebLyrics } from './lyrics.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -620,6 +621,48 @@ export default {
         return libraryError(error, headers);
       }
       return libraryError('not found', headers, 404);
+    }
+
+    // Published lyrics for a recognized title. The browser cannot fetch these
+    // itself (every lyrics site blocks cross-origin reads), so the proxy does
+    // the lookup and returns plain lines for the editor to structure. Only a
+    // title crosses the wire — never a URL — and src/lyrics.js will only fetch
+    // allowlisted hosts, so this cannot be used to reach arbitrary origins.
+    if (request.method === 'GET' && url.pathname === '/lyrics') {
+      const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+      if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+
+      // Published lyrics do not change, and a conti is opened repeatedly while
+      // a deck is built — serve repeats from the edge instead of re-scraping.
+      const cacheKey = new Request(`${url.origin}/lyrics?title=${encodeURIComponent(title)}`, {
+        method: 'GET',
+      });
+      const cache = caches.default;
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const body = await cached.text();
+        return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+      }
+
+      let found = null;
+      try {
+        found = await fetchWebLyrics(title);
+      } catch (error) {
+        console.warn('lyrics lookup failed:', error instanceof Error ? error.message : error);
+      }
+      const payload = found
+        ? { title, lines: found.lines, url: found.url, host: found.host }
+        : { title, lines: [] };
+      const body = JSON.stringify(payload);
+      if (found) {
+        await cache.put(
+          cacheKey,
+          new Response(body, {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=604800' },
+          }),
+        );
+      }
+      return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
 
     if (request.method === 'GET' && url.pathname === '/usage') {
