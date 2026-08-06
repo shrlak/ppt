@@ -17,11 +17,14 @@ const NOTES_RE = /[세셰]션\s*노트/;
  */
 const LABEL_GAP = String.raw`\s*[:：|｜]?\s*`;
 
-const SCRIPTURE_RE = new RegExp(String.raw`^본문${LABEL_GAP}(\S.*)$`);
+const SCRIPTURE_RE = new RegExp(String.raw`^(?:본문|말씀)${LABEL_GAP}(\S.*)$`);
+/** An explicitly labeled sermon title — the most reliable form. */
 const SERMON_TITLE_RE = new RegExp(
-  String.raw`^(?:설교\s*제목|말씀\s*제목|설교|주제)${LABEL_GAP}(\S.*)$`,
+  String.raw`^(?:설교\s*제목|말씀\s*제목|설교)${LABEL_GAP}(\S.*)$`,
 );
-const DATE_LABEL_RE = new RegExp(String.raw`^날짜${LABEL_GAP}(\S.*)$`);
+/** `주제 | 청년의 때` — a theme row, used only when no explicit label exists. */
+const SERMON_THEME_RE = new RegExp(String.raw`^(?:주제|제목)${LABEL_GAP}(\S.*)$`);
+const DATE_LABEL_RE = new RegExp(String.raw`^(?:날짜|일자|예배\s*일)${LABEL_GAP}(\S.*)$`);
 
 /** A scripture value must name a chapter/verse — otherwise "본문" is a heading. */
 const SCRIPTURE_VALUE_RE = /\d\s*[장편절:]/;
@@ -45,12 +48,22 @@ const SONG_BULLET_RE = /^[•·∙▪▫◦*]\s*(\S.*?)\s*[(（]([^)）]{1,60})[
 /** `o 이 찬양은…` — the indented description under a bullet heading. */
 const BULLET_BODY_RE = /^[o○◦-]\s+(\S.*)$/;
 
-/** `2. 찬양 콘티 (Plan A)` — where the song table starts. */
-const SONG_SECTION_RE = /^\d+\s*[.)]\s*.*찬양\s*콘티/;
+/**
+ * `2. 찬양 콘티 (Plan A)` — where the song table starts. The section number is
+ * optional and the wording varies between contis (찬양 콘티, 찬양 순서,
+ * 예배 순서), so match on the heading words rather than the exact phrase.
+ */
+const SONG_SECTION_RE = /^(?:\d+\s*[.)]\s*)?.{0,10}(?:찬양\s*콘티|찬양\s*순서|예배\s*순서|콘티)/;
 /** Any other numbered section heading ("1. 말씀 묵상", "3. 본문") ends it. */
 const SECTION_HEADING_RE = /^\d+\s*[.)]\s*\S/;
-/** The table's own header row, which carries no song. */
-const TABLE_HEADER_RE = /^순서[\s|｜]*찬양[\s|｜]*키$/;
+/**
+ * The table's own header row, which carries no song. Column names differ
+ * between contis (순서/번호, 찬양/곡/제목, 키/Key), and the row is by itself
+ * proof that a song table follows — so it opens the section as well as being
+ * skipped, for a conti that never writes a 찬양 콘티 heading at all.
+ */
+const TABLE_HEADER_RE =
+  /^(?:순서|번호|No\.?)[\s|｜]*(?:찬양|곡|곡명|제목)[\s|｜]*(?:키|key)\s*$/i;
 
 function normalizeKey(raw: string): string {
   const key = raw[0].toUpperCase();
@@ -84,7 +97,10 @@ export function normalizeKeyChain(raw: string): string | undefined {
  */
 export function parseSermonInfoText(text: string): Pick<ContiInfo, 'sermonTitle' | 'scripture'> {
   let sermonTitle: string | undefined;
+  let theme: string | undefined;
   let scripture: string | undefined;
+
+  const clean = (value: string) => value.trim().replace(/^[“"]|[”"]$/g, '').trim();
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -97,11 +113,15 @@ export function parseSermonInfoText(text: string): Pick<ContiInfo, 'sermonTitle'
     }
     const titleMatch = line.match(SERMON_TITLE_RE);
     if (titleMatch) {
-      sermonTitle ??= titleMatch[1].trim().replace(/^[“"]|[”"]$/g, '').trim();
+      sermonTitle ??= clean(titleMatch[1]);
+      continue;
     }
+    const themeMatch = line.match(SERMON_THEME_RE);
+    if (themeMatch) theme ??= clean(themeMatch[1]);
   }
 
-  return { sermonTitle, scripture };
+  // An explicit 설교 제목 always beats a 주제 row, wherever each sits on the page.
+  return { sermonTitle: sermonTitle ?? theme, scripture };
 }
 
 /**
@@ -132,13 +152,13 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
     const line = rawLine.trim();
     if (!line) continue;
 
-    if (SONG_SECTION_RE.test(line)) {
+    // Either the section heading or the table's header row opens the table.
+    if (SONG_SECTION_RE.test(line) || TABLE_HEADER_RE.test(line)) {
       inSection = true;
       bullet = null;
       continue;
     }
     if (!inSection) continue;
-    if (TABLE_HEADER_RE.test(line)) continue;
 
     const bulletMatch = line.match(SONG_BULLET_RE);
     if (bulletMatch) {

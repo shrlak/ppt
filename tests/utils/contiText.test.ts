@@ -77,6 +77,54 @@ describe('parseCoverText — 순서/찬양/키 table layout', () => {
   });
 });
 
+describe('parseCoverText — layout variations', () => {
+  it('finds the table from its header row when no 찬양 콘티 heading is written', () => {
+    const info = parseCoverText(
+      ['날짜 | 2026.08.09', '본문 | 전도서 12장 1-8절', '순서 찬양 키', '1 첫째 곡 A', '2 둘째 곡 F'].join('\n'),
+    );
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['첫째 곡', 'A'],
+      ['둘째 곡', 'F'],
+    ]);
+  });
+
+  it('accepts the column names other contis use', () => {
+    const info = parseCoverText(
+      ['날짜: 2026.08.09', '번호 | 곡명 | Key', '1 첫째 곡 A', '2 둘째 곡 Bb'].join('\n'),
+    );
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['첫째 곡', 'A'],
+      ['둘째 곡', 'Bb'],
+    ]);
+  });
+
+  it('accepts 찬양 순서 as the section heading, numbered or not', () => {
+    for (const heading of ['2. 찬양 순서', '찬양 순서', '찬양 콘티']) {
+      const info = parseCoverText(['본문: 로마서 5장 1-11절', heading, '1 첫째 곡 A'].join('\n'));
+      expect(info?.songs.map((s) => s.title)).toEqual(['첫째 곡']);
+    }
+  });
+
+  it('prefers an explicit 설교 제목 over a 주제 row, whichever comes first', () => {
+    expect(parseSermonInfoText('주제 | 청년의 때\n설교 제목: 하나님과 화평을 누리자')).toEqual({
+      sermonTitle: '하나님과 화평을 누리자',
+      scripture: undefined,
+    });
+    // With only a 주제 row, that is the best available sermon title.
+    expect(parseSermonInfoText('주제 | 청년의 때').sermonTitle).toBe('청년의 때');
+  });
+
+  it('does not read a page of lyrics as a cover', () => {
+    const lyricsPage = ['주님의 사랑', '가나다라 마바사 아자차', '카타파하 그 이름 높이'].join('\n');
+    expect(parseCoverText(lyricsPage)).toBeNull();
+  });
+
+  it('needs service context, not just something table-shaped', () => {
+    // A song list with no date, sermon title or 본문 is not a cover page.
+    expect(parseCoverText('순서 찬양 키\n1 첫째 곡 A')).toBeNull();
+  });
+});
+
 describe('parseSermonInfoText', () => {
   it('reads labeled sermon metadata without requiring a song list', () => {
     expect(parseSermonInfoText('설교 제목: “믿음으로 걷기”\n본문: 히브리서 11장 1-3절')).toEqual({
