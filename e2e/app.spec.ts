@@ -448,14 +448,13 @@ test('admin panel lists the complete concurrent recognition model pool', async (
 
   const rows = page.getByTestId('admin-recognition-order').locator('.admin-engine');
   await expect(page.getByRole('heading', { name: '가사 인식 동시 실행 모델' })).toBeVisible();
-  // Gemini 2.5 Flash and Nemotron Nano are the two primary models, so they
-  // lead the priority-ordered list; everything after is an assistant model.
-  // The expected labels come from the catalog so adding a model to the pool
-  // does not mean editing a hard-coded count here.
+  // The two primary models lead the priority-ordered list; everything after
+  // is an assistant model. Both the labels and the leading pair come from the
+  // catalog, so changing the pool does not mean editing hard-coded names here.
   await expect(rows).toHaveCount(RECOGNITION_MODEL_CATALOG.length);
   await expect(rows).toContainText(RECOGNITION_MODEL_CATALOG.map((entry) => entry.label));
-  await expect(rows.first()).toContainText('Gemini 2.5 Flash');
-  await expect(rows.nth(1)).toContainText('NVIDIA Nemotron Nano 12B VL');
+  await expect(rows.first()).toContainText(RECOGNITION_MODEL_CATALOG[0].label);
+  await expect(rows.nth(1)).toContainText(RECOGNITION_MODEL_CATALOG[1].label);
   await expect(page.getByTestId('admin-recognition-order').getByRole('button')).toHaveCount(0);
 });
 
