@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeWebLyrics } from '../../src/lib/lyrics/mergeWebLyrics';
+import { crossReferenceLines, mergeWebLyrics } from '../../src/lib/lyrics/mergeWebLyrics';
 import type { WebLyrics } from '../../src/lib/lyrics/webLyrics';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
@@ -19,6 +19,61 @@ function web(sections: { label: string; lines: string[] }[]): WebLyrics {
     sourceHost: 'ccm.co.kr',
   };
 }
+
+describe('crossReferenceLines', () => {
+  it('takes the published spelling of a line the models misread', () => {
+    const { lines, corrected } = crossReferenceLines(
+      ['가나다라 마바사 아자차', '카타파하 그 이음 높이'],
+      ['가나다라 마바사 아자차', '카타파하 그 이름 높이'],
+    );
+    expect(lines).toEqual(['가나다라 마바사 아자차', '카타파하 그 이름 높이']);
+    expect(corrected).toBe(1);
+  });
+
+  it('keeps a recognized line the page has no counterpart for', () => {
+    // The score sings a line this arrangement of the song does not print.
+    const { lines } = crossReferenceLines(
+      ['가나다라 마바사 아자차', '악보에만 있는 완전히 다른 줄'],
+      ['가나다라 마바사 아자차'],
+    );
+    expect(lines).toEqual(['가나다라 마바사 아자차', '악보에만 있는 완전히 다른 줄']);
+  });
+
+  it('recovers a tail the models cut short', () => {
+    const { lines } = crossReferenceLines(
+      ['가나다라 마바사 아자차', '카타파하 그 이름 높이'],
+      ['가나다라 마바사 아자차', '카타파하 그 이름 높이', '영원토록 노래해'],
+    );
+    expect(lines).toEqual([
+      '가나다라 마바사 아자차',
+      '카타파하 그 이름 높이',
+      '영원토록 노래해',
+    ]);
+  });
+
+  it('will not append a tail off the back of one incidental match', () => {
+    const { lines } = crossReferenceLines(
+      ['가나다라 마바사 아자차'],
+      ['가나다라 마바사 아자차', '전혀 다른 절의 첫 줄', '전혀 다른 절의 둘째 줄'],
+    );
+    expect(lines).toEqual(['가나다라 마바사 아자차']);
+  });
+
+  it('stays in order when the page repeats a line later', () => {
+    // The hook appears twice on the page; the first recognized line must not
+    // bind to the second copy and swallow everything in between.
+    const { lines } = crossReferenceLines(
+      ['높이 노래해', '잔잔한 강물처럼', '높이 노래해'],
+      ['높이 노래해', '잔잔한 강물처럼', '높이 노래해'],
+    );
+    expect(lines).toEqual(['높이 노래해', '잔잔한 강물처럼', '높이 노래해']);
+  });
+
+  it('reports nothing corrected when the two already agree', () => {
+    const { corrected } = crossReferenceLines(['같은 줄'], ['같은 줄']);
+    expect(corrected).toBe(0);
+  });
+});
 
 describe('mergeWebLyrics', () => {
   it('keeps the score’s shape and takes the published wording', () => {

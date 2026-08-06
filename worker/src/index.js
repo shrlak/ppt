@@ -1,6 +1,6 @@
 // Shared recognition proxy for the lyrics app's score-recognition feature.
 //
-// Holds the site owner's Gemini / Hugging Face / OpenRouter API keys as Worker
+// Holds the site owner's Gemini / OpenRouter API keys as Worker
 // secrets (never shipped to the browser) and forwards recognition requests
 // to the real provider with the key attached. The client sends the exact
 // same request body it would send directly to the provider — this Worker is
@@ -10,7 +10,7 @@
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
-//   POST /huggingface     -> https://api-inference.huggingface.co/models/:HUGGINGFACE_MODEL
+//   GET  /lyrics          -> published lyrics for a recognized 찬양 제목
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
@@ -25,7 +25,6 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import {
-  DEFAULT_HUGGINGFACE_MODEL,
   buildUsageSnapshot,
   mergeUsageRecord,
   sanitizeUsageEvent,
@@ -51,7 +50,6 @@ import { fetchWebLyrics } from './lyrics.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const HUGGINGFACE_ENDPOINT = 'https://api-inference.huggingface.co/models';
 
 // Always allow the production GitHub Pages origin, even if ALLOWED_ORIGINS
 // is unset or misconfigured on the Worker — the recognition proxy is useless
@@ -386,7 +384,7 @@ async function recordUsage(env, event) {
 async function readUsage(env) {
   const tracker = usageTracker(env);
   if (!tracker) throw new Error('usage tracker is not configured');
-  return buildUsageSnapshot(await tracker.records(), env, new Date(), usageCatalogModels(env));
+  return buildUsageSnapshot(await tracker.records(), env, new Date(), usageCatalogModels());
 }
 
 function geminiUsageMetadata(responseBody) {
@@ -416,15 +414,6 @@ function openAiUsageMetadata(responseBody) {
   } catch {
     return { promptTokens: 0, outputTokens: 0, totalTokens: 0 };
   }
-}
-
-function providerComputeSeconds(response, wallSeconds) {
-  const raw = response.headers.get('x-compute-time');
-  const value = raw == null ? Number.NaN : Number(raw);
-  return {
-    computeSeconds: Number.isFinite(value) && value >= 0 ? value : wallSeconds,
-    computeSource: Number.isFinite(value) && value >= 0 ? 'provider' : 'wall',
-  };
 }
 
 /**
@@ -780,34 +769,6 @@ export default {
         success: res.ok,
         wallSeconds,
         ...openAiUsageMetadata(resBody),
-      });
-      return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
-    }
-
-    if (url.pathname === '/huggingface') {
-      if (!env.HUGGINGFACE_API_KEY) {
-        return jsonResponse({ error: 'HUGGINGFACE_API_KEY not configured on the proxy' }, 500, headers);
-      }
-      const model = env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL;
-      const upstream = `${HUGGINGFACE_ENDPOINT}/${model}`;
-      const body = await request.text();
-      const startedAt = Date.now();
-      const res = await fetch(upstream, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.HUGGINGFACE_API_KEY}`,
-        },
-        body,
-      });
-      const resBody = await res.text();
-      const wallSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
-      await recordUsage(env, {
-        provider: 'huggingface',
-        model,
-        success: res.ok,
-        wallSeconds,
-        ...providerComputeSeconds(res, wallSeconds),
       });
       return new Response(resBody, { status: res.status, headers: { ...headers, 'Content-Type': 'application/json' } });
     }

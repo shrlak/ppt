@@ -24,14 +24,9 @@ vi.mock('../../src/lib/ai/scoreNvidia', () => ({
   recognizeWithNvidia: vi.fn(),
   recognizeBatchWithNvidia: vi.fn(),
 }));
-vi.mock('../../src/lib/ai/scoreHuggingFace', () => ({
-  recognizeWithHuggingFace: vi.fn(),
-  recognizeBatchWithHuggingFace: vi.fn(),
-}));
 
 import { recognizeBatchWithGemini, recognizeWithGemini } from '../../src/lib/ai/scoreAi';
 import { recognizeBatchWithNvidia, recognizeWithNvidia } from '../../src/lib/ai/scoreNvidia';
-import { recognizeBatchWithHuggingFace, recognizeWithHuggingFace } from '../../src/lib/ai/scoreHuggingFace';
 
 const stub: Song = {
   id: '1',
@@ -56,7 +51,6 @@ const settings = {
   ...DEFAULT_AI_SETTINGS,
   geminiApiKey: 'test-key',
   openrouterApiKey: 'test-key',
-  huggingfaceApiKey: 'test-key',
 };
 
 describe('concurrent single-page recognition', () => {
@@ -67,7 +61,6 @@ describe('concurrent single-page recognition', () => {
     vi.clearAllMocks();
     vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeWithNvidia).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeWithHuggingFace).mockRejectedValue(new Error('down'));
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -84,7 +77,6 @@ describe('concurrent single-page recognition', () => {
     expect(out.engine).toBe('nvidia');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
     expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
-    expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(0);
   });
 
   it('lets a later-listed provider win by finishing first', async () => {
@@ -119,7 +111,6 @@ describe('concurrent single-page recognition', () => {
     await expect(recognizeScore('data:image/png;base64,x', settings)).rejects.toThrow('down');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
     expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
-    expect(recognizeWithHuggingFace).toHaveBeenCalledTimes(0);
   });
 
   it('retries an individual model once after a transient server failure', async () => {
@@ -160,7 +151,6 @@ describe('concurrent batch recognition', () => {
     vi.clearAllMocks();
     vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithHuggingFace).mockRejectedValue(new Error('down'));
   });
 
   it('launches every model together for the title pass', async () => {
@@ -174,7 +164,6 @@ describe('concurrent batch recognition', () => {
     expect(out.scores).toEqual([first, second]);
     expect(recognizeBatchWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
     expect(recognizeBatchWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
-    expect(recognizeBatchWithHuggingFace).toHaveBeenCalledTimes(0);
   });
 
   it('keeps a non-score page in the aligned title results for caller-side filtering', async () => {
@@ -408,7 +397,7 @@ describe('concurrent batch recognition', () => {
 
   it('uses the same complete pool for the full-lyrics ensemble API', async () => {
     vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'google/gemma-4-26b-a4b-it:free') return [first, second];
+      if (model === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free') return [first, second];
       throw new Error('down');
     });
 
@@ -417,7 +406,6 @@ describe('concurrent batch recognition', () => {
     expect(out.engine).toBe('nvidia');
     expect(recognizeBatchWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
     expect(recognizeBatchWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
-    expect(recognizeBatchWithHuggingFace).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -531,7 +519,6 @@ describe('line-level consensus across the model pool', () => {
       model === 'gemini-3.6-flash' ? [one(['능력이'])] : [one(['실력이'])],
     );
     vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithHuggingFace).mockRejectedValue(new Error('down'));
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
     expect(out.scores[0].sections[0].lines[0]).toBe('능력이');
   });
@@ -543,7 +530,6 @@ describe('lines the winning model stopped short of', () => {
       model === 'gemini-3.6-flash' ? [winner] : [other],
     );
     vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithHuggingFace).mockRejectedValue(new Error('down'));
   };
 
   it('appends a dropped tail from a model that read further', async () => {

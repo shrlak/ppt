@@ -24,13 +24,11 @@ export const RECOGNITION_MODEL_CATALOG = [
   { engine: 'gemini', model: 'gemini-3.5-flash' },
   { engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' },
   { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
-  { engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' },
 ];
 
 const OPENROUTER_MODEL_ALIASES = new Map([
   [DEFAULT_NVIDIA_MODEL, OPENROUTER_NEMOTRON_MODEL],
   ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
-  ['google/gemma-4-26b-a4b-it:free', 'google/gemma-4-26b-a4b-it:free'],
 ]);
 
 export const DEFAULT_EXCLUDED_TITLES = ['공동체 고백송', '예배 전 준비 찬양'];
@@ -128,18 +126,15 @@ export function adminPassword(env = {}) {
  * Every model in the system as the {provider, model} pair it is METERED
  * under, so the 사용량 page can show a card per model even before its first
  * request. The OpenRouter lane meters the exact upstream :free slug the
- * Worker forwards to; Hugging Face meters whatever model the proxy is
- * pinned to (HUGGINGFACE_MODEL env override included).
+ * Worker forwards to, which is why this is not just the catalog itself.
  */
-export function usageCatalogModels(env = {}) {
+export function usageCatalogModels() {
   const models = [];
   for (const entry of RECOGNITION_MODEL_CATALOG) {
     if (entry.engine === 'gemini') {
       models.push({ provider: 'gemini', model: entry.model });
     } else if (entry.engine === 'nvidia') {
       models.push({ provider: 'openrouter', model: resolveOpenRouterRoute(entry.model).upstreamModel });
-    } else if (entry.engine === 'huggingface') {
-      models.push({ provider: 'huggingface', model: env.HUGGINGFACE_MODEL || entry.model });
     }
   }
   return models;

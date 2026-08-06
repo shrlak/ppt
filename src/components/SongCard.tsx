@@ -21,7 +21,6 @@ const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
   // Legacy engine ID: all current entries in this lane are OpenRouter free models.
   nvidia: 'OpenRouter',
-  huggingface: 'Hugging Face',
   library: '라이브러리',
 };
 

@@ -9,8 +9,7 @@ compatibility_date = "2025-01-01"
 [vars]
 ALLOWED_ORIGINS = "https://shrlak.github.io"
 # Dashboard reference limits. Gemini quotas vary per project; update this to
-# the RPD value shown in AI Studio. Hugging Face currently grants free users
-# $0.10/month, while hf-inference cost is estimated from compute time.
+# the RPD value shown in AI Studio.
 GEMINI_MODEL = "gemini-3.6-flash"
 GEMINI_DAILY_REQUEST_LIMIT = "250"
 # OpenRouter's free-model allowance is shared across all :free models. Keep
@@ -18,8 +17,6 @@ GEMINI_DAILY_REQUEST_LIMIT = "250"
 # after the account has purchased at least $10 in credits.
 OPENROUTER_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free"
 OPENROUTER_DAILY_REQUEST_LIMIT = "50"
-HUGGINGFACE_MONTHLY_CREDIT_USD = "0.10"
-HUGGINGFACE_USD_PER_SECOND = "0.00012"
 # Weekly wipe of the shared PPT library: every saved deck and its files are
 # deleted each Sunday at 5 PM in this timezone (the 곡 라이브러리 is kept).
 # PURGE_WEEKDAY overrides the day and follows JavaScript's Date#getDay()
@@ -54,7 +51,6 @@ new_sqlite_classes = ["UsageTracker"]
 
 # API keys are NOT set here (this file is committed to git). Set them with:
 #   npx wrangler secret put GEMINI_API_KEY
-#   npx wrangler secret put HUGGINGFACE_API_KEY
 #   npx wrangler secret put OPENROUTER_API_KEY
 # POST /settings (shared recognition settings) is guarded by the 관리자 설정
 # password. It defaults to the app's built-in admin password; override with:

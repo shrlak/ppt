@@ -1,5 +1,5 @@
 export interface CatalogAttempt {
-  engine: 'gemini' | 'nvidia' | 'huggingface';
+  engine: 'gemini' | 'nvidia';
   model: string;
 }
 
@@ -17,9 +17,7 @@ export function sanitizeAttemptOrder(raw: unknown): CatalogAttempt[];
 export function sanitizeExcludedTitles(raw: unknown): string[];
 export function sanitizeSharedSettings(raw: unknown): SharedSettings;
 export function allowedOpenRouterModels(): Set<string>;
-export function usageCatalogModels(
-  env?: Record<string, string | undefined>,
-): { provider: 'gemini' | 'openrouter' | 'huggingface'; model: string }[];
+export function usageCatalogModels(): { provider: 'gemini' | 'openrouter'; model: string }[];
 export function resolveOpenRouterRoute(requested: string): {
   configuredModel: string;
   upstreamModel: string;

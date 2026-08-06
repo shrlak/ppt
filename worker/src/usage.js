@@ -8,21 +8,18 @@
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
 export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
-export const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT = 250;
 export const DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT = 50;
 // build.nvidia.com grants free API credits (1 credit = 1 request). The pool
 // is per-account rather than per-month; the monthly bar is a pacing guide.
 export const DEFAULT_NVIDIA_MONTHLY_REQUEST_LIMIT = 1000;
-export const DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD = 0.1;
 // Hugging Face bills hf-inference by compute time x hardware price. This
 // default mirrors the public pricing example and is deliberately configurable.
-export const DEFAULT_HUGGINGFACE_USD_PER_SECOND = 0.00012;
 
-const PROVIDERS = new Set(['gemini', 'openrouter', 'nvidia', 'huggingface']);
+const PROVIDERS = new Set(['gemini', 'openrouter', 'nvidia']);
 
 /** Stable display/sort order for the usage dashboard. */
-const PROVIDER_RANK = { gemini: 0, openrouter: 1, huggingface: 2, nvidia: 3 };
+const PROVIDER_RANK = { gemini: 0, openrouter: 1, nvidia: 2 };
 
 function finiteNonNegative(value, fallback = 0) {
   const number = Number(value);
@@ -168,14 +165,6 @@ export function buildUsageSnapshot(records, env = {}, now = new Date(), catalogM
     env.OPENROUTER_DAILY_REQUEST_LIMIT,
     DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT,
   );
-  const huggingFaceLimit = positiveNumber(
-    env.HUGGINGFACE_MONTHLY_CREDIT_USD,
-    DEFAULT_HUGGINGFACE_MONTHLY_CREDIT_USD,
-  );
-  const huggingFaceRate = positiveNumber(
-    env.HUGGINGFACE_USD_PER_SECOND,
-    DEFAULT_HUGGINGFACE_USD_PER_SECOND,
-  );
   const defaultPairs = [
     ...(Array.isArray(catalogModels) ? catalogModels : []),
     { provider: 'gemini', model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL },
@@ -234,24 +223,16 @@ export function buildUsageSnapshot(records, env = {}, now = new Date(), catalogM
           estimated: false,
         };
       }
-      if (record.provider === 'nvidia') {
-        // build.nvidia.com charges one credit per request, so the request
-        // count IS the credit spend — no estimation involved.
-        return {
-          ...common,
-          metric: 'requests',
-          used: requests,
-          limit: nvidiaLimit,
-          estimated: false,
-        };
-      }
+      // build.nvidia.com charges one credit per request, so the request
+      // count IS the credit spend — no estimation involved. Only the three
+      // provider lanes in PROVIDERS reach this map, so nvidia is the total
+      // fallback rather than one more branch.
       return {
         ...common,
-        metric: 'usd',
-        used: common.computeSeconds * huggingFaceRate,
-        limit: huggingFaceLimit,
-        estimated: true,
-        usdPerSecond: huggingFaceRate,
+        metric: 'requests',
+        used: requests,
+        limit: nvidiaLimit,
+        estimated: false,
       };
     })
     .sort((a, b) => {
