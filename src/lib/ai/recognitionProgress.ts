@@ -8,7 +8,7 @@
 // claims 100% before the work is actually done.
 
 /** Pipeline stages, in execution order. */
-export type RecognitionPhase = 'render' | 'titles' | 'lyrics' | 'rescue';
+export type RecognitionPhase = 'render' | 'titles' | 'lyrics' | 'rescue' | 'web';
 
 export interface PhaseSpan {
   /** Overall fraction where this stage begins. */
@@ -21,11 +21,14 @@ export interface PhaseSpan {
 
 export const RECOGNITION_PHASES: Record<RecognitionPhase, PhaseSpan> = {
   render: { start: 0, end: 0.12, expectedMs: 4000 },
-  titles: { start: 0.12, end: 0.45, expectedMs: 9000 },
-  lyrics: { start: 0.45, end: 0.97, expectedMs: 22000 },
+  titles: { start: 0.12, end: 0.4, expectedMs: 9000 },
+  lyrics: { start: 0.4, end: 0.88, expectedMs: 22000 },
   // Rescue re-runs only the pages the batch pass missed; it overlaps the tail
   // of the lyrics span so the bar keeps creeping instead of jumping back.
-  rescue: { start: 0.9, end: 0.99, expectedMs: 15000 },
+  rescue: { start: 0.82, end: 0.9, expectedMs: 15000 },
+  // The web lookup runs last, once a title and the score's reading are both in
+  // hand, and only for songs the library doesn't already have.
+  web: { start: 0.9, end: 0.99, expectedMs: 6000 },
 };
 
 function clamp01(value: number): number {

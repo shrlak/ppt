@@ -30,6 +30,7 @@ const PHASE_LABELS: Record<RecognitionPhase, string> = {
   titles: '전체 곡 제목 확인 중',
   lyrics: '전체 가사 일괄 인식 중',
   rescue: '남은 곡 다시 인식 중',
+  web: '웹에서 가사 확인 중',
 };
 
 interface Props {

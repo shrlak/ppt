@@ -22,7 +22,7 @@ describe('recognition model catalog', () => {
     const keys = RECOGNITION_MODEL_CATALOG.map(attemptKey);
     expect(new Set(keys).size).toBe(keys.length);
     // Stable display order starts with the benchmark-validated Flash model.
-    expect(RECOGNITION_MODEL_CATALOG[0]).toMatchObject({ engine: 'gemini', model: 'gemini-2.5-flash' });
+    expect(RECOGNITION_MODEL_CATALOG[0]).toMatchObject({ engine: 'gemini', model: 'gemini-3.6-flash' });
     // Multiple providers and multiple models per provider are available.
     expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'gemini').length).toBeGreaterThan(1);
     expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length).toBeGreaterThan(1);
@@ -38,9 +38,9 @@ describe('recognition model catalog', () => {
       configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
       upstreamModel: OPENROUTER_NEMOTRON_MODEL,
     });
-    expect(resolveOpenRouterRoute('google/gemma-4-31b-it:free')).toEqual({
-      configuredModel: 'google/gemma-4-31b-it:free',
-      upstreamModel: 'google/gemma-4-31b-it:free',
+    expect(resolveOpenRouterRoute('google/gemma-4-26b-a4b-it:free')).toEqual({
+      configuredModel: 'google/gemma-4-26b-a4b-it:free',
+      upstreamModel: 'google/gemma-4-26b-a4b-it:free',
     });
     expect(resolveOpenRouterRoute('paid/or-made-up-model')).toEqual({
       configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
@@ -53,7 +53,7 @@ describe('sanitizeAttemptOrder', () => {
   it('keeps a valid custom order and appends the missing catalog models', () => {
     const custom = [
       { engine: 'nvidia', model: 'google/gemma-4-26b-a4b-it:free' },
-      { engine: 'gemini', model: 'gemini-2.5-flash' },
+      { engine: 'gemini', model: 'gemini-3.6-flash' },
     ];
     const order = sanitizeAttemptOrder(custom);
     expect(order.slice(0, 2)).toEqual(custom);
@@ -65,10 +65,10 @@ describe('sanitizeAttemptOrder', () => {
     const order = sanitizeAttemptOrder([
       { engine: 'gemini', model: 'made-up-model' },
       { engine: 'gemini', model: 'gemini-2.5-pro' },
-      { engine: 'gemini', model: 'gemini-2.0-flash' },
-      { engine: 'gemini', model: 'gemini-2.0-flash' },
+      { engine: 'gemini', model: 'gemini-3.5-flash' },
+      { engine: 'gemini', model: 'gemini-3.5-flash' },
     ]);
-    expect(order[0]).toEqual({ engine: 'gemini', model: 'gemini-2.0-flash' });
+    expect(order[0]).toEqual({ engine: 'gemini', model: 'gemini-3.5-flash' });
     expect(order).toHaveLength(DEFAULT_ATTEMPT_ORDER.length);
   });
 
@@ -118,6 +118,6 @@ describe('recognition settings without storage (node)', () => {
     const settings = getAiSettings();
     expect(settings.attempts).toEqual(DEFAULT_ATTEMPT_ORDER);
     expect(settings.excludedTitles).toEqual(DEFAULT_EXCLUDED_TITLES);
-    expect(settings.attempts[0]).toEqual({ engine: 'gemini', model: 'gemini-2.5-flash' });
+    expect(settings.attempts[0]).toEqual({ engine: 'gemini', model: 'gemini-3.6-flash' });
   });
 });

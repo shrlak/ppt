@@ -11,7 +11,7 @@ ALLOWED_ORIGINS = "https://shrlak.github.io"
 # Dashboard reference limits. Gemini quotas vary per project; update this to
 # the RPD value shown in AI Studio. Hugging Face currently grants free users
 # $0.10/month, while hf-inference cost is estimated from compute time.
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 GEMINI_DAILY_REQUEST_LIMIT = "250"
 # OpenRouter's free-model allowance is shared across all :free models. Keep
 # this at 50 for accounts that have not purchased credits; set it to 1000

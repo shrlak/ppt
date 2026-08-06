@@ -5,7 +5,7 @@
 // module maintains the app's own counter because none of these APIs exposes a
 // portable "remaining credit" API.
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
 export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
 export const DEFAULT_HUGGINGFACE_MODEL = 'Qwen/Qwen2-VL-7B-Instruct';
@@ -180,7 +180,6 @@ export function buildUsageSnapshot(records, env = {}, now = new Date(), catalogM
     ...(Array.isArray(catalogModels) ? catalogModels : []),
     { provider: 'gemini', model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL },
     { provider: 'openrouter', model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL },
-    { provider: 'huggingface', model: env.HUGGINGFACE_MODEL || DEFAULT_HUGGINGFACE_MODEL },
   ].filter((pair) => pair && PROVIDERS.has(pair.provider) && typeof pair.model === 'string' && pair.model);
   const defaults = [];
   const seenPairs = new Set();

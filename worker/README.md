@@ -16,6 +16,7 @@ to anyone who opens dev tools, since the app has no backend of its own.
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
 Browser  ──POST /openrouter────▶  Worker (adds real key)  ──▶  OpenRouter free vision models
 Browser  ──POST /huggingface───▶  Worker (adds real key)  ──▶  Hugging Face API
+Browser  ──GET  /lyrics────────▶  Worker (search + scrape) ──▶  allowlisted lyrics sites
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
@@ -122,7 +123,9 @@ to show the shared-key totals across every browser using the site.
 Gemini does not publish a portable API for the active project's remaining
 quota. Set `GEMINI_DAILY_REQUEST_LIMIT` in `wrangler.toml` to the current RPD
 shown in AI Studio. OpenRouter's free-model request allowance is shared by
-the three configured `:free` models. Hugging Face's bar uses its monthly
+the configured `:free` models. Hugging Face is no longer part of the
+recognition pool, so it gets no card until the route is actually used; its
+bar then uses its monthly
 free credit and an estimate based on `x-compute-time`; adjust
 `HUGGINGFACE_MONTHLY_CREDIT_USD` and `HUGGINGFACE_USD_PER_SECOND` if the
 account allowance or hardware rate changes. Provider billing dashboards
