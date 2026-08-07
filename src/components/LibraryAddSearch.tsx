@@ -68,6 +68,11 @@ export default function LibraryAddSearch({ library, onAdd }: Props) {
           type="text"
           data-testid="library-add-search"
           className="library-add-input"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="library-add-listbox"
+          aria-autocomplete="list"
+          aria-label="라이브러리에서 찬양 검색"
           placeholder="곡 검색…"
           value={query}
           onChange={(e) => {
@@ -78,12 +83,26 @@ export default function LibraryAddSearch({ library, onAdd }: Props) {
           onKeyDown={onKeyDown}
         />
         {open && (
-          <ul className="library-add-dropdown" data-testid="library-add-dropdown">
-            {results.length === 0 && <li className="library-add-empty">일치하는 곡이 없습니다.</li>}
+          <ul
+            className="library-add-dropdown"
+            id="library-add-listbox"
+            role="listbox"
+            // Driven by the input's arrow keys — a scrollable <ul> is focusable
+            // in Chromium by default, which would add a dead tab stop.
+            tabIndex={-1}
+            data-testid="library-add-dropdown"
+          >
+            {results.length === 0 && (
+              <li className="library-add-empty" role="presentation">
+                일치하는 곡이 없습니다.
+              </li>
+            )}
             {results.map((e, i) => (
               <li
                 key={e.title}
                 data-testid="library-add-option"
+                role="option"
+                aria-selected={i === highlight}
                 className={i === highlight ? 'active' : ''}
                 onMouseDown={(ev) => {
                   ev.preventDefault();

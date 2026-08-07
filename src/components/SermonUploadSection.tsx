@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import Icon from './Icon';
 
 export interface SermonFile {
   name: string;
@@ -21,22 +22,26 @@ export default function SermonUploadSection({ value, onChange }: Props) {
 
   return (
     <section className="card" data-testid="sermon-upload-section">
-      <h2>설교 PPT 업로드</h2>
-      <p className="tool-intro" style={{ margin: '0 0 14px' }}>
+      <h3>설교 PPT 업로드</h3>
+      <p className="tool-intro">
         말씀 슬라이드 다음에 그대로 삽입됩니다. 목사님께 받은 설교 PPT 파일을 업로드하세요 (선택).
       </p>
       {value ? (
         <div className="template-row">
           <span className="input-hint">업로드됨: {value.name}</span>
-          <button className="btn" onClick={() => fileInputRef.current?.click()}>
+          <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
+            <Icon name="upload" />
             변경
           </button>
-          <button className="btn btn-ghost" onClick={() => onChange(null)}>
+          <button type="button" className="btn btn-ghost" onClick={() => onChange(null)}>
             제거
           </button>
         </div>
       ) : (
-        <div
+        // A real button, so the dropzone is reachable with Tab and fires on
+        // Enter/Space — dropping a file stays the shortcut, not the only way in.
+        <button
+          type="button"
           className="dropzone"
           data-testid="sermon-dropzone"
           onClick={() => fileInputRef.current?.click()}
@@ -47,9 +52,12 @@ export default function SermonUploadSection({ value, onChange }: Props) {
             if (file) void handleUpload(file);
           }}
         >
-          <p className="dropzone-title">📄 설교 PPT 파일을 여기에 끌어다 놓거나 클릭하세요</p>
-          <p className="dropzone-sub">업로드하지 않으면 이 순서를 건너뜁니다.</p>
-        </div>
+          <span className="dropzone-title">
+            <Icon name="file" />
+            설교 PPT 파일을 여기에 끌어다 놓거나 클릭하세요
+          </span>
+          <span className="dropzone-sub">업로드하지 않으면 이 순서를 건너뜁니다.</span>
+        </button>
       )}
       <input
         ref={fileInputRef}
@@ -57,6 +65,7 @@ export default function SermonUploadSection({ value, onChange }: Props) {
         accept=".pptx"
         data-testid="sermon-input"
         className="visually-hidden-input"
+        tabIndex={-1}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void handleUpload(file);

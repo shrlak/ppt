@@ -11,17 +11,18 @@ import type { RenderedSlide } from '../lib/pptx/pptxRenderer';
 import type { AutoSaveStatus } from '../lib/storage/deckAutoSave';
 import AutoSaveIndicator from './AutoSaveIndicator';
 import SlideThumbnail from './SlideThumbnail';
+import Icon, { type IconName } from './Icon';
 
-const KIND_ICON: Record<DeckOverviewItem['kind'], string> = {
-  front: '🖼',
-  'lyrics-title': '🎵',
-  lyrics: '📝',
-  prayer: '🙏',
-  bible: '📖',
-  sermon: '🎙',
-  divider: '📌',
-  announcement: '📢',
-  back: '🖼',
+const KIND_ICON: Record<DeckOverviewItem['kind'], IconName> = {
+  front: 'slide',
+  'lyrics-title': 'music',
+  lyrics: 'lyrics',
+  prayer: 'prayer',
+  bible: 'bible',
+  sermon: 'sermon',
+  divider: 'divider',
+  announcement: 'announcement',
+  back: 'slide',
 };
 
 const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set(['lyrics-title', 'lyrics', 'bible', 'sermon', 'announcement']);
@@ -64,15 +65,8 @@ export default function SlideOverviewList({
       <div className="slide-overview-header">
         <h2 className="slide-overview-title">슬라이드{slides ? ` (${slides.length})` : ''}</h2>
         <div className="slide-overview-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            data-testid="editor-generate-pptx"
-            disabled={downloading}
-            onClick={onDownload}
-          >
-            {downloading ? '생성 중…' : '⬇ 다운로드'}
-          </button>
+          {/* Both toolbar actions share one size token, so the pair lines up
+              exactly instead of one sitting taller than the other. */}
           <button
             type="button"
             className="btn"
@@ -80,12 +74,28 @@ export default function SlideOverviewList({
             disabled={savingToLibrary}
             onClick={onSaveToLibrary}
           >
-            {savingToLibrary ? '저장 중…' : '📚 저장'}
+            <Icon name="save" />
+            {savingToLibrary ? '저장 중…' : '저장'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-testid="editor-generate-pptx"
+            disabled={downloading}
+            onClick={onDownload}
+          >
+            <Icon name="download" />
+            {downloading ? '생성 중…' : '다운로드'}
           </button>
         </div>
       </div>
       <AutoSaveIndicator status={autoSaveStatus} testId="editor-auto-save-status" />
-      {error && <p className="banner banner-warn slide-overview-error">{error}</p>}
+      {error && (
+        <p className="banner banner-warn slide-overview-error">
+          <Icon name="warning" />
+          <span className="banner-text">{error}</span>
+        </p>
+      )}
       {overview.length === 0 && !loading ? (
         <p className="empty-hint">콘티나 광고를 입력하면 여기에 슬라이드 목록이 표시됩니다.</p>
       ) : (
@@ -98,8 +108,8 @@ export default function SlideOverviewList({
                 <span className="slide-overview-text">
                   <span className="slide-overview-text-top">
                     <span className="slide-overview-number">{index + 1}</span>
-                    <span className="slide-overview-icon" aria-hidden="true">
-                      {KIND_ICON[item.kind]}
+                    <span className="slide-overview-icon">
+                      <Icon name={KIND_ICON[item.kind]} />
                     </span>
                     <span className="slide-overview-label">{item.label}</span>
                   </span>
@@ -133,6 +143,7 @@ export default function SlideOverviewList({
           })}
           {loading && (
             <li className="slide-overview-loading" data-testid="slide-overview-loading">
+              <span className="spinner" aria-hidden="true" />
               슬라이드 생성 중…
             </li>
           )}

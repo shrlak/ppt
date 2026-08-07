@@ -4,6 +4,7 @@ import { formatOrder, parseOrder } from '../lib/utils/orderParser';
 import { planSlides, unmatchedTokens } from '../lib/utils/slidePlanner';
 import { progressPercent, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { nextAvailableLabel } from './songLabels';
+import Icon from './Icon';
 
 /** Live status of auto-recognizing a song's score image. */
 export interface RecogState {
@@ -157,20 +158,25 @@ export default function SongCard({
         </div>
       ) : (
         <>
-          <button className="btn btn-chip" data-testid="recognize-btn" onClick={onRecognize}>
-            {recog?.status === 'done' ? '↻ 다시 인식' : '✨ 가사 자동 인식'}
+          <button type="button" className="btn btn-chip" data-testid="recognize-btn" onClick={onRecognize}>
+            <Icon name={recog?.status === 'done' ? 'refresh' : 'music'} />
+            {recog?.status === 'done' ? '다시 인식' : '가사 자동 인식'}
           </button>
           {recog?.status === 'error' && (
             <span className="recog-error">
-              인식 실패 — 다시 시도하거나 직접 입력하세요.
-              {recog.message && <span className="recog-error-detail">{recog.message}</span>}
+              <Icon name="error" />
+              <span>
+                인식 실패 — 다시 시도하거나 직접 입력하세요.
+                {recog.message && <span className="recog-error-detail">{recog.message}</span>}
+              </span>
             </span>
           )}
           {recog?.status === 'done' && (
             <span className="recog-done">
+              <Icon name="check" />
               {recog.engine === 'library'
-                ? '✓ 라이브러리의 저장된 가사를 불러왔습니다'
-                : `✓ ${recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해 주세요`}
+                ? '라이브러리의 저장된 가사를 불러왔습니다'
+                : `${recog.engine ? `${ENGINE_LABELS[recog.engine] ?? recog.engine}로 ` : ''}인식 완료 · 확인해 주세요`}
             </span>
           )}
         </>
@@ -205,25 +211,36 @@ export default function SongCard({
           onChange={(e) => onChange({ ...song, key: e.target.value || undefined })}
         />
         <div className="song-actions">
-          <button className="btn btn-icon" disabled={index === 0} onClick={() => onMove(song.id, -1)} title="위로">
-            ↑
+          <button
+            type="button"
+            className="btn btn-icon"
+            disabled={index === 0}
+            onClick={() => onMove(song.id, -1)}
+            aria-label="위로 이동"
+            title="위로"
+          >
+            <Icon name="up" />
           </button>
           <button
+            type="button"
             className="btn btn-icon"
             disabled={index === total - 1}
             onClick={() => onMove(song.id, 1)}
+            aria-label="아래로 이동"
             title="아래로"
           >
-            ↓
+            <Icon name="down" />
           </button>
           <button
+            type="button"
             className="btn btn-icon btn-danger"
+            aria-label="찬양 삭제"
             title="삭제"
             onClick={() => {
               if (window.confirm(`'${song.title || '제목 없음'}' 곡을 삭제할까요?`)) onRemove(song.id);
             }}
           >
-            🗑
+            <Icon name="trash" />
           </button>
         </div>
       </div>
@@ -232,7 +249,11 @@ export default function SongCard({
       <div className="song-body">
         {editorOnly ? null : pageImage ? (
           <div className="score-pane">
-            <img src={pageImage} alt="악보 미리보기" onClick={onZoom} />
+            {/* The preview opens the split editor, so it is a real control
+                with its own focus ring rather than a click handler on an image. */}
+            <button type="button" className="score-zoom" onClick={onZoom} aria-label="악보를 크게 보기">
+              <img src={pageImage} alt="악보 미리보기" />
+            </button>
             <span className="score-hint">클릭하면 콘티 전체를 보며 가사를 편집할 수 있어요 (p.{song.pageIndex})</span>
             {recogBox}
           </div>
@@ -261,23 +282,33 @@ export default function SongCard({
               />
               <div className="section-controls">
                 <button
+                  type="button"
                   className="btn btn-icon"
                   disabled={i === 0}
+                  aria-label="파트를 위로 이동"
                   title="파트를 위로 이동"
                   onClick={() => moveSection(i, -1)}
                 >
-                  ↑
+                  <Icon name="up" />
                 </button>
                 <button
+                  type="button"
                   className="btn btn-icon"
                   disabled={i === song.sections.length - 1}
+                  aria-label="파트를 아래로 이동"
                   title="파트를 아래로 이동"
                   onClick={() => moveSection(i, 1)}
                 >
-                  ↓
+                  <Icon name="down" />
                 </button>
-                <button className="btn btn-icon" title="파트 삭제" onClick={() => removeSection(i)}>
-                  ✕
+                <button
+                  type="button"
+                  className="btn btn-icon"
+                  aria-label="파트 삭제"
+                  title="파트 삭제"
+                  onClick={() => removeSection(i)}
+                >
+                  <Icon name="close" />
                 </button>
               </div>
             </div>
@@ -285,11 +316,11 @@ export default function SongCard({
           <div className="quick-add">
             파트 추가:
             {QUICK_LABELS.map((l) => (
-              <button key={l} className="btn btn-chip" onClick={() => addSection(l)}>
+              <button key={l} type="button" className="btn btn-chip" onClick={() => addSection(l)}>
                 {l}
               </button>
             ))}
-            <button className="btn btn-chip" onClick={() => addSection('')}>
+            <button type="button" className="btn btn-chip" onClick={() => addSection('')}>
               직접 입력
             </button>
           </div>
@@ -314,6 +345,7 @@ export default function SongCard({
                 title={t === 'I' ? '간주/제목 슬라이드' : missing.has(t) ? '해당 파트가 없습니다' : undefined}
               >
                 {t}
+                {missing.has(t) && <span className="sr-only"> (해당 파트 없음)</span>}
               </span>
             ))}
           </div>
@@ -333,6 +365,7 @@ export default function SongCard({
               </select>
             </label>
             <button
+              type="button"
               className="btn"
               onClick={() => {
                 onSaveToLibrary(song);
@@ -340,7 +373,8 @@ export default function SongCard({
                 setTimeout(() => setSaved(false), 1500);
               }}
             >
-              {saved ? '✓ 저장됨' : '💾 라이브러리에 저장'}
+              <Icon name={saved ? 'check' : 'save'} />
+              {saved ? '저장됨' : '라이브러리에 저장'}
             </button>
           </div>
         </div>

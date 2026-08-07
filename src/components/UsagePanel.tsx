@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
 import { fetchAiUsage, hasSharedUsageMonitor, type AiUsageSnapshot, type ModelUsage } from '../lib/ai/usageMonitor';
+import Icon from './Icon';
 
 interface Props {
   onClose: () => void;
@@ -62,7 +63,14 @@ function ModelUsageCard({ usage }: { usage: ModelUsage }) {
       >
         <span style={{ width: `${percent}%` }} />
       </div>
-      <p className="admin-usage-details">{details}</p>
+      <p className="admin-usage-details">
+        {level !== 'normal' && (
+          <>
+            <Icon name="warning" /> <strong>{level === 'danger' ? '한도 임박' : '사용량 높음'}</strong> ·{' '}
+          </>
+        )}
+        {details}
+      </p>
       <p className="admin-usage-reset">{resetLabel}</p>
     </article>
   );
@@ -97,7 +105,7 @@ export default function UsagePanel({ onClose }: Props) {
       <section className="admin-usage" data-testid="admin-ai-usage">
         <div className="admin-usage-heading">
           <div>
-            <h4>무료 API 사용량</h4>
+            <h3>무료 API 사용량</h3>
             <p>
               가사 인식 때 Gemini·OpenRouter·Hugging Face 모델이 모두 동시에 실행됩니다. 아래는 공유
               키를 사용하는 모든 브라우저의 모델별 사용량입니다.
@@ -105,17 +113,19 @@ export default function UsagePanel({ onClose }: Props) {
           </div>
           <button
             type="button"
-            className="btn btn-chip"
+            className="btn"
             disabled={loading || !hasSharedUsageMonitor()}
             data-testid="admin-usage-refresh"
             onClick={() => void refresh()}
           >
+            <Icon name="refresh" />
             {loading ? '확인 중…' : '새로고침'}
           </button>
         </div>
         {error && (
           <div className="admin-usage-error" role="status" data-testid="admin-usage-error">
-            {error}
+            <Icon name="error" />
+            <span>{error}</span>
           </div>
         )}
         {snapshot && (

@@ -3,6 +3,7 @@
 // material can be found and re-downloaded later without regenerating it.
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
+import Icon from './Icon';
 import {
   deleteSavedDeck,
   getSavedDeck,
@@ -101,6 +102,7 @@ function LibraryEntryCard({
           disabled={loading !== null}
           onClick={() => void handleDownload('pptx')}
         >
+          <Icon name="file-down" />
           {loading === 'pptx' ? '불러오는 중…' : 'PPTX 다운로드'}
         </button>
         {deck.contiPdf && (
@@ -110,6 +112,7 @@ function LibraryEntryCard({
             disabled={loading !== null}
             onClick={() => void handleDownload('contiPdf')}
           >
+            <Icon name="download" />
             {loading === 'contiPdf' ? '불러오는 중…' : '콘티 PDF'}
           </button>
         )}
@@ -120,6 +123,7 @@ function LibraryEntryCard({
             disabled={loading !== null}
             onClick={() => void handleDownload('sermonPptx')}
           >
+            <Icon name="download" />
             {loading === 'sermonPptx' ? '불러오는 중…' : '설교 PPT'}
           </button>
         )}
@@ -130,15 +134,17 @@ function LibraryEntryCard({
           disabled={loading !== null}
           onClick={() => void handleEdit()}
         >
+          <Icon name="edit" />
           {loading === 'edit' ? '불러오는 중…' : '편집'}
         </button>
         <button
           type="button"
-          className="btn btn-ghost"
+          className="btn btn-ghost btn-danger"
           data-testid="library-entry-delete"
           disabled={deleting}
           onClick={() => void handleDelete()}
         >
+          <Icon name="trash" />
           삭제
         </button>
       </div>
@@ -174,9 +180,12 @@ export default function PptLibraryPanel({ onClose, onEdit }: Props) {
         다시 열리고, 저장하면 같은 항목이 갱신됩니다.
       </p>
       <p className="library-purge-notice" data-testid="ppt-library-purge-notice">
-        서버에 보관된 PPT와 원본 파일은 <strong>매주 일요일 오후 5시(미 동부 시간)</strong>에 모두 자동으로
-        삭제되어 다음 주 콘티를 빈 상태에서 시작합니다. 계속 보관할 파일은 그 전에 다운로드해 두세요.
-        찬양 가사 라이브러리는 삭제되지 않습니다.
+        <Icon name="warning" />
+        <span>
+          서버에 보관된 PPT와 원본 파일은 <strong>매주 일요일 오후 5시(미 동부 시간)</strong>에 모두 자동으로
+          삭제되어 다음 주 콘티를 빈 상태에서 시작합니다. 계속 보관할 파일은 그 전에 다운로드해 두세요.
+          찬양 가사 라이브러리는 삭제되지 않습니다.
+        </span>
       </p>
       {snapshot && (
         <p className={`admin-sync admin-sync-${snapshot.sync}`} data-testid="ppt-library-sync" role="status">

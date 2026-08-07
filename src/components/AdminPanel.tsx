@@ -20,6 +20,7 @@ import {
 } from '../lib/ai/aiSettings';
 import { showToast } from '../lib/utils/toast';
 import { ADMIN_PASSWORD, ADMIN_UNLOCK_KEY } from '../lib/adminAuth';
+import Icon from './Icon';
 
 interface Props {
   onClose: () => void;
@@ -116,10 +117,12 @@ function DeckSlotRow({
           }}
         />
         <button type="button" className="btn" disabled={busy} onClick={() => inputRef.current?.click()}>
+          <Icon name="upload" />
           {deck ? '다른 파일로 교체' : '파일 교체'}
         </button>
         {deck && (
           <button type="button" className="btn" disabled={busy} onClick={() => void handleReset()}>
+            <Icon name="refresh" />
             기본값 복원
           </button>
         )}
@@ -182,7 +185,8 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
             />
           </label>
           {wrong && (
-            <p className="admin-lock-error" data-testid="admin-password-error">
+            <p className="admin-lock-error" data-testid="admin-password-error" role="alert">
+              <Icon name="error" />
               비밀번호가 올바르지 않습니다.
             </p>
           )}
@@ -314,6 +318,7 @@ function RecognitionSettingsSection() {
         </div>
         <div className="admin-deck-actions">
           <button type="button" className="btn" data-testid="admin-excluded-save" onClick={saveExcluded}>
+            <Icon name="save" />
             제외 목록 저장
           </button>
         </div>
