@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { extractSlideSubset } from '../../src/lib/pptx/pptxSlices';
 import { findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
+import { parseContentTypes } from '../../src/lib/pptx/contentTypes';
 
 const serviceTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'service-template.pptx'));
 
@@ -69,6 +70,17 @@ describe('extractSlideSubset', () => {
     for (const path of slideFiles(zip)) {
       expect(contentTypes).toContain(`PartName="/${path}"`);
     }
+  });
+
+  // The service template declares its content types with ContentType before
+  // PartName, so removals that assume the other order silently keep every
+  // dropped slide declared — a package full of parts that are not there.
+  it('drops the Content_Types override of every slide it leaves behind', async () => {
+    const out = await extractSlideSubset(serviceTemplate, [17]);
+    const zip = await JSZip.loadAsync(out);
+    const declared = [...parseContentTypes(await zip.file('[Content_Types].xml')!.async('string')).overrides.keys()]
+      .filter((part) => part.startsWith('/ppt/slides/'));
+    expect(declared).toEqual(['/ppt/slides/slide1.xml']);
   });
 
   it('throws for an out-of-range slide number', async () => {

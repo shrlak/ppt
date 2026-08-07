@@ -6,7 +6,13 @@
 // download. Notes masters/slides are dropped (cosmetic only, not shown to
 // the congregation).
 import JSZip from 'jszip';
-import { stripNonVisualParts } from './pptxPackage';
+import { repairContentTypes, stripNonVisualParts } from './pptxPackage';
+import {
+  ensureDefaultExtension,
+  parseContentTypes,
+  partNameKey,
+  setContentTypeOverride,
+} from './contentTypes';
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -270,32 +276,22 @@ export async function mergePptxDecks(
   }
 
   // ---- [Content_Types].xml: carry over Overrides for renamed parts + any new Default extensions ----
-  const addContentTypes = await addP.zip.file('[Content_Types].xml')!.async('string');
-  const addOverrides = new Map<string, string>();
-  for (const match of addContentTypes.matchAll(/<Override\b[^>]*\/>/g)) {
-    const partName = xmlAttr(match[0], 'PartName');
-    const contentType = xmlAttr(match[0], 'ContentType');
-    if (partName && contentType) addOverrides.set(partName, contentType);
-  }
+  const addContentTypes = parseContentTypes(await addP.zip.file('[Content_Types].xml')!.async('string'));
   for (const [oldPath, newPath] of allRenames) {
-    const contentType = addOverrides.get(`/${oldPath}`);
-    if (contentType) {
-      contentTypes = contentTypes.replace('</Types>', `<Override PartName="/${newPath}" ContentType="${contentType}"/></Types>`);
-    }
+    const contentType = addContentTypes.overrides.get(partNameKey(oldPath));
+    if (contentType) contentTypes = setContentTypeOverride(contentTypes, newPath, contentType);
   }
   for (const newPath of slideRenameMap.values()) {
-    if (!newPath.endsWith('.rels') && !contentTypes.includes(`PartName="/${newPath}"`)) {
-      contentTypes = contentTypes.replace(
-        '</Types>',
-        `<Override PartName="/${newPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+    if (!newPath.endsWith('.rels')) {
+      contentTypes = setContentTypeOverride(
+        contentTypes,
+        newPath,
+        'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
       );
     }
   }
-  for (const m of addContentTypes.matchAll(/<Default Extension="([^"]+)" ContentType="([^"]+)"\/>/g)) {
-    const [, ext, ct] = m;
-    if (!contentTypes.includes(`Extension="${ext}"`)) {
-      contentTypes = contentTypes.replace('</Types>', `<Default Extension="${ext}" ContentType="${ct}"/></Types>`);
-    }
+  for (const [ext, ct] of addContentTypes.defaults) {
+    contentTypes = ensureDefaultExtension(contentTypes, ext, ct);
   }
 
   // ---- presentation.xml + rels: carry over addition's slide master(s), then its slides ----
@@ -335,6 +331,11 @@ export async function mergePptxDecks(
   baseP.zip.file('[Content_Types].xml', contentTypes);
   baseP.zip.file('ppt/presentation.xml', presentation);
   baseP.zip.file('ppt/_rels/presentation.xml.rels', presRels);
+
+  // Last word on content types: a part copied out of a deck whose own
+  // declarations could not be read still has to be declared for what the
+  // relationships pointing at it say it is.
+  await repairContentTypes(baseP.zip);
 
   return baseP.zip.generateAsync({ type: 'uint8array', compression });
 }

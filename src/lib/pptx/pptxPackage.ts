@@ -1,4 +1,11 @@
 import JSZip from 'jszip';
+import {
+  contentTypeOf,
+  parseContentTypes,
+  partNameKey,
+  removeContentTypeOverridesWhere,
+  setContentTypeOverride,
+} from './contentTypes';
 
 const DISCARD_PART_PREFIXES = [
   'ppt/notesSlides/',
@@ -62,11 +69,13 @@ export async function stripNonVisualParts(zip: JSZip): Promise<void> {
 
   const contentTypesFile = zip.file('[Content_Types].xml');
   if (contentTypesFile) {
-    let contentTypes = await contentTypesFile.async('string');
-    contentTypes = contentTypes.replace(/<Override\b[^>]*PartName="\/ppt\/(?:notesSlides|notesMasters|comments|threadedComments|tags|persons)\/[^\"]+"[^>]*\/>/g, '');
-    contentTypes = contentTypes.replace(/<Override\b[^>]*PartName="\/ppt\/(?:commentAuthors|threadedCommentAuthors|person)\.xml"[^>]*\/>/g, '');
-    contentTypes = contentTypes.replace(/<Override\b[^>]*PartName="\/ppt\/metadata"[^>]*\/>/g, '');
-    zip.file('[Content_Types].xml', contentTypes);
+    const contentTypes = await contentTypesFile.async('string');
+    zip.file(
+      '[Content_Types].xml',
+      removeContentTypeOverridesWhere(contentTypes, (partName) =>
+        isDiscardedPart(partName.replace(/^\/+/, '')),
+      ),
+    );
   }
 
   // presentation.xml keeps its own pointer to the notes master; with the
@@ -122,6 +131,67 @@ function resolveRelationshipTarget(relsPath: string, target: string): string {
   const owner = relationshipOwner(relsPath);
   const directory = owner?.includes('/') ? owner.slice(0, owner.lastIndexOf('/')) : '';
   return normalizePartPath(`${directory}/${clean}`);
+}
+
+/**
+ * Content type each part must carry, keyed by the relationship kind that
+ * points at it. PowerPoint reads a part through its relationship and then
+ * checks the type the package declares for it; a slide master typed as plain
+ * `application/xml` makes it report the deck as needing repair.
+ */
+export const CONTENT_TYPE_BY_RELATIONSHIP: Record<string, string> = {
+  slide: 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+  slideLayout: 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
+  slideMaster: 'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml',
+  theme: 'application/vnd.openxmlformats-officedocument.theme+xml',
+};
+
+interface RequiredContentType {
+  contentType: string;
+  /** The .rels part that demands it, so a failure names where to look. */
+  relsPath: string;
+}
+
+/** The content type every relationship in the package demands of its target. */
+async function requiredContentTypes(zip: JSZip): Promise<Map<string, RequiredContentType>> {
+  const required = new Map<string, RequiredContentType>();
+  const relPaths = Object.keys(zip.files).filter((path) => path.endsWith('.rels'));
+  for (const relsPath of relPaths) {
+    const xml = await zip.file(relsPath)!.async('string');
+    for (const match of xml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+      const tag = match[0];
+      if ((attr(tag, 'TargetMode') ?? '').toLowerCase() === 'external') continue;
+      const type = attr(tag, 'Type') ?? '';
+      const expected = CONTENT_TYPE_BY_RELATIONSHIP[type.slice(type.lastIndexOf('/') + 1)];
+      const target = attr(tag, 'Target');
+      if (!expected || !target || /^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+      required.set(resolveRelationshipTarget(relsPath, target), { contentType: expected, relsPath });
+    }
+  }
+  return required;
+}
+
+/**
+ * Declare the content type every relationship target needs.
+ *
+ * A merged deck carries parts from packages this app did not author, and a
+ * copied part's own declaration can go missing — most often because the source
+ * package wrote `[Content_Types].xml` in a shape a reader failed to recognise.
+ * The relationship pointing at the part says what it has to be, so derive the
+ * declaration from that rather than trusting the copy to have brought one.
+ */
+export async function repairContentTypes(zip: JSZip): Promise<void> {
+  const file = zip.file('[Content_Types].xml');
+  if (!file) return;
+  let xml = await file.async('string');
+  const declared = parseContentTypes(xml);
+  let changed = false;
+  for (const [path, { contentType }] of await requiredContentTypes(zip)) {
+    if (!zip.file(path) || contentTypeOf(declared, path) === contentType) continue;
+    xml = setContentTypeOverride(xml, path, contentType);
+    changed = true;
+  }
+  if (changed) zip.file('[Content_Types].xml', xml);
 }
 
 // Attributes in the officeDocument relationships namespace: their value must
@@ -265,55 +335,18 @@ export async function assertPptxIntegrity(data: ArrayBuffer | Uint8Array): Promi
     }
   }
 
-  const contentTypes = await zip.file('[Content_Types].xml')!.async('string');
-  const overrides = new Map<string, string>();
-  const defaults = new Map<string, string>();
-  for (const match of contentTypes.matchAll(/<Override\b[^>]*\/>/g)) {
-    const partName = attr(match[0], 'PartName');
-    const contentType = attr(match[0], 'ContentType');
-    if (partName && contentType) overrides.set(partName.replace(/^\//, ''), contentType);
-  }
-  for (const match of contentTypes.matchAll(/<Default\b[^>]*\/>/g)) {
-    const extension = attr(match[0], 'Extension');
-    const contentType = attr(match[0], 'ContentType');
-    if (extension && contentType) defaults.set(extension.toLowerCase(), contentType);
-  }
-
-  const effectiveContentType = (path: string): string | undefined => {
-    const override = overrides.get(path);
-    if (override) return override;
-    const extension = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : '';
-    return defaults.get(extension);
-  };
+  const declared = parseContentTypes(await zip.file('[Content_Types].xml')!.async('string'));
 
   for (const path of slideFiles) {
-    if (!contentTypes.includes(`PartName="/${path}"`)) {
+    if (!declared.overrides.has(partNameKey(path))) {
       errors.push(`[Content_Types].xml: missing override for ${path}`);
     }
   }
 
-  const expectedByRelationship: Record<string, string> = {
-    slide: 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
-    slideLayout: 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
-    slideMaster: 'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml',
-    theme: 'application/vnd.openxmlformats-officedocument.theme+xml',
-  };
-  const relPaths = Object.keys(zip.files).filter((path) => path.endsWith('.rels'));
-  for (const relsPath of relPaths) {
-    const xml = await zip.file(relsPath)!.async('string');
-    for (const match of xml.matchAll(/<Relationship\b[^>]*\/>/g)) {
-      const tag = match[0];
-      if ((attr(tag, 'TargetMode') ?? '').toLowerCase() === 'external') continue;
-      const type = attr(tag, 'Type') ?? '';
-      const kind = type.slice(type.lastIndexOf('/') + 1);
-      const expected = expectedByRelationship[kind];
-      const target = attr(tag, 'Target');
-      if (!expected || !target) continue;
-      const resolved = resolveRelationshipTarget(relsPath, target);
-      const actual = effectiveContentType(resolved);
-      if (actual !== expected) {
-        errors.push(`${relsPath}: ${resolved} has content type ${actual ?? '(missing)'}; expected ${expected}`);
-      }
+  for (const [path, { contentType, relsPath }] of await requiredContentTypes(zip)) {
+    const actual = contentTypeOf(declared, path);
+    if (actual !== contentType) {
+      errors.push(`${relsPath}: ${path} has content type ${actual ?? '(missing)'}; expected ${contentType}`);
     }
   }
 

@@ -17,6 +17,7 @@ const backSlides = readFileSync(join(publicDir, 'back-slides.pptx'));
 const serviceTemplate = readFileSync(join(publicDir, 'service-template.pptx'));
 const lyricsTemplate = readFileSync(join(publicDir, 'template.pptx'));
 const bibleTemplate = readFileSync(join(publicDir, 'bible-template.pptx'));
+const sermonUpload = readFileSync(join(__dirname, 'fixtures', 'placeholder-front-slide.pptx'));
 
 const song: Song = {
   id: 'integration-song',
@@ -65,6 +66,25 @@ function slideFiles(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path));
 }
 
+/**
+ * A sermon deck as it really arrives: authored elsewhere, so nothing about
+ * how it writes `[Content_Types].xml` matches what this app writes. Here
+ * every element carries a namespace prefix — legal XML, and a shape a
+ * hand-written `<Override PartName=…/>` match does not see.
+ */
+async function foreignSermonDeck(): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(sermonUpload);
+  const contentTypes = await zip.file('[Content_Types].xml')!.async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes
+      .replace(/<Types /, '<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types" ')
+      .replace(/<\/Types>/, '</ct:Types>')
+      .replace(/<(Override|Default) /g, '<ct:$1 '),
+  );
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
 describe('complete service deck', () => {
   // Chains 9 real PPTX merges (JSZip parse/renumber/repack each time); on a
   // loaded CI runner this comfortably exceeds vitest's 5000ms default.
@@ -79,6 +99,7 @@ describe('complete service deck', () => {
     // Simulates a separately authored sermon PPTX uploaded by the user. Its
     // master/layout ids start in the same range as the other source decks.
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [42]), 'STORE');
+    deck = await mergePptxDecks(deck, await foreignSermonDeck(), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [31]), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [32]), 'STORE');
     deck = await mergePptxDecks(
@@ -119,6 +140,7 @@ describe('complete service deck', () => {
     expect(allText).toContain('새 노래로 찬양해');
     expect(allText).toContain('하나님과 화평을 누리자');
     expect(allText).toContain('송별');
+    expect(allText).toContain('플레이스홀더 제목');
     expect(allText).toContain('테스트 광고');
     expect(allText).toContain('공동체 고백송');
 

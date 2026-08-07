@@ -8,6 +8,7 @@ import { buildBiblePptx } from '../../src/bible/pptxBuilder';
 import type { Song } from '../../src/lib/utils/types';
 import type { VerseSlidePlan } from '../../src/bible/versePlanner';
 import { assertPptxIntegrity, findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
+import { contentTypeOf, parseContentTypes } from '../../src/lib/pptx/contentTypes';
 
 const lyricsTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'template.pptx'));
 const bibleTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'bible-template.pptx'));
@@ -186,6 +187,49 @@ describe('mergePptxDecks', () => {
     expect(slideFiles(zip)).toHaveLength(7);
     expect(new Set(ids).size).toBe(ids.length);
     await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+  });
+
+  // An uploaded deck declares its own content types, and XML lets its
+  // producer write those declarations in shapes this app does not. Whatever
+  // the shape, the master/layouts/theme copied out of it have to keep their
+  // content types — declared as plain application/xml, PowerPoint reports
+  // the merged deck as needing repair.
+  describe('an addition deck whose content types are written unfamiliarly', () => {
+    const shapes: Record<string, (xml: string) => string> = {
+      'attributes in the other order': (xml) =>
+        xml.replace(
+          /<Override PartName="([^"]*)" ContentType="([^"]*)"\/>/g,
+          (_m, part, type) => `<Override ContentType="${type}" PartName="${part}"/>`,
+        ),
+      'single-quoted attributes': (xml) =>
+        xml.replace(/(PartName|ContentType|Extension)="([^"]*)"/g, (_m, name, value) => `${name}='${value}'`),
+      'element pairs instead of empty elements': (xml) =>
+        xml.replace(/<Override\b([^>]*)\/>/g, (_m, attrs) => `<Override${attrs}></Override>`),
+      'a namespace prefix on every element': (xml) =>
+        xml
+          .replace(/<Types /, '<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types" ')
+          .replace(/<\/Types>/, '</ct:Types>')
+          .replace(/<(Override|Default) /g, '<ct:$1 '),
+      'lower-cased part names': (xml) =>
+        xml.replace(/PartName="([^"]*)"/g, (_m, part: string) => `PartName="${part.toLowerCase()}"`),
+    };
+
+    for (const [shape, rewrite] of Object.entries(shapes)) {
+      it(`keeps every copied part's content type with ${shape}`, async () => {
+        const uploaded = await JSZip.loadAsync(bibleTemplate);
+        uploaded.file('[Content_Types].xml', rewrite(await uploaded.file('[Content_Types].xml')!.async('string')));
+        const merged = await mergePptxDecks(frontSlides, await uploaded.generateAsync({ type: 'uint8array' }));
+
+        const zip = await JSZip.loadAsync(merged);
+        const contentTypes = await zip.file('[Content_Types].xml')!.async('string');
+        const master = Object.keys(zip.files).find((path) => /^ppt\/slideMasters\/merged-.*\.xml$/.test(path));
+        expect(master).toBeTruthy();
+        expect(contentTypeOf(parseContentTypes(contentTypes), master!)).toBe(
+          'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml',
+        );
+        await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+      });
+    }
   });
 
   it('throws when the addition deck has no slides', async () => {
