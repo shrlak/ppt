@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
 import { dismissToast, subscribeToasts, type Toast } from '../lib/utils/toast';
+import Icon, { type IconName } from './Icon';
 
 type DisplayedToast = Toast & { leaving?: boolean };
+
+// Colour alone never carries the outcome — each kind also gets its own icon
+// alongside the wording.
+const KIND_ICON: Record<Toast['kind'], IconName> = {
+  notice: 'info',
+  warn: 'warning',
+  error: 'error',
+};
 
 /**
  * Renders whatever's pushed via showToast() as a stack in the bottom-left
@@ -39,9 +48,10 @@ export default function ToastHost() {
             if (t.leaving) setDisplayed((prev) => prev.filter((d) => d.id !== t.id));
           }}
         >
-          <span>{t.message}</span>
-          <button onClick={() => dismissToast(t.id)} aria-label="닫기">
-            ✕
+          <Icon name={KIND_ICON[t.kind]} />
+          <span className="toast-text">{t.message}</span>
+          <button type="button" onClick={() => dismissToast(t.id)} aria-label="닫기">
+            <Icon name="close" />
           </button>
         </div>
       ))}

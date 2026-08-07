@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { LibraryEntry } from '../lib/utils/types';
 import { normalizeTitle } from '../lib/storage/library';
+import Icon from './Icon';
 
 interface Props {
   library: LibraryEntry[];
@@ -56,21 +57,27 @@ export default function LibraryManager({ library, onDelete, onImport, onAdd }: P
   return (
     <div className="library-manager">
       <div className="library-search">
-        <span className="library-search-icon" aria-hidden>
-          🔎
+        <span className="library-search-icon">
+          <Icon name="search" />
         </span>
         <input
           className="library-search-input"
           data-testid="library-search"
           type="search"
+          aria-label="찬양 검색"
           placeholder="제목이나 가사로 찬양 검색…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
         />
         {query && (
-          <button className="library-search-clear" aria-label="검색어 지우기" onClick={() => setQuery('')}>
-            ✕
+          <button
+            type="button"
+            className="library-search-clear"
+            aria-label="검색어 지우기"
+            onClick={() => setQuery('')}
+          >
+            <Icon name="close" />
           </button>
         )}
       </div>
@@ -97,22 +104,26 @@ export default function LibraryManager({ library, onDelete, onImport, onAdd }: P
                 <td className="library-row-actions">
                   {onAdd && (
                     <button
+                      type="button"
                       className="btn btn-chip"
                       data-testid="library-add-btn"
                       title="이번 콘티 목록에 추가"
                       onClick={() => onAdd(e)}
                     >
-                      ＋ 추가
+                      <Icon name="plus" />
+                      추가
                     </button>
                   )}
                   <button
+                    type="button"
                     className="btn btn-icon btn-danger"
+                    aria-label={`'${e.title}' 저장본 삭제`}
                     title="내 저장본 삭제 (기본 곡은 초기 상태로 돌아갑니다)"
                     onClick={() => {
                       if (window.confirm(`'${e.title}' 저장본을 삭제할까요?`)) onDelete(e.title);
                     }}
                   >
-                    🗑
+                    <Icon name="trash" />
                   </button>
                 </td>
               </tr>
@@ -129,17 +140,20 @@ export default function LibraryManager({ library, onDelete, onImport, onAdd }: P
       </div>
 
       <div className="library-actions">
-        <button className="btn" onClick={exportJson}>
-          ⬇ JSON 내보내기
+        <button type="button" className="btn" onClick={exportJson}>
+          <Icon name="download" />
+          JSON 내보내기
         </button>
-        <button className="btn" onClick={() => fileRef.current?.click()}>
-          ⬆ JSON 가져오기
+        <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
+          <Icon name="upload" />
+          JSON 가져오기
         </button>
         <input
           ref={fileRef}
           type="file"
           accept="application/json,.json"
           className="visually-hidden-input"
+          tabIndex={-1}
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) void importJson(f);

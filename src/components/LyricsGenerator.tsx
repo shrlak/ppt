@@ -33,6 +33,7 @@ import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
+import Icon from './Icon';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
 
@@ -971,13 +972,14 @@ export default function LyricsGenerator({
 
   return (
     <div className="tool">
-      <p className="tool-intro">찬양 콘티 PDF를 업로드하면 가사 슬라이드를 자동으로 만들어 드립니다.</p>
-
       <section className="card">
-        <h2>
+        <h3>
           <span className="step">1</span> 콘티 업로드
-        </h2>
-        <div
+        </h3>
+        {/* A real button, so the dropzone is reachable with Tab and fires on
+            Enter/Space — dropping a file stays the shortcut, not the only way in. */}
+        <button
+          type="button"
           className={`dropzone${dragOver ? ' dragover' : ''}`}
           data-testid="upload-dropzone"
           onClick={() => fileInputRef.current?.click()}
@@ -999,6 +1001,7 @@ export default function LyricsGenerator({
             accept="application/pdf,.pdf"
             data-testid="pdf-input"
             className="visually-hidden-input"
+            tabIndex={-1}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void handleFile(file);
@@ -1006,20 +1009,23 @@ export default function LyricsGenerator({
             }}
           />
           {parsing ? (
-            <div className="parsing">
-              <div className="spinner" />
-              <p>콘티를 분석하는 중입니다…</p>
-            </div>
+            <span className="parsing">
+              <span className="spinner" aria-hidden="true" />
+              <span>콘티를 분석하는 중입니다…</span>
+            </span>
           ) : (
             <>
-              <p className="dropzone-title">📄 찬양 콘티 PDF를 여기에 끌어다 놓거나 클릭하세요</p>
-              <p className="dropzone-sub">
+              <span className="dropzone-title">
+                <Icon name="file" />
+                찬양 콘티 PDF를 여기에 끌어다 놓거나 클릭하세요
+              </span>
+              <span className="dropzone-sub">
                 악보 페이지에서만 찬양 가사를 읽고, 악보가 없는 페이지에서는 설교 제목·본문을
                 찾아 자동으로 채워 드립니다.
-              </p>
+              </span>
             </>
           )}
-        </div>
+        </button>
 
         {info && (
           <div className="conti-info" data-testid="conti-info">
@@ -1053,9 +1059,9 @@ export default function LyricsGenerator({
       </section>
 
       <section className="card">
-        <h2>
+        <h3>
           <span className="step">2</span> 찬양 편집
-        </h2>
+        </h3>
         {songs.length === 0 && (
           <p className="empty-hint">
             콘티를 업로드하거나, 아래 버튼으로 곡을 직접 추가하세요. V(절)·PC(프리코러스)·C(후렴)·
@@ -1089,8 +1095,14 @@ export default function LyricsGenerator({
           </div>
         ))}
         <div className="add-row">
-          <button className="btn" data-testid="add-song" onClick={() => setSongs((l) => [...l, blankSong()])}>
-            ＋ 빈 찬양 추가
+          <button
+            type="button"
+            className="btn"
+            data-testid="add-song"
+            onClick={() => setSongs((l) => [...l, blankSong()])}
+          >
+            <Icon name="plus" />
+            빈 찬양 추가
           </button>
           <LibraryAddSearch
             library={library}
@@ -1100,13 +1112,15 @@ export default function LyricsGenerator({
             }}
           />
           <button
+            type="button"
             className="btn btn-ghost"
             onClick={() => {
               setLibraryOpen(true);
               libraryPromiseRef.current = refreshLibrary();
             }}
           >
-            📚 라이브러리 관리
+            <Icon name="library" />
+            라이브러리 관리
           </button>
         </div>
       </section>

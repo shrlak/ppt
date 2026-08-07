@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { TRANSLATIONS } from '../bible/books';
 import { parseVerseInput, displayRef } from '../bible/refParser';
 import { showToast } from '../lib/utils/toast';
+import Icon from './Icon';
 
 const KO_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'ko');
 const EN_TRANSLATIONS = TRANSLATIONS.filter((t) => t.language === 'en');
@@ -83,16 +84,15 @@ export default function BibleSlideGenerator({
 
   return (
     <div className="tool">
-      <p className="tool-intro">성경 구절을 입력하면 말씀 슬라이드를 자동으로 만들어 드립니다.</p>
-
       <section className="card">
-        <h2>
+        <h3>
           <span className="step">1</span> 성경 구절
-        </h2>
+        </h3>
         <input
           className="verse-input"
           data-testid="bible-verse-input"
           type="text"
+          aria-label="성경 구절"
           placeholder="행1:8-10 요3:16 롬8:28"
           value={verseInput}
           onChange={(e) => setVerseInput(e.target.value)}
@@ -104,7 +104,11 @@ export default function BibleSlideGenerator({
               const ok = !invalidTokens.includes(t);
               return (
                 <div key={i} className={`verse-preview-item${ok ? '' : ' invalid'}`}>
-                  {displayRef(t)}
+                  <Icon name={ok ? 'check' : 'error'} />
+                  <span>
+                    {displayRef(t)}
+                    {ok ? '' : ' — 인식할 수 없는 구절입니다'}
+                  </span>
                 </div>
               );
             })}
@@ -113,21 +117,24 @@ export default function BibleSlideGenerator({
       </section>
 
       <section className="card">
-        <h2>
+        <h3>
           <span className="step">2</span> 설교 제목 &amp; 번역본
-        </h2>
+        </h3>
         <input
           className="verse-input"
           data-testid="bible-sermon-title-input"
           type="text"
+          aria-label="설교 제목"
           placeholder="설교 제목을 입력하세요 (선택)"
           value={sermonTitle}
           onChange={(e) => setSermonTitle(e.target.value)}
         />
 
         <div className="lang-group">
-          <span className="lang-label">한국어</span>
-          <div className="translations">
+          <span className="lang-label" id="ko-translation-label">
+            한국어
+          </span>
+          <div className="translations" role="radiogroup" aria-labelledby="ko-translation-label">
             {KO_TRANSLATIONS.map((t) => (
               <label key={t.id} className={`chip chip-radio${koTranslation === t.id ? ' active' : ''}`}>
                 <input
@@ -142,29 +149,32 @@ export default function BibleSlideGenerator({
           </div>
         </div>
         <div className="lang-group">
-          <span className="lang-label">English</span>
-          <div className="translations">
+          <span className="lang-label" id="en-translation-label">
+            English
+          </span>
+          <div className="translations" role="group" aria-labelledby="en-translation-label">
             {EN_TRANSLATIONS.map((t) => (
-              <label
+              // English is optional and can be switched back off, which a radio
+              // cannot express — and the old label/preventDefault pair could not
+              // be reached by keyboard at all. A real toggle carries both.
+              <button
                 key={t.id}
+                type="button"
                 className={`chip chip-radio${enTranslation === t.id ? ' active' : ''}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setEnTranslation((prev) => (prev === t.id ? null : t.id));
-                }}
+                aria-pressed={enTranslation === t.id}
+                onClick={() => setEnTranslation((prev) => (prev === t.id ? null : t.id))}
               >
-                <input type="radio" name="en-translation" checked={enTranslation === t.id} readOnly />
                 {t.name}
-              </label>
+              </button>
             ))}
           </div>
         </div>
       </section>
 
       <section className="card">
-        <h2>
+        <h3>
           <span className="step">3</span> 옵션
-        </h2>
+        </h3>
         <div className="option-row">
           <label htmlFor="bible-verses-per-slide">슬라이드당 절 수</label>
           <input
@@ -182,11 +192,12 @@ export default function BibleSlideGenerator({
           <span className="input-hint">
             {customTemplate ? `커스텀 템플릿: ${customTemplate.name}` : '기본 템플릿 사용 중'}
           </span>
-          <button className="btn" onClick={() => fileInputRef.current?.click()}>
+          <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
+            <Icon name="upload" />
             {customTemplate ? '템플릿 변경' : '내 템플릿 업로드'}
           </button>
           {customTemplate && (
-            <button className="btn btn-ghost" onClick={() => setCustomTemplate(null)}>
+            <button type="button" className="btn btn-ghost" onClick={() => setCustomTemplate(null)}>
               기본으로 복원
             </button>
           )}
@@ -196,6 +207,7 @@ export default function BibleSlideGenerator({
             accept=".pptx"
             data-testid="bible-template-input"
             className="visually-hidden-input"
+            tabIndex={-1}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void handleTemplateUpload(file);

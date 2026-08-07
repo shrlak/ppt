@@ -33,6 +33,7 @@ import {
   type AutoSaveStatus,
 } from './lib/storage/deckAutoSave';
 import { showToast } from './lib/utils/toast';
+import Icon from './components/Icon';
 
 // Debounce before the 편집기 view regenerates the whole deck + re-renders
 // thumbnails after an edit — regeneration re-zips several .pptx pieces, so
@@ -78,6 +79,7 @@ function WizardNavigation({ step, onMove }: WizardNavigationProps) {
           data-testid={`wizard-back-${currentId}`}
           onClick={() => onMove(step - 1)}
         >
+          <Icon name="back" />
           이전
         </button>
       ) : (
@@ -90,6 +92,7 @@ function WizardNavigation({ step, onMove }: WizardNavigationProps) {
           onClick={() => onMove(step + 1)}
         >
           다음: {nextStep.label}
+          <Icon name="next" />
         </button>
       )}
     </nav>
@@ -103,6 +106,7 @@ export default function App() {
   const [direction, setDirection] = useState<'forward' | 'back'>('forward');
   const [viewMode, setViewMode] = useState<'wizard' | 'editor'>('wizard');
   const [scrolled, setScrolled] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [contiDate, setContiDate] = useState<string | undefined>();
   const [bibleState, setBibleState] = useState<BibleGeneratorState>({
@@ -186,6 +190,38 @@ export default function App() {
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // The header is sticky, so anything scrolled to by an anchor or by
+  // scrollIntoView() has to clear it. Publish the bar's real painted height as
+  // --header-h (never a guessed token) and keep it current as the bar wraps,
+  // shrinks on scroll, or changes at a breakpoint. The taller, unscrolled
+  // height is what the offset uses, so the layout doesn't jump when the bar
+  // compacts.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    let tallest = 0;
+    const publish = () => {
+      const height = el.getBoundingClientRect().height;
+      if (height <= tallest) return;
+      tallest = height;
+      document.documentElement.style.setProperty('--header-h', `${Math.round(height)}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    // A breakpoint change can make the bar shorter, so the running maximum is
+    // reset and re-measured rather than kept forever.
+    const onResize = () => {
+      tallest = 0;
+      publish();
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', onResize);
+    };
   }, []);
 
   useEffect(() => {
@@ -676,7 +712,13 @@ export default function App() {
 
   return (
     <>
-      <header className={`header${scrolled ? ' header-scrolled' : ''}`}>
+      <a className="skip-link" href="#main-content">
+        본문으로 건너뛰기
+      </a>
+      <header
+        ref={headerRef}
+        className={`header${scrolled ? ' header-scrolled' : ''}${viewMode === 'editor' ? ' header-wide' : ''}`}
+      >
         <div className="header-inner">
           <div className="header-brand">
             <img
@@ -689,44 +731,46 @@ export default function App() {
               <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
             </div>
           </div>
-          <div className="header-actions">
+          {/* Narrow screens drop the labels and keep the icons; the label
+              stays in the DOM as the accessible name either way. */}
+          <nav className="header-actions" aria-label="도구">
             <button
               type="button"
               className="btn"
               data-testid="view-mode-toggle"
-              title={viewMode === 'wizard' ? '편집기 보기' : '단계별 보기'}
               onClick={() => setViewMode((mode) => (mode === 'wizard' ? 'editor' : 'wizard'))}
             >
-              {viewMode === 'wizard' ? '🖥 편집기 보기' : '📝 단계별 보기'}
+              <Icon name={viewMode === 'wizard' ? 'editor' : 'steps'} />
+              <span className="btn-label">{viewMode === 'wizard' ? '편집기 보기' : '단계별 보기'}</span>
             </button>
             <button
               type="button"
               className="btn library-open"
               data-testid="library-open"
-              title="PPT 라이브러리"
               onClick={() => setLibraryOpen(true)}
             >
-              📚 라이브러리
+              <Icon name="library" />
+              <span className="btn-label">라이브러리</span>
             </button>
             <button
               type="button"
               className="btn usage-open"
               data-testid="usage-open"
-              title="AI 사용량"
               onClick={() => setUsageOpen(true)}
             >
-              📊 사용량
+              <Icon name="usage" />
+              <span className="btn-label">사용량</span>
             </button>
             <button
               type="button"
               className="btn admin-open"
               data-testid="admin-open"
-              title="관리자 설정"
               onClick={() => setAdminOpen(true)}
             >
-              ⚙ 관리자
+              <Icon name="settings" />
+              <span className="btn-label">관리자</span>
             </button>
-          </div>
+          </nav>
         </div>
       </header>
 
@@ -753,7 +797,9 @@ export default function App() {
                   aria-current={index === activeStep ? 'step' : undefined}
                   onClick={() => moveToStep(index)}
                 >
-                  <span className="wizard-step-dot">{index < activeStep ? '✓' : index + 1}</span>
+                  <span className="wizard-step-dot">
+                    {index < activeStep ? <Icon name="check" /> : index + 1}
+                  </span>
                   <span className="wizard-step-label">{step.label}</span>
                 </button>
               </li>
@@ -779,7 +825,7 @@ export default function App() {
               autoSaveStatus={autoSaveStatus}
             />
           )}
-          <main data-direction={direction}>
+          <main id="main-content" data-direction={direction}>
             <section
               className={`wizard-panel${isPanelActive('lyrics') ? ' active' : ''}`}
               aria-hidden={!isPanelActive('lyrics')}
@@ -863,9 +909,12 @@ export default function App() {
               </div>
               <section className="card download-card">
                 {editingDeck && (
-                  <div className="banner" data-testid="editing-deck-banner">
-                    라이브러리의 &lsquo;{editingDeck.name}&rsquo;을(를) 편집하고 있습니다. 저장하면 같은
-                    항목이 갱신됩니다.{' '}
+                  <div className="banner banner-notice" data-testid="editing-deck-banner">
+                    <Icon name="info" />
+                    <span className="banner-text">
+                      라이브러리의 &lsquo;{editingDeck.name}&rsquo;을(를) 편집하고 있습니다. 저장하면
+                      같은 항목이 갱신됩니다.
+                    </span>
                     <button
                       type="button"
                       className="btn btn-ghost"
@@ -886,12 +935,17 @@ export default function App() {
                 )}
                 {allWarnings.length > 0 && (
                   <div className="banner banner-warn">
-                    일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-                    {allWarnings.map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`).join(' · ')}
+                    <Icon name="warning" />
+                    <span className="banner-text">
+                      일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
+                      {allWarnings
+                        .map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`)
+                        .join(' · ')}
+                    </span>
                   </div>
                 )}
                 <p className="deck-order">
-                  Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
+                  슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
                 </p>
                 <div className="generate-row">
                   <label htmlFor="filename-input">
@@ -914,22 +968,29 @@ export default function App() {
                     {sermonFile ? ' · 설교 첨부' : ''}
                     {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
                   </div>
-                  <button
-                    className="btn btn-primary btn-download"
-                    data-testid="generate-pptx"
-                    disabled={generating}
-                    onClick={() => void generate()}
-                  >
-                    {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
-                  </button>
-                  <button
-                    className="btn"
-                    data-testid="save-to-library"
-                    disabled={savingToLibrary}
-                    onClick={() => void saveCurrentToLibrary()}
-                  >
-                    {savingToLibrary ? '저장 중…' : '📚 라이브러리에 저장'}
-                  </button>
+                  {/* Both actions share the base control size — the primary is
+                      told apart by its variant, not by being bigger — and it
+                      sits last, the LTR position for the primary action. */}
+                  <div className="download-actions">
+                    <button
+                      className="btn"
+                      data-testid="save-to-library"
+                      disabled={savingToLibrary}
+                      onClick={() => void saveCurrentToLibrary()}
+                    >
+                      <Icon name="save" />
+                      {savingToLibrary ? '저장 중…' : '라이브러리에 저장'}
+                    </button>
+                    <button
+                      className="btn btn-primary btn-download"
+                      data-testid="generate-pptx"
+                      disabled={generating}
+                      onClick={() => void generate()}
+                    >
+                      <Icon name="download" />
+                      {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+                    </button>
+                  </div>
                 </div>
                 <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
               </section>
@@ -938,7 +999,7 @@ export default function App() {
           </main>
         </div>
 
-        <p className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</p>
+        <footer className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</footer>
         <ToastHost />
       </div>
     </>
