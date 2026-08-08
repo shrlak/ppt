@@ -7,6 +7,7 @@
 import JSZip from 'jszip';
 import { xmlEscape } from '../pptx/pptxBuilder';
 import { extractSlideSubset } from '../pptx/pptxSlices';
+import { removeContentTypeOverride, setContentTypeOverride } from '../pptx/contentTypes';
 
 export interface AnnouncementItem {
   /** Title text as written between < > in the source text, e.g. "새가족 환영". */
@@ -183,7 +184,7 @@ export async function buildAnnouncementDeck(
   const templateRels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
 
   let contentTypes = await zip.file('[Content_Types].xml')!.async('string');
-  contentTypes = contentTypes.replace(/<Override PartName="\/ppt\/slides\/slide1\.xml"[^>]*\/>/, '');
+  contentTypes = removeContentTypeOverride(contentTypes, 'ppt/slides/slide1.xml');
   zip.remove('ppt/slides/slide1.xml');
   zip.remove('ppt/slides/_rels/slide1.xml.rels');
 
@@ -191,9 +192,10 @@ export async function buildAnnouncementDeck(
     const n = i + 1;
     zip.file(`ppt/slides/slide${n}.xml`, buildAnnouncementSlideXml(templateXml, i, item));
     zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, templateRels);
-    contentTypes = contentTypes.replace(
-      '</Types>',
-      `<Override PartName="/ppt/slides/slide${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+    contentTypes = setContentTypeOverride(
+      contentTypes,
+      `ppt/slides/slide${n}.xml`,
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
     );
   });
 

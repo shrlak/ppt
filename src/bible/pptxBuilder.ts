@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import type { VerseSlideData } from './types';
 import type { VerseSlidePlan } from './versePlanner';
 import { stripNonVisualParts } from '../lib/pptx/pptxPackage';
+import { removeContentTypeOverride, setContentTypeOverride } from '../lib/pptx/contentTypes';
 // Reused as this module's escapeXml: besides the special characters it strips
 // XML-illegal control characters, which cleanText below can even resurrect
 // from numeric entities (&#11; → raw 0x0B) hiding in translation data.
@@ -148,9 +149,10 @@ export async function buildBiblePptx(
     const name = `slide${nextNum}.xml`;
     zip.file(`ppt/slides/${name}`, xml);
     if (rels) zip.file(`ppt/slides/_rels/${name}.rels`, rels);
-    contentTypes = contentTypes.replace(
-      '</Types>',
-      `<Override PartName="/ppt/slides/${name}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+    contentTypes = setContentTypeOverride(
+      contentTypes,
+      `ppt/slides/${name}`,
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
     );
     presRels = presRels.replace(
       '</Relationships>',
@@ -172,7 +174,7 @@ export async function buildBiblePptx(
     for (const path of [`ppt/slides/${name}`, `ppt/slides/_rels/${name}.rels`]) {
       if (zip.file(path)) zip.remove(path);
     }
-    contentTypes = contentTypes.replace(new RegExp(`<Override[^>]*/ppt/slides/${escaped}[^>]*/>`), '');
+    contentTypes = removeContentTypeOverride(contentTypes, `ppt/slides/${name}`);
   };
 
   for (const name of slideOrder) {

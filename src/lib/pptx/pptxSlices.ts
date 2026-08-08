@@ -5,10 +5,7 @@
 // they can be spliced into the combined deck via mergePptxDecks.
 import JSZip from 'jszip';
 import { stripNonVisualParts } from './pptxPackage';
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { removeContentTypeOverride, setContentTypeOverride } from './contentTypes';
 
 /** Resolve a deck's slide filenames in presentation display order. */
 async function slideOrderOf(zip: JSZip): Promise<string[]> {
@@ -61,19 +58,17 @@ export async function extractSlideSubset(
   for (const name of orderedNames) {
     zip.remove(`ppt/slides/${name}`);
     zip.remove(`ppt/slides/_rels/${name}.rels`);
-    contentTypes = contentTypes.replace(
-      new RegExp(`<Override PartName="/ppt/slides/${escapeRegExp(name)}"[^>]*/>`),
-      '',
-    );
+    contentTypes = removeContentTypeOverride(contentTypes, `ppt/slides/${name}`);
   }
 
   kept.forEach(({ xml, rels }, i) => {
     const n = i + 1;
     zip.file(`ppt/slides/slide${n}.xml`, xml);
     if (rels) zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, rels);
-    contentTypes = contentTypes.replace(
-      '</Types>',
-      `<Override PartName="/ppt/slides/slide${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+    contentTypes = setContentTypeOverride(
+      contentTypes,
+      `ppt/slides/slide${n}.xml`,
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
     );
   });
 

@@ -3,6 +3,7 @@
 import JSZip from 'jszip';
 import type { Song, SlidePlan } from '../utils/types';
 import { planAllSlides } from '../utils/slidePlanner';
+import { removeContentTypeOverridesWhere, setContentTypeOverride } from './contentTypes';
 
 const SLIDE_REL_TYPE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
@@ -230,18 +231,12 @@ export async function buildPptx(
   presRels = presRels.replace('</Relationships>', `${newRels}</Relationships>`);
 
   // [Content_Types].xml: drop old slide/notesSlide/metadata overrides, add ours.
-  contentTypes = contentTypes.replace(
-    /<Override PartName="\/ppt\/(slides|notesSlides)\/[^"]*"[^>]*\/>/g,
-    '',
+  contentTypes = removeContentTypeOverridesWhere(contentTypes, (partName) =>
+    /^\/ppt\/(?:slides|notesSlides)\/|^\/ppt\/metadata$/.test(partName),
   );
-  contentTypes = contentTypes.replace(/<Override PartName="\/ppt\/metadata"[^>]*\/>/g, '');
-  const newOverrides = plans
-    .map(
-      (_, idx) =>
-        `<Override PartName="/ppt/slides/slide${idx + 1}.xml" ContentType="${SLIDE_CONTENT_TYPE}"/>`,
-    )
-    .join('');
-  contentTypes = contentTypes.replace('</Types>', `${newOverrides}</Types>`);
+  plans.forEach((_, idx) => {
+    contentTypes = setContentTypeOverride(contentTypes, `ppt/slides/slide${idx + 1}.xml`, SLIDE_CONTENT_TYPE);
+  });
 
   zip.file('ppt/presentation.xml', presentation);
   zip.file('ppt/_rels/presentation.xml.rels', presRels);
