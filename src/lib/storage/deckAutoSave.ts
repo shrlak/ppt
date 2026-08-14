@@ -36,6 +36,8 @@ export interface AutoSaveInputs {
   announcementText: string;
   sermonFile: AutoSaveFile | null;
   contiFile: AutoSaveFile | null;
+  /** Ordered raw files appended after Back/End. Order changes the generated deck. */
+  additionalFiles: AutoSaveFile[];
   /** 관리자 설정 replacements for the bundled front/back decks. */
   frontDeck: AutoSaveFile | null;
   backDeck: AutoSaveFile | null;
@@ -83,6 +85,7 @@ export function deckFingerprint(inputs: AutoSaveInputs): string {
     announcementText: inputs.announcementText.trim(),
     sermon: fileKey(inputs.sermonFile),
     conti: fileKey(inputs.contiFile),
+    additional: inputs.additionalFiles.map((file) => fileKey(file)),
     front: fileKey(inputs.frontDeck),
     back: fileKey(inputs.backDeck),
   });

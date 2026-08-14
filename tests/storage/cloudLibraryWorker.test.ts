@@ -46,6 +46,7 @@ describe('shared PPT library validation', () => {
       contiPdf: null,
       sermonPptx: null,
       source: { name: 'deck-source.json', size: 40, chunkCount: 1 },
+      additionalFiles: { name: 'additional-files.zip', size: 80, chunkCount: 1 },
     };
     expect(
       sanitizePptDeckMetadata(
@@ -62,6 +63,19 @@ describe('shared PPT library validation', () => {
       ),
     ).toMatchObject({ id: 'deck-1', uploadId: 'upload-1', updatedAt: now.toISOString() });
     expect(samePptFiles(files, structuredClone(files))).toBe(true);
+    expect(
+      sanitizePptDeckMetadata(
+        {
+          id: 'deck-1',
+          uploadId: 'upload-1',
+          name: '0719.pptx',
+          files,
+          slideCount: 32,
+          savedAt: '2026-07-19T17:00:00.000Z',
+        },
+        now,
+      )?.files.additionalFiles,
+    ).toEqual({ name: 'additional-files.zip', size: 80, chunkCount: 1 });
   });
 
   it('keeps the wizard inputs snapshot alongside the deck files', () => {

@@ -11,7 +11,6 @@ const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcem
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
 const PLACEHOLDER_FRONT_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'placeholder-front-slide.pptx');
-
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
 const PARSE_TIMEOUT = 30_000;
@@ -47,11 +46,31 @@ async function masterAndLayoutIds(zip: JSZip): Promise<string[]> {
   return ids;
 }
 
+async function makeImageFixtures(page: Page): Promise<{ png: Buffer; jpeg: Buffer }> {
+  const fixtures = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#496554';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return {
+      png: canvas.toDataURL('image/png').split(',')[1],
+      jpeg: canvas.toDataURL('image/jpeg', 0.9).split(',')[1],
+    };
+  });
+  return {
+    png: Buffer.from(fixtures.png, 'base64'),
+    jpeg: Buffer.from(fixtures.jpeg, 'base64'),
+  };
+}
+
 async function moveFromLyricsToDownload(page: Page): Promise<void> {
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
   await page.getByTestId('wizard-next-announcement').click();
+  await page.getByTestId('wizard-next-additional').click();
   await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
 }
 
@@ -59,10 +78,11 @@ async function moveFromBibleToDownload(page: Page): Promise<void> {
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
   await page.getByTestId('wizard-next-announcement').click();
+  await page.getByTestId('wizard-next-additional').click();
   await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
 }
 
-test('moves through the five-step wizard with next and back buttons', async ({ page }) => {
+test('moves through the six-step wizard with next and back buttons', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
@@ -78,7 +98,56 @@ test('moves through the five-step wizard with next and back buttons', async ({ p
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 });
 
-test('editor view shows slides on the left and the 찬양/성경 말씀/설교/광고 editors together on the right', async ({ page }) => {
+test('adds, reorders, and removes files on the new 추가 자료 page', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('wizard-tab-additional').click();
+  await expect(page.getByTestId('additional-files-section')).toBeVisible();
+
+  const fixtureImages = await makeImageFixtures(page);
+
+  await page.getByTestId('additional-files-input').setInputFiles([
+    { name: 'first.png', mimeType: 'image/png', buffer: fixtureImages.png },
+    { name: 'second.jpg', mimeType: 'image/jpeg', buffer: fixtureImages.jpeg },
+  ]);
+  const rows = page.getByTestId('additional-file-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('first.png');
+  await expect(rows.nth(1)).toContainText('second.jpg');
+
+  await rows.nth(1).getByTestId('additional-file-up').click();
+  await expect(rows.nth(0)).toContainText('second.jpg');
+  await rows.nth(0).getByTestId('additional-file-delete').click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText('first.png');
+});
+
+test('appends image and PPTX uploads after the final Back/End slide in chosen order', async ({
+  page,
+}, testInfo) => {
+  await page.goto('./');
+  await page.getByTestId('wizard-tab-additional').click();
+  const fixtureImages = await makeImageFixtures(page);
+  await page.getByTestId('additional-files-input').setInputFiles([
+    { name: 'post-end.png', mimeType: 'image/png', buffer: fixtureImages.png },
+    {
+      name: 'post-end.pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      buffer: await fs.readFile(LYRICS_TEMPLATE_PPTX),
+    },
+  ]);
+  await expect(page.getByTestId('additional-file-row')).toHaveCount(2);
+  await page.getByTestId('wizard-next-additional').click();
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const zip = await loadPptx(await downloadPromise, testInfo.outputPath('post-end-order.pptx'));
+
+  expect(slideFileNames(zip)).toHaveLength(34);
+  expect(await zip.file('ppt/slides/slide28.xml')!.async('string')).toContain('<p:pic>');
+  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('주님의 사랑');
+});
+
+test('editor view shows slides and all five content editors together', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);
 
@@ -110,6 +179,8 @@ test('editor view shows slides on the left and the 찬양/성경 말씀/설교/�
   await expect(page.getByTestId('sermon-upload-section')).toBeVisible();
   await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/새가족 환영/);
+  await expect(page.getByTestId('wizard-panel-additional')).toBeVisible();
+  await expect(page.getByTestId('additional-files-section')).toBeVisible();
 
   // Uploaded/typed content survives the switch (no remount, no data loss).
   await expect(page.getByTestId('conti-info')).toBeVisible();
@@ -167,6 +238,43 @@ test('editor view shows slides on the left and the 찬양/성경 말씀/설교/�
   await page.getByTestId('view-mode-toggle').click();
   await expect(page.getByTestId('slide-overview')).toHaveCount(0);
   await expect(page.getByTestId('wizard-tab-lyrics')).toBeVisible();
+});
+
+test('editor view keeps balanced gutters and stacks before the editing column gets cramped', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('./');
+  await page.getByTestId('view-mode-toggle').click();
+
+  const wide = await page.evaluate(() => {
+    const app = document.querySelector<HTMLElement>('.app')!.getBoundingClientRect();
+    const header = document.querySelector<HTMLElement>('.header-inner')!.getBoundingClientRect();
+    const overview = document.querySelector<HTMLElement>('.slide-overview')!.getBoundingClientRect();
+    const main = document.querySelector<HTMLElement>('#main-content')!.getBoundingClientRect();
+    return {
+      appLeft: app.left,
+      appRight: app.right,
+      headerLeft: header.left,
+      headerRight: header.right,
+      overviewWidth: overview.width,
+      mainWidth: main.width,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(Math.abs(wide.appLeft - wide.headerLeft)).toBeLessThan(1);
+  expect(Math.abs(wide.appRight - wide.headerRight)).toBeLessThan(1);
+  expect(wide.overviewWidth).toBe(312);
+  expect(wide.mainWidth).toBeGreaterThanOrEqual(900);
+  expect(wide.overflow).toBe(0);
+
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const compact = await page.evaluate(() => {
+    const overview = document.querySelector<HTMLElement>('.slide-overview')!.getBoundingClientRect();
+    const main = document.querySelector<HTMLElement>('#main-content')!.getBoundingClientRect();
+    return { overviewLeft: overview.left, mainLeft: main.left, overviewBottom: overview.bottom, mainTop: main.top, mainWidth: main.width };
+  });
+  expect(Math.abs(compact.overviewLeft - compact.mainLeft)).toBeLessThan(1);
+  expect(compact.mainTop).toBeGreaterThanOrEqual(compact.overviewBottom);
+  expect(compact.mainWidth).toBeGreaterThan(900);
 });
 
 test('jumps directly between steps via the progress tabs', async ({ page }) => {
@@ -375,7 +483,7 @@ test('every edit auto-saves into the library, always updating the same entry', a
   await expect(page.getByTestId('library-entry')).toHaveCount(1);
 });
 
-test('library 편집 reopens a saved deck in the five-step wizard and re-saves over the same entry', async ({ page }) => {
+test('library 편집 reopens a saved deck in the six-step wizard and re-saves over the same entry', async ({ page }) => {
   await page.goto('./');
   await uploadExamplePdf(page);
   const savedSongTitle = await page
@@ -390,6 +498,14 @@ test('library 편집 reopens a saved deck in the five-step wizard and re-saves o
   await page.getByTestId('wizard-next-sermon').click();
   await page.getByTestId('announcement-input').fill('1. <저장 전 광고>\n첫 번째 내용입니다.');
   await page.getByTestId('wizard-next-announcement').click();
+  const fixtureImages = await makeImageFixtures(page);
+  await page.getByTestId('additional-files-input').setInputFiles({
+    name: '복원할-추가자료.png',
+    mimeType: 'image/png',
+    buffer: fixtureImages.png,
+  });
+  await expect(page.getByTestId('additional-file-row')).toHaveCount(1);
+  await page.getByTestId('wizard-next-additional').click();
 
   await page.getByTestId('save-to-library').click();
   // Building the deck loads translation data and re-zips every piece.
@@ -418,6 +534,8 @@ test('library 편집 reopens a saved deck in the five-step wizard and re-saves o
   await expect(page.getByTestId('bible-verse-input')).toHaveValue('요3:16');
   await page.getByTestId('wizard-tab-announcement').click();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/저장 전 광고/);
+  await page.getByTestId('wizard-tab-additional').click();
+  await expect(page.getByTestId('additional-file-row')).toContainText('복원할-추가자료.png');
 
   await page.getByTestId('wizard-tab-download').click();
   await expect(page.getByTestId('editing-deck-banner')).toContainText(savedName);
@@ -686,6 +804,7 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
   await expect(page.getByTestId('announcement-preview')).toContainText('새가족 환영');
 
   await page.getByTestId('wizard-next-announcement').click();
+  await page.getByTestId('wizard-next-additional').click();
   await expect(page.getByTestId('slide-count')).toContainText('말씀 1구절');
   await expect(page.getByTestId('slide-count')).toContainText('광고 5건');
 
@@ -724,6 +843,7 @@ test('keeps PowerPoint ids valid with a parsed conti and an uploaded sermon deck
   await expect(page.getByText('업로드됨: bible-template.pptx')).toBeVisible();
   await page.getByTestId('wizard-next-sermon').click();
   await page.getByTestId('wizard-next-announcement').click();
+  await page.getByTestId('wizard-next-additional').click();
 
   const dlPromise = page.waitForEvent('download');
   await page.getByTestId('generate-pptx').click();

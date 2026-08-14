@@ -16,6 +16,7 @@ export interface PptFiles {
   contiPdf: PptFileDescriptor | null;
   sermonPptx: PptFileDescriptor | null;
   source: PptFileDescriptor | null;
+  additionalFiles: PptFileDescriptor | null;
 }
 
 export interface PptDeckMetadata {
@@ -32,7 +33,7 @@ export interface PptDeckMetadata {
 export const PPT_CHUNK_BYTES: number;
 export const MAX_PPT_LIBRARY_BYTES: number;
 export const MAX_PPT_LIBRARY_DECKS: number;
-export const PPT_FILE_KINDS: readonly ['pptx', 'contiPdf', 'sermonPptx', 'source'];
+export const PPT_FILE_KINDS: readonly ['pptx', 'contiPdf', 'sermonPptx', 'source', 'additionalFiles'];
 
 export function normalizeLibraryTitle(value: unknown): string;
 export function sanitizeLyricsEntry(raw: unknown): LyricsLibraryEntry | null;

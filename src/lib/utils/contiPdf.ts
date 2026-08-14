@@ -9,6 +9,15 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const BASE: string = (import.meta.env && import.meta.env.BASE_URL) || '/';
 
+export function loadPdfTask(data: ArrayBuffer): pdfjs.PDFDocumentLoadingTask {
+  return pdfjs.getDocument({
+    data: new Uint8Array(data.slice(0)),
+    cMapUrl: BASE + 'cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: BASE + 'standard_fonts/',
+  });
+}
+
 export interface ContiDocument {
   parsed: ParsedConti;
   /**
@@ -65,12 +74,7 @@ async function extractPageText(page: pdfjs.PDFPageProxy): Promise<string> {
 
 export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   // pdf.js transfers the buffer to its worker, so hand it a private copy.
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(data.slice(0)),
-    cMapUrl: BASE + 'cmaps/',
-    cMapPacked: true,
-    standardFontDataUrl: BASE + 'standard_fonts/',
-  });
+  const loadingTask = loadPdfTask(data);
   const doc = await loadingTask.promise;
 
   const pageTexts: string[] = [];

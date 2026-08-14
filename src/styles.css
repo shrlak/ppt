@@ -140,6 +140,7 @@
   --header-h: 96px;
   --content-max: 880px;
   --content-max-wide: 1400px;
+  --page-gutter: clamp(var(--s-4), 2vw, var(--s-6));
 
   /* Fixed regardless of theme: represents the actual (always-white) PPTX
      slide canvas in mini previews, not the surrounding app UI. */
@@ -325,7 +326,7 @@ a.btn {
 .app {
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: 0 var(--s-6) var(--s-16);
+  padding: 0 var(--page-gutter) var(--s-16);
 }
 .app.app-editor-mode {
   max-width: var(--content-max-wide);
@@ -335,6 +336,9 @@ a.btn {
   grid-template-columns: 312px 1fr;
   gap: var(--s-8);
   align-items: start;
+}
+.app-editor-mode main {
+  min-width: 0;
 }
 .app-editor-mode .wizard-nav {
   display: none;
@@ -547,7 +551,7 @@ a.btn {
     animation: none;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1160px) {
   .app-editor-mode .app-body {
     grid-template-columns: 1fr;
   }
@@ -597,7 +601,7 @@ a.btn {
   gap: var(--s-3) var(--s-4);
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--s-5) var(--s-6) var(--s-4);
+  padding: var(--s-5) var(--page-gutter) var(--s-4);
   transition: padding 0.3s var(--ease);
 }
 /* 편집기 view widens the content column; the bar follows it so the brand and
@@ -674,7 +678,7 @@ a.btn {
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   list-style: none;
   margin: var(--s-6) 0 0;
   padding: 0;
@@ -691,7 +695,7 @@ a.btn {
   top: var(--s-1);
   bottom: var(--s-1);
   left: var(--s-1);
-  width: calc((100% - var(--s-2)) / 5);
+  width: calc((100% - var(--s-2)) / 6);
   /* Nested radius: 16px outer − 4px gap = 12px. */
   border-radius: var(--radius-md);
   background: var(--accent-soft);
@@ -1273,6 +1277,93 @@ main[data-direction='back'] .wizard-panel.active {
   opacity: 0;
   overflow: hidden;
   clip-path: inset(50%);
+}
+
+/* The ordered tail of the service deck. The END + N marker makes the final
+   presentation position explicit instead of presenting a generic file list. */
+.additional-file-list {
+  list-style: none;
+  margin: var(--s-5) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.additional-file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: var(--s-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+}
+.additional-file-position {
+  flex: none;
+  min-width: 72px;
+  color: var(--accent-dark);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.additional-file-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--ink-muted);
+}
+.additional-file-info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.additional-file-info strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.additional-file-info > span {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.additional-file-controls {
+  display: flex;
+  flex: none;
+  gap: var(--s-1);
+}
+.additional-files-status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-4) 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.additional-files-status .spinner {
+  width: var(--s-5);
+  height: var(--s-5);
+  border-width: 2px;
+}
+.additional-files-error {
+  margin-top: var(--s-4);
+}
+@media (max-width: 600px) {
+  .additional-file-row {
+    flex-wrap: wrap;
+  }
+  .additional-file-info {
+    flex-basis: calc(100% - 120px);
+  }
+  .additional-file-controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .parsing {
@@ -2813,10 +2904,10 @@ main[data-direction='back'] .wizard-panel.active {
 
 @media (max-width: 760px) {
   .app {
-    padding: 0 var(--s-4) var(--s-10);
+    padding: 0 var(--page-gutter) var(--s-10);
   }
   .header-inner {
-    padding: var(--s-4);
+    padding: var(--s-4) var(--page-gutter);
     gap: var(--s-3);
   }
   .header-brand {
@@ -2854,7 +2945,7 @@ main[data-direction='back'] .wizard-panel.active {
     white-space: nowrap;
   }
   .wizard-progress {
-    grid-template-columns: repeat(5, minmax(44px, 1fr));
+    grid-template-columns: repeat(6, minmax(44px, 1fr));
   }
   .wizard-step-button {
     padding: var(--s-2) var(--s-1);

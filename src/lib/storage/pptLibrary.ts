@@ -30,10 +30,12 @@ export interface SavedDeck {
   sermonPptx: SavedFile | null;
   /**
    * The wizard inputs this deck was generated from (see deckSource.ts), so
-   * 편집 can reopen it in the five-step editor. Null for entries saved before
+   * 편집 can reopen it in the six-step editor. Null for entries saved before
    * snapshots existed — those restore only from the files above.
    */
   source: SavedFile | null;
+  /** Ordered raw uploads appended after Back/End, packed as additional-files.zip. */
+  additionalFiles?: SavedFile | null;
   slideCount: number;
   songTitles: string[];
   savedAt: string;
@@ -64,6 +66,7 @@ export interface SavedDeckSummary {
   contiPdf: SavedFileSummary | null;
   sermonPptx: SavedFileSummary | null;
   source: SavedFileSummary | null;
+  additionalFiles: SavedFileSummary | null;
   slideCount: number;
   songTitles: string[];
   savedAt: string;
@@ -86,6 +89,7 @@ interface RemoteDeckMetadata {
     contiPdf: SavedFileSummary | null;
     sermonPptx: SavedFileSummary | null;
     source: SavedFileSummary | null;
+    additionalFiles?: SavedFileSummary | null;
   };
   slideCount: number;
   songTitles: string[];
@@ -133,6 +137,8 @@ function normalizeLocalDeck(deck: SavedDeck): SavedDeck {
     ...deck,
     // Records written before inputs snapshots existed have no `source` key.
     source: deck.source ?? null,
+    // Records written before post-End uploads existed have no archive key.
+    additionalFiles: deck.additionalFiles ?? null,
     updatedAt: deck.updatedAt || deck.savedAt,
   };
 }
@@ -181,6 +187,7 @@ function filesForDeck(deck: SavedDeck): RemoteDeckMetadata['files'] {
     contiPdf: deck.contiPdf ? descriptor(deck.contiPdf) : null,
     sermonPptx: deck.sermonPptx ? descriptor(deck.sermonPptx) : null,
     source: deck.source ? descriptor(deck.source) : null,
+    additionalFiles: deck.additionalFiles ? descriptor(deck.additionalFiles) : null,
   };
 }
 
@@ -193,6 +200,7 @@ function summaryFromRemote(deck: RemoteDeckMetadata, syncPending = false): Saved
     sermonPptx: deck.files.sermonPptx,
     // A deck uploaded by an older build has no snapshot descriptor at all.
     source: deck.files.source ?? null,
+    additionalFiles: deck.files.additionalFiles ?? null,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
     savedAt: deck.savedAt,
@@ -210,6 +218,7 @@ export function summarizeSavedDeck(deck: SavedDeck): SavedDeckSummary {
     contiPdf: files.contiPdf,
     sermonPptx: files.sermonPptx,
     source: files.source,
+    additionalFiles: files.additionalFiles ?? null,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
     savedAt: deck.savedAt,
@@ -219,7 +228,7 @@ export function summarizeSavedDeck(deck: SavedDeck): SavedDeckSummary {
 }
 
 function fileForKind(deck: SavedDeck, kind: SavedFileKind): SavedFile | null {
-  return deck[kind];
+  return deck[kind] ?? null;
 }
 
 async function inBatches<T>(items: T[], run: (item: T) => Promise<void>): Promise<void> {
@@ -318,11 +327,12 @@ async function downloadRemoteFile(deck: RemoteDeckMetadata, kind: SavedFileKind)
 }
 
 async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDeck> {
-  const [pptx, contiPdf, sermonPptx, source] = await Promise.all([
+  const [pptx, contiPdf, sermonPptx, source, additionalFiles] = await Promise.all([
     downloadRemoteFile(metadata, 'pptx'),
     downloadRemoteFile(metadata, 'contiPdf'),
     downloadRemoteFile(metadata, 'sermonPptx'),
     downloadRemoteFile(metadata, 'source'),
+    downloadRemoteFile(metadata, 'additionalFiles'),
   ]);
   if (!pptx) throw new Error('공유 라이브러리에서 PPTX 파일을 찾지 못했습니다.');
   const deck: SavedDeck = {
@@ -332,6 +342,7 @@ async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDe
     contiPdf,
     sermonPptx,
     source,
+    additionalFiles,
     slideCount: metadata.slideCount,
     songTitles: metadata.songTitles,
     savedAt: metadata.savedAt,

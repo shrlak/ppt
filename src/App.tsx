@@ -34,6 +34,10 @@ import {
 } from './lib/storage/deckAutoSave';
 import { showToast } from './lib/utils/toast';
 import Icon from './components/Icon';
+import AdditionalFilesSection from './components/AdditionalFilesSection';
+import type { AdditionalFile } from './lib/additionalFiles/types';
+import { convertAdditionalFile } from './lib/additionalFiles/convert';
+import { decodeAdditionalFiles, encodeAdditionalFiles } from './lib/storage/additionalFilesArchive';
 
 // Debounce before the 편집기 view regenerates the whole deck + re-renders
 // thumbnails after an edit — regeneration re-zips several .pptx pieces, so
@@ -59,6 +63,7 @@ const WIZARD_STEPS = [
   { id: 'bible', label: '성경 말씀' },
   { id: 'sermon', label: '설교' },
   { id: 'announcement', label: '광고' },
+  { id: 'additional', label: '추가 자료' },
   { id: 'download', label: '다운로드' },
 ] as const;
 
@@ -119,6 +124,7 @@ export default function App() {
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
+  const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
   const [generating, setGenerating] = useState(false);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -250,7 +256,11 @@ export default function App() {
   const isPanelActive = useCallback(
     (stepId: (typeof WIZARD_STEPS)[number]['id']) =>
       viewMode === 'editor'
-        ? stepId === 'lyrics' || stepId === 'bible' || stepId === 'sermon' || stepId === 'announcement'
+        ? stepId === 'lyrics' ||
+          stepId === 'bible' ||
+          stepId === 'sermon' ||
+          stepId === 'announcement' ||
+          stepId === 'additional'
         : WIZARD_STEPS[activeStep].id === stepId,
     [viewMode, activeStep],
   );
@@ -270,9 +280,18 @@ export default function App() {
   function scrollToSermon() {
     document.querySelector('[data-testid="sermon-upload-section"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+  function scrollToAdditional() {
+    document.querySelector('[data-testid="additional-files-section"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const lyricsSlideCount = planAllSlides(songs).length;
-  const hasAnyContent = songs.length > 0 || bibleRefs.length > 0 || sermonFile !== null || announcementItems.length > 0;
+  const additionalSlideCount = additionalFiles.reduce((sum, file) => sum + file.slideCount, 0);
+  const hasAnyContent =
+    songs.length > 0 ||
+    bibleRefs.length > 0 ||
+    sermonFile !== null ||
+    announcementItems.length > 0 ||
+    additionalFiles.length > 0;
 
   // Recomputed every render, but cheap next to rebuilding the deck: it is what
   // tells auto-save whether this render actually changed the generated file.
@@ -290,6 +309,7 @@ export default function App() {
     announcementText,
     sermonFile,
     contiFile,
+    additionalFiles,
     frontDeck: customDecks.front,
     backDeck: customDecks.back,
   });
@@ -398,9 +418,34 @@ export default function App() {
     }
 
     // The full closing deck is mandatory and always follows announcements.
-    merged = await mergePptxDecks(merged, backSlides);
+    // When post-End material follows it, only the final merge is compressed.
+    merged = await mergePptxDecks(merged, backSlides, additionalFiles.length > 0 ? 'STORE' : 'DEFLATE');
     const backCount = (await inspectDeckBytes(backSlides)).slideCount;
     overview.push(...expandDeckSegment({ kind: 'back', count: backCount, labelAt: (i, count) => `Back ${i + 1}/${count}` }));
+
+    let imageTemplate: ArrayBuffer | null = null;
+    if (additionalFiles.some((file) => file.kind !== 'pptx')) {
+      imageTemplate = await fetch(`${BASE}template.pptx`).then((response) => {
+        if (!response.ok) throw new Error('추가 자료용 템플릿 파일을 불러오지 못했습니다.');
+        return response.arrayBuffer();
+      });
+    }
+    for (const [fileIndex, file] of additionalFiles.entries()) {
+      const converted = await convertAdditionalFile(file, imageTemplate ?? new Uint8Array());
+      merged = await mergePptxDecks(
+        merged,
+        converted.deck,
+        fileIndex === additionalFiles.length - 1 ? 'DEFLATE' : 'STORE',
+      );
+      overview.push(
+        ...Array.from({ length: converted.slideCount }, (_, slideIndex) => ({
+          id: `additional-${file.id}-${slideIndex}`,
+          kind: 'additional' as const,
+          label: file.name,
+          subtitle: `${slideIndex + 1}/${converted.slideCount}`,
+        })),
+      );
+    }
 
     await assertPptxIntegrity(merged);
     return { merged, overview };
@@ -422,7 +467,7 @@ export default function App() {
 
   async function generate() {
     if (!hasAnyContent) {
-      showToast('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.', 'error');
+      showToast('찬양, 성경 말씀, 설교, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
     setGenerating(true);
@@ -465,6 +510,7 @@ export default function App() {
           },
           announcementText,
         }),
+        additionalFiles: await encodeAdditionalFiles(additionalFiles),
         slideCount,
         songTitles: songs.map((s) => s.title.trim()).filter(Boolean),
       },
@@ -474,7 +520,7 @@ export default function App() {
 
   async function saveCurrentToLibrary() {
     if (!hasAnyContent) {
-      showToast('찬양, 성경 말씀, 설교, 광고 중 최소 하나 이상 입력해 주세요.', 'error');
+      showToast('찬양, 성경 말씀, 설교, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
     if (savingRef.current) return;
@@ -595,7 +641,7 @@ export default function App() {
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, songs, bibleState, sermonFile, announcementText, customDecks, hasAnyContent]);
+  }, [viewMode, songs, bibleState, sermonFile, announcementText, additionalFiles, customDecks, hasAnyContent]);
 
   // Release any still-live thumbnail object URLs when the app itself unmounts.
   useEffect(() => () => revokeRenderedSlides(editorSlidesRef.current), []);
@@ -658,7 +704,7 @@ export default function App() {
   // Bible slide count isn't known until generation (it depends on how many
   // verses each reference expands to, which needs the full translation
   // data loaded) — shown as a "+" lower bound instead of a false-precise number.
-  const totalSlideCount = fixedSlideCount + lyricsSlideCount + announcementItems.length;
+  const totalSlideCount = fixedSlideCount + lyricsSlideCount + announcementItems.length + additionalSlideCount;
 
   function moveToStep(step: number) {
     setDirection(step >= activeStep ? 'forward' : 'back');
@@ -667,14 +713,25 @@ export default function App() {
   }
 
   /**
-   * 라이브러리 → 편집: reopen a saved deck in the five wizard steps with the
+   * 라이브러리 → 편집: reopen a saved deck in the six wizard steps with the
    * inputs it was generated from, so it is edited the same way it was built
    * and re-saved over the same entry. Entries saved before inputs snapshots
    * existed still restore their archived 콘티 PDF and 설교 PPT — the 콘티 is
    * re-parsed by the 찬양 step exactly as a fresh upload would be.
    */
-  function openSavedDeck(deck: SavedDeck) {
+  async function openSavedDeck(deck: SavedDeck) {
     const source = decodeDeckSource(deck.source);
+    let restoreWarning: string | null = null;
+    if (deck.additionalFiles) {
+      try {
+        setAdditionalFiles(await decodeAdditionalFiles(deck.additionalFiles));
+      } catch (error) {
+        setAdditionalFiles([]);
+        restoreWarning = error instanceof Error ? error.message : String(error);
+      }
+    } else {
+      setAdditionalFiles([]);
+    }
     setLibraryOpen(false);
     setViewMode('wizard');
     setDirection('back');
@@ -703,10 +760,12 @@ export default function App() {
     }));
 
     showToast(
-      source
+      restoreWarning
+        ? `'${deck.name}'을(를) 불러왔지만 추가 자료는 복원하지 못했습니다: ${restoreWarning}`
+        : source
         ? `'${deck.name}'을(를) 불러왔습니다. 내용을 수정하면 같은 항목이 자동으로 갱신됩니다.`
         : `'${deck.name}'은(는) 입력 내용이 함께 저장되기 전에 만들어져 콘티 PDF와 설교 PPT만 복원했습니다. 광고와 가사 수정은 다시 입력해 주세요.`,
-      source ? 'notice' : 'warn',
+      restoreWarning || !source ? 'warn' : 'notice',
     );
   }
 
@@ -818,6 +877,7 @@ export default function App() {
               onSelectBible={scrollToBible}
               onSelectSermon={scrollToSermon}
               onSelectAnnouncement={scrollToAnnouncement}
+              onSelectAdditional={scrollToAdditional}
               onDownload={() => void generate()}
               onSaveToLibrary={() => void saveCurrentToLibrary()}
               downloading={generating}
@@ -832,7 +892,7 @@ export default function App() {
               data-testid="wizard-panel-lyrics"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">1 / 5</p>
+                <p className="wizard-kicker">1 / 6</p>
                 <h2>찬양</h2>
                 <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
               </div>
@@ -854,7 +914,7 @@ export default function App() {
               data-testid="wizard-panel-bible"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">2 / 5</p>
+                <p className="wizard-kicker">2 / 6</p>
                 <h2>성경 말씀</h2>
                 <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
               </div>
@@ -875,7 +935,7 @@ export default function App() {
               data-testid="wizard-panel-sermon"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">3 / 5</p>
+                <p className="wizard-kicker">3 / 6</p>
                 <h2>설교</h2>
                 <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
               </div>
@@ -889,7 +949,7 @@ export default function App() {
               data-testid="wizard-panel-announcement"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">4 / 5</p>
+                <p className="wizard-kicker">4 / 6</p>
                 <h2>광고</h2>
                 <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
               </div>
@@ -898,12 +958,26 @@ export default function App() {
             </section>
 
             <section
+              className={`wizard-panel${isPanelActive('additional') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('additional')}
+              data-testid="wizard-panel-additional"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">5 / 6</p>
+                <h2>추가 자료</h2>
+                <p>예배 End 슬라이드 뒤에 이어서 보여줄 파일과 순서를 정하세요.</p>
+              </div>
+              <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
+              {viewMode === 'wizard' && <WizardNavigation step={4} onMove={moveToStep} />}
+            </section>
+
+            <section
               className={`wizard-panel${isPanelActive('download') ? ' active' : ''}`}
               aria-hidden={!isPanelActive('download')}
               data-testid="wizard-panel-download"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">5 / 5</p>
+                <p className="wizard-kicker">6 / 6</p>
                 <h2>확인 및 다운로드</h2>
                 <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
               </div>
@@ -945,7 +1019,7 @@ export default function App() {
                   </div>
                 )}
                 <p className="deck-order">
-                  슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back slides
+                  슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back/End → 추가 자료
                 </p>
                 <div className="generate-row">
                   <label htmlFor="filename-input">
@@ -967,6 +1041,7 @@ export default function App() {
                     {bibleRefs.length}구절
                     {sermonFile ? ' · 설교 첨부' : ''}
                     {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
+                    {additionalFiles.length > 0 ? ` · 추가 자료 ${additionalFiles.length}개 (${additionalSlideCount}장)` : ''}
                   </div>
                   {/* Both actions share the base control size — the primary is
                       told apart by its variant, not by being bigger — and it
@@ -994,7 +1069,7 @@ export default function App() {
                 </div>
                 <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
               </section>
-              <WizardNavigation step={4} onMove={moveToStep} />
+              <WizardNavigation step={5} onMove={moveToStep} />
             </section>
           </main>
         </div>

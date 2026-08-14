@@ -1,6 +1,6 @@
 # KCCP PPT Generator
 
-찬양, 성경 말씀, 설교, 광고를 **5단계 화면**에서 `다음`/이전 버튼으로 입력하면
+찬양, 성경 말씀, 설교, 광고, 추가 자료를 **6단계 화면**에서 `다음`/이전 버튼으로 입력하면
 **하나의 예배 슬라이드 PPTX**로 합쳐서 만들어 주는 웹 앱입니다.
 
 배포 주소: <https://shrlak.github.io/ppt/>
@@ -8,34 +8,36 @@
 ## 생성되는 슬라이드 순서
 
 ```
-Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  광고  →  Back slides
+Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  광고  →  Back/End  →  추가 자료
 ```
 
 Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
 포함합니다. 기도(×2)와 광고 서식은 `public/service-template.pptx`에서 가져오며, 나머지 입력을
-고정 순서에 맞춰 하나의 `.pptx`로 내려받습니다. 다운로드 파일명은 콘티 날짜가 속한
+고정 순서에 맞춰 하나의 `.pptx`로 내려받습니다. 추가 자료가 있으면 Back/End의 마지막 장 뒤에
+사용자가 정한 순서대로 이어집니다. 다운로드 파일명은 콘티 날짜가 속한
 주의 일요일을 기준으로 `MMDD.pptx`(예: `0712.pptx`)로 자동 생성됩니다.
 
 ## 🖥 편집기 보기
 
 헤더의 **편집기 보기** 버튼을 누르면 단계별 화면 대신 PowerPoint 편집기 같은 화면으로
 전환됩니다. 왼쪽에 최종 PPT의 전체 슬라이드 목록(Front → 찬양 → 기도 → 성경 말씀 → 설교 →
-기도 → 광고 → Back)이 순서대로 나열되고, 오른쪽에는 찬양 가사 편집기와 광고 편집기가 함께
+기도 → 광고 → Back/End → 추가 자료)이 순서대로 나열되고, 오른쪽에는 모든 입력 편집기가 함께
 표시됩니다. 찬양이나 광고 슬라이드를 왼쪽에서 클릭하면 오른쪽 편집 화면이 그 위치로
 이동합니다. 같은 데이터를 보여주는 것이라 **단계별 보기**로 다시 전환해도 입력한 내용은
 그대로 유지됩니다.
 
 ## 📚 PPT 라이브러리
 
-만든 PPT는 콘티 PDF·설교 PPT와 함께 공유 서버와 이 브라우저의 오프라인 캐시에 보관됩니다.
+만든 PPT는 콘티 PDF·설교 PPT·추가 자료 원본과 함께 공유 서버와 이 브라우저의 오프라인 캐시에
+보관됩니다.
 이때 그 PPT를 만든 입력 내용(찬양 가사·순서, 성경 본문·설교 제목·번역본, 광고 원문)도 함께
 저장됩니다. 헤더의 **라이브러리** 버튼으로 저장된 PPT 목록을 열어 어느 기기에서나 다시
 다운로드·편집·삭제할 수 있습니다.
 
 ### 자동 저장
 
-콘티를 올리거나 가사·본문·설교 PPT·광고를 수정하면 **버튼을 누르지 않아도** 잠시 뒤 라이브러리에
-자동으로 저장됩니다. 저장 상태는 다운로드 단계와 편집기 화면의 저장 버튼 아래 줄(`자동 저장 대기
+콘티를 올리거나 가사·본문·설교 PPT·광고·추가 자료를 수정하면 **버튼을 누르지 않아도** 잠시 뒤
+라이브러리에 자동으로 저장됩니다. 저장 상태는 다운로드 단계와 편집기 화면의 저장 버튼 아래 줄(`자동 저장 대기
 중… → 자동 저장 중… → HH:MM 자동 저장됨`)에서 확인할 수 있습니다.
 
 - 매번 새 항목이 생기지 않고 **같은 항목이 계속 갱신**됩니다. 파일명을 바꾸면 항목 이름도 함께
@@ -45,13 +47,13 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 - 저장에 실패하면 상태 줄에 이유가 표시되고 한 번 더 시도합니다. 그래도 실패하면 다음 편집 때
   다시 시도하며, **라이브러리에 저장** 버튼으로 즉시 저장할 수도 있습니다.
 - 서버 연결이 끊긴 동안에도 이 기기에는 저장되고, 다시 연결되면 자동으로 동기화됩니다.
-- 항목에 딸린 **모든 파일**(완성된 PPTX, 콘티 PDF, 설교 PPT, 입력 내용 스냅샷)이 함께 서버로
+- 항목에 딸린 **모든 파일**(완성된 PPTX, 콘티 PDF, 설교 PPT, 추가 자료 원본 묶음, 입력 내용 스냅샷)이 함께 서버로
   올라갑니다. 그래서 다른 기기에서 **편집**을 눌러도 저장할 때의 입력 내용이 그대로 열립니다.
 
 ### 매주 일요일 오후 5시 자동 삭제
 
 공유 서버는 **한 주치 자료만** 보관합니다. 매주 **일요일 오후 5시(미 동부 시간)** 에 서버에 저장된
-**모든 PPT 항목과 딸린 파일**(PPTX·콘티 PDF·설교 PPT·입력 내용)이 자동으로 삭제되어, 다음 주 콘티를
+**모든 PPT 항목과 딸린 파일**(PPTX·콘티 PDF·설교 PPT·추가 자료·입력 내용)이 자동으로 삭제되어, 다음 주 콘티를
 빈 라이브러리에서 시작합니다.
 
 - 계속 보관할 파일은 그 전에 **다운로드**해 두세요. 삭제된 파일은 되돌릴 수 없습니다.
@@ -63,8 +65,8 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 - 삭제 시각·시간대는 Worker의 `PURGE_TIMEZONE`/`PURGE_HOUR` 설정으로 바꿀 수 있습니다
   (`worker/README.md`의 *Weekly PPT purge* 참고).
 
-**편집**을 누르면 그 PPT를 만들 때의 입력 내용 그대로 찬양 → 성경 말씀 → 설교 → 광고 →
-다운로드 5단계가 다시 열립니다. 내용을 고치면 같은 항목이 자동으로 갱신되며, 파일명을
+**편집**을 누르면 그 PPT를 만들 때의 입력 내용 그대로 찬양 → 성경 말씀 → 설교 → 광고 → 추가 자료 →
+다운로드 6단계가 다시 열립니다. 내용을 고치면 같은 항목이 자동으로 갱신되며, 파일명을
 바꿔도 항목이 새로 생기지 않고 이름만 바뀝니다. 다운로드 단계의 **새 항목으로 저장** 버튼을
 누르면 연결을 끊고, 이후 자동 저장은 별개의 항목으로 저장합니다. 입력 내용이 함께 저장되기 전에
 만들어진 항목은 콘티 PDF와 설교 PPT만 복원되고, 콘티는 새로 업로드한 것처럼 다시 분석됩니다.
@@ -221,6 +223,17 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 사용합니다 (하위 항목의 `- ` 표시는 그대로 유지됩니다). 번호는 입력한 순서대로 항상 새로
 매겨집니다.
 
+## 📎 추가 자료
+
+마지막 **추가 자료** 단계에서 PDF, PPTX, PNG, JPG/JPEG 파일을 여러 개 올리고 위·아래 버튼으로
+순서를 정할 수 있습니다. 이 파일들은 필수 Back/End 슬라이드를 바꾸지 않고, 그 마지막 장 다음에
+선택한 순서대로 붙습니다.
+
+- PDF는 페이지마다 한 장의 슬라이드로 변환됩니다.
+- PNG와 JPG/JPEG는 파일마다 한 장으로 추가되며, 4:3 화면 안에 잘리지 않도록 맞춥니다.
+- PPTX는 원본 슬라이드·레이아웃·테마를 유지한 채 전체가 삽입됩니다.
+- 저장된 PPT를 라이브러리에서 다시 편집하면 파일 이름, 원본 데이터, 순서가 함께 복원됩니다.
+
 ## 로컬 개발
 
 ```bash
@@ -271,9 +284,10 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
 ## English Summary
 
-**KCCP PPT Generator** is a five-step wizard that combines four inputs into one downloaded
+**KCCP PPT Generator** is a six-step wizard that combines five input types into one downloaded
 `.pptx`, in this fixed order: **front slides → praise (찬양) → prayer → scripture (말씀) →
-sermon (설교) → prayer → announcements (광고) → back slides**. The supplied front and back decks
+sermon (설교) → prayer → announcements (광고) → back/end slides → additional files**. The
+supplied front and back decks
 are mandatory; the prayer and announcement layouts come from `public/service-template.pptx`. The
 download filename is generated automatically from that week's Sunday in `MMDD.pptx` format.
 
@@ -290,9 +304,13 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 4. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split
    into one slide per item. Markdown pasted from a notes app works too: bold/italic markers around
    the title (`1. **<title>**`) or inside the body are stripped, and `*`/`•` bullets become `-`.
+5. **Additional files** — ordered PDF, PPTX, PNG, and JPG/JPEG uploads are appended only after the
+   final back/end slide. PDFs become one slide per page, images are fitted without cropping, and
+   uploaded PPTX slides keep their own layouts and themes.
 
 Generated decks are archived in a shared PPT library backed by a Cloudflare Worker, together with
-every file that produced them (conti PDF, sermon PPTX, and a snapshot of the wizard inputs), and
+every file that produced them (conti PDF, sermon PPTX, ordered additional-file originals, and a
+snapshot of the wizard inputs), and
 auto-save keeps that server copy current while you edit. The server side of that library is wiped
 every **Sunday at 5 PM US Eastern** so each week starts from an empty shelf — download anything you
 want to keep before then. The song-lyrics library is never purged.
