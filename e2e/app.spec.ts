@@ -240,6 +240,43 @@ test('editor view shows slides and all five content editors together', async ({ 
   await expect(page.getByTestId('wizard-tab-lyrics')).toBeVisible();
 });
 
+test('editor view keeps balanced gutters and stacks before the editing column gets cramped', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('./');
+  await page.getByTestId('view-mode-toggle').click();
+
+  const wide = await page.evaluate(() => {
+    const app = document.querySelector<HTMLElement>('.app')!.getBoundingClientRect();
+    const header = document.querySelector<HTMLElement>('.header-inner')!.getBoundingClientRect();
+    const overview = document.querySelector<HTMLElement>('.slide-overview')!.getBoundingClientRect();
+    const main = document.querySelector<HTMLElement>('#main-content')!.getBoundingClientRect();
+    return {
+      appLeft: app.left,
+      appRight: app.right,
+      headerLeft: header.left,
+      headerRight: header.right,
+      overviewWidth: overview.width,
+      mainWidth: main.width,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(Math.abs(wide.appLeft - wide.headerLeft)).toBeLessThan(1);
+  expect(Math.abs(wide.appRight - wide.headerRight)).toBeLessThan(1);
+  expect(wide.overviewWidth).toBe(312);
+  expect(wide.mainWidth).toBeGreaterThanOrEqual(900);
+  expect(wide.overflow).toBe(0);
+
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const compact = await page.evaluate(() => {
+    const overview = document.querySelector<HTMLElement>('.slide-overview')!.getBoundingClientRect();
+    const main = document.querySelector<HTMLElement>('#main-content')!.getBoundingClientRect();
+    return { overviewLeft: overview.left, mainLeft: main.left, overviewBottom: overview.bottom, mainTop: main.top, mainWidth: main.width };
+  });
+  expect(Math.abs(compact.overviewLeft - compact.mainLeft)).toBeLessThan(1);
+  expect(compact.mainTop).toBeGreaterThanOrEqual(compact.overviewBottom);
+  expect(compact.mainWidth).toBeGreaterThan(900);
+});
+
 test('jumps directly between steps via the progress tabs', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
