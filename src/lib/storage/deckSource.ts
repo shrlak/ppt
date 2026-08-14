@@ -1,5 +1,5 @@
 // The wizard inputs a saved deck was built from, archived next to the
-// generated .pptx so 라이브러리 → 편집 can reopen the deck in the five-step
+// generated .pptx so 라이브러리 → 편집 can reopen the deck in the six-step
 // editor instead of only offering the finished file. Kept apart from
 // pptLibrary.ts so it stays free of browser storage APIs and unit testable.
 import type { Song } from '../utils/types';

@@ -30,7 +30,7 @@ export interface SavedDeck {
   sermonPptx: SavedFile | null;
   /**
    * The wizard inputs this deck was generated from (see deckSource.ts), so
-   * 편집 can reopen it in the five-step editor. Null for entries saved before
+   * 편집 can reopen it in the six-step editor. Null for entries saved before
    * snapshots existed — those restore only from the files above.
    */
   source: SavedFile | null;
