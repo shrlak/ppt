@@ -15,6 +15,7 @@ describe('shared PPT library chunk routes', () => {
     // The client sends one chunk stream per declared kind and fails the whole
     // deck upload if any of them is rejected, so the two lists must not drift.
     expect([...PPT_FILE_KINDS]).toEqual([...SAVED_FILE_KINDS]);
+    expect(PPT_FILE_KINDS).toContain('additionalFiles');
     for (const kind of SAVED_FILE_KINDS) {
       expect(matchUploadChunkRoute(`/libraries/ppt/uploads/upload-1/files/${kind}/chunks/0`)).toEqual({
         uploadId: 'upload-1',
@@ -32,6 +33,11 @@ describe('shared PPT library chunk routes', () => {
   it('carries the wizard inputs snapshot to the server like any other file', () => {
     expect(matchUploadChunkRoute('/libraries/ppt/uploads/upload-1/files/source/chunks/0')).not.toBeNull();
     expect(matchDeckChunkRoute('/libraries/ppt/deck-1/files/source/chunks/0')).not.toBeNull();
+  });
+
+  it('carries the ordered additional-file archive like any other file', () => {
+    expect(matchUploadChunkRoute('/libraries/ppt/uploads/upload-1/files/additionalFiles/chunks/0')).not.toBeNull();
+    expect(matchDeckChunkRoute('/libraries/ppt/deck-1/files/additionalFiles/chunks/0')).not.toBeNull();
   });
 
   it('rejects unknown kinds, missing indexes and the upload path as a deck ID', () => {
