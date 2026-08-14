@@ -1,7 +1,7 @@
 // Left-hand slide list for the 편집기 (PPT editor) view — a PowerPoint-style
 // slide pane showing a real visual thumbnail of every slide in final deck
-// order (from pptxRenderer.ts), not just a text label. 찬양/말씀/설교/광고 rows
-// are clickable and scroll the right-hand editor to that exact section; the
+// order (from pptxRenderer.ts), not just a text label. Editable content and
+// post-End uploads scroll the right-hand editor to that exact section; the
 // rest (front/prayer/back) are informational, since they come from fixed
 // templates rather than being edited here. A toolbar above the list lets the
 // whole deck be downloaded or saved to the 라이브러리 without leaving this view,
@@ -23,9 +23,17 @@ const KIND_ICON: Record<DeckOverviewItem['kind'], IconName> = {
   divider: 'divider',
   announcement: 'announcement',
   back: 'slide',
+  additional: 'file',
 };
 
-const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set(['lyrics-title', 'lyrics', 'bible', 'sermon', 'announcement']);
+const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set([
+  'lyrics-title',
+  'lyrics',
+  'bible',
+  'sermon',
+  'announcement',
+  'additional',
+]);
 
 const THUMB_WIDTH = 248;
 
@@ -38,6 +46,7 @@ interface Props {
   onSelectBible: () => void;
   onSelectSermon: () => void;
   onSelectAnnouncement: () => void;
+  onSelectAdditional: () => void;
   onDownload: () => void;
   onSaveToLibrary: () => void;
   downloading: boolean;
@@ -54,6 +63,7 @@ export default function SlideOverviewList({
   onSelectBible,
   onSelectSermon,
   onSelectAnnouncement,
+  onSelectAdditional,
   onDownload,
   onSaveToLibrary,
   downloading,
@@ -128,6 +138,7 @@ export default function SlideOverviewList({
                     type="button"
                     onClick={() => {
                       if (item.kind === 'announcement') onSelectAnnouncement();
+                      else if (item.kind === 'additional') onSelectAdditional();
                       else if (item.kind === 'bible') onSelectBible();
                       else if (item.kind === 'sermon') onSelectSermon();
                       else onSelectSong(item.songId!);

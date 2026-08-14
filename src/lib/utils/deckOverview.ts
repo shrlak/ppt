@@ -16,7 +16,8 @@ export type DeckOverviewKind =
   | 'sermon'
   | 'divider'
   | 'announcement'
-  | 'back';
+  | 'back'
+  | 'additional';
 
 export interface DeckOverviewItem {
   id: string;

@@ -26,6 +26,10 @@ const inputs: AutoSaveInputs = {
   announcementText: '1. <새가족 환영>\n환영합니다.',
   sermonFile: { name: '설교.pptx', data: new ArrayBuffer(2048) },
   contiFile: { name: 'conti.pdf', data: new ArrayBuffer(4096) },
+  additionalFiles: [
+    { name: '마지막-안내.png', data: new ArrayBuffer(128) },
+    { name: '선교보고.pptx', data: new ArrayBuffer(512) },
+  ],
   frontDeck: null,
   backDeck: null,
 };
@@ -101,6 +105,21 @@ describe('auto-save change detection', () => {
     expect(deckFingerprint({ ...inputs, sermonFile: { name: '설교.pptx', data: new ArrayBuffer(2048) } })).toBe(
       deckFingerprint(inputs),
     );
+  });
+
+  it('changes when a post-End file is added, removed, or reordered', () => {
+    const base = deckFingerprint(inputs);
+    expect(deckFingerprint({ ...inputs, additionalFiles: inputs.additionalFiles.slice(0, 1) })).not.toBe(base);
+    expect(deckFingerprint({ ...inputs, additionalFiles: [...inputs.additionalFiles].reverse() })).not.toBe(base);
+    expect(
+      deckFingerprint({
+        ...inputs,
+        additionalFiles: [
+          inputs.additionalFiles[0],
+          { name: '다른자료.pptx', data: new ArrayBuffer(512) },
+        ],
+      }),
+    ).not.toBe(base);
   });
 });
 
