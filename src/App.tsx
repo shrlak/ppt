@@ -34,6 +34,8 @@ import {
 } from './lib/storage/deckAutoSave';
 import { showToast } from './lib/utils/toast';
 import Icon from './components/Icon';
+import AdditionalFilesSection from './components/AdditionalFilesSection';
+import type { AdditionalFile } from './lib/additionalFiles/types';
 
 // Debounce before the 편집기 view regenerates the whole deck + re-renders
 // thumbnails after an edit — regeneration re-zips several .pptx pieces, so
@@ -59,6 +61,7 @@ const WIZARD_STEPS = [
   { id: 'bible', label: '성경 말씀' },
   { id: 'sermon', label: '설교' },
   { id: 'announcement', label: '광고' },
+  { id: 'additional', label: '추가 자료' },
   { id: 'download', label: '다운로드' },
 ] as const;
 
@@ -119,6 +122,7 @@ export default function App() {
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
+  const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
   const [generating, setGenerating] = useState(false);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -250,7 +254,11 @@ export default function App() {
   const isPanelActive = useCallback(
     (stepId: (typeof WIZARD_STEPS)[number]['id']) =>
       viewMode === 'editor'
-        ? stepId === 'lyrics' || stepId === 'bible' || stepId === 'sermon' || stepId === 'announcement'
+        ? stepId === 'lyrics' ||
+          stepId === 'bible' ||
+          stepId === 'sermon' ||
+          stepId === 'announcement' ||
+          stepId === 'additional'
         : WIZARD_STEPS[activeStep].id === stepId,
     [viewMode, activeStep],
   );
@@ -832,7 +840,7 @@ export default function App() {
               data-testid="wizard-panel-lyrics"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">1 / 5</p>
+                <p className="wizard-kicker">1 / 6</p>
                 <h2>찬양</h2>
                 <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
               </div>
@@ -854,7 +862,7 @@ export default function App() {
               data-testid="wizard-panel-bible"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">2 / 5</p>
+                <p className="wizard-kicker">2 / 6</p>
                 <h2>성경 말씀</h2>
                 <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
               </div>
@@ -875,7 +883,7 @@ export default function App() {
               data-testid="wizard-panel-sermon"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">3 / 5</p>
+                <p className="wizard-kicker">3 / 6</p>
                 <h2>설교</h2>
                 <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
               </div>
@@ -889,7 +897,7 @@ export default function App() {
               data-testid="wizard-panel-announcement"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">4 / 5</p>
+                <p className="wizard-kicker">4 / 6</p>
                 <h2>광고</h2>
                 <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
               </div>
@@ -898,12 +906,26 @@ export default function App() {
             </section>
 
             <section
+              className={`wizard-panel${isPanelActive('additional') ? ' active' : ''}`}
+              aria-hidden={!isPanelActive('additional')}
+              data-testid="wizard-panel-additional"
+            >
+              <div className="wizard-page-header">
+                <p className="wizard-kicker">5 / 6</p>
+                <h2>추가 자료</h2>
+                <p>예배 End 슬라이드 뒤에 이어서 보여줄 파일과 순서를 정하세요.</p>
+              </div>
+              <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
+              {viewMode === 'wizard' && <WizardNavigation step={4} onMove={moveToStep} />}
+            </section>
+
+            <section
               className={`wizard-panel${isPanelActive('download') ? ' active' : ''}`}
               aria-hidden={!isPanelActive('download')}
               data-testid="wizard-panel-download"
             >
               <div className="wizard-page-header">
-                <p className="wizard-kicker">5 / 5</p>
+                <p className="wizard-kicker">6 / 6</p>
                 <h2>확인 및 다운로드</h2>
                 <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
               </div>
@@ -994,7 +1016,7 @@ export default function App() {
                 </div>
                 <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
               </section>
-              <WizardNavigation step={4} onMove={moveToStep} />
+              <WizardNavigation step={5} onMove={moveToStep} />
             </section>
           </main>
         </div>

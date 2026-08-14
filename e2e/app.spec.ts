@@ -11,7 +11,6 @@ const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcem
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
 const PLACEHOLDER_FRONT_PPTX = path.join(HERE, '..', 'tests', 'fixtures', 'placeholder-front-slide.pptx');
-
 // PDF parsing (pdf.js on scanned pages) and fetching translation JSON can be
 // slow, especially in CI.
 const PARSE_TIMEOUT = 30_000;
@@ -76,6 +75,40 @@ test('moves through the five-step wizard with next and back buttons', async ({ p
 
   await page.getByTestId('wizard-back-bible').click();
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+});
+
+test('adds, reorders, and removes files on the new 추가 자료 page', async ({ page }) => {
+  await page.goto('./');
+  await page.getByTestId('wizard-tab-additional').click();
+  await expect(page.getByTestId('additional-files-section')).toBeVisible();
+
+  const fixtureImages = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#496554';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return {
+      png: canvas.toDataURL('image/png').split(',')[1],
+      jpeg: canvas.toDataURL('image/jpeg', 0.9).split(',')[1],
+    };
+  });
+
+  await page.getByTestId('additional-files-input').setInputFiles([
+    { name: 'first.png', mimeType: 'image/png', buffer: Buffer.from(fixtureImages.png, 'base64') },
+    { name: 'second.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(fixtureImages.jpeg, 'base64') },
+  ]);
+  const rows = page.getByTestId('additional-file-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('first.png');
+  await expect(rows.nth(1)).toContainText('second.jpg');
+
+  await rows.nth(1).getByTestId('additional-file-up').click();
+  await expect(rows.nth(0)).toContainText('second.jpg');
+  await rows.nth(0).getByTestId('additional-file-delete').click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText('first.png');
 });
 
 test('editor view shows slides on the left and the 찬양/성경 말씀/설교/광고 editors together on the right', async ({ page }) => {
