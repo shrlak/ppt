@@ -29,6 +29,7 @@ const RESPONSE_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     lyricRowCount: { type: 'integer' },
@@ -55,6 +56,7 @@ const BATCH_TITLE_ITEM_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
   },
   required: ['imageIndex', 'pageType', 'sermonTitle', 'scripture', 'title'],
@@ -68,6 +70,7 @@ const BATCH_FULL_ITEM_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     lyricRowCount: { type: 'integer' },
@@ -142,13 +145,13 @@ export function buildGeminiBatchBody(
           'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 인식하지 마세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
           'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, key, order, lyricRowCount, sections를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key, order, lyricRowCount, sections를 포함하세요.',
           ...BASE_PROMPT_LINES,
         ];
   const hasHints = (hints ?? []).some((hint) => hint && hint.trim());

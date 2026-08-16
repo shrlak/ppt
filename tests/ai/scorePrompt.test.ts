@@ -28,6 +28,11 @@ describe('the shared score prompt', () => {
     expect(prompt).toContain('새 파트를 만들지 마세요');
   });
 
+  it('asks for a printed artist without letting the model invent one', () => {
+    expect(prompt).toContain('- artist:');
+    expect(prompt).toContain('제목만 보고 아티스트를 추측하지 마세요');
+  });
+
   it('reaches the engines through the same shared text', () => {
     const body = buildGeminiBatchBody(['data:image/png;base64,AAA'], 'full') as {
       contents: { parts: { text?: string }[] }[];

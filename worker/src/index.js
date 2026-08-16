@@ -37,6 +37,8 @@ import {
   PPT_FILE_KINDS,
   matchDeckChunkRoute,
   matchUploadChunkRoute,
+  isGroundTruth,
+  entryVerification,
   normalizeLibraryTitle,
   samePptFiles,
   sanitizeLyricsEntries,
@@ -145,11 +147,24 @@ export class UsageTracker extends DurableObject {
     return this.lyricsLibrary();
   }
 
+  /**
+   * Store a lyrics entry, refusing to let a draft replace ground truth.
+   *
+   * Recognition runs on every conti, so the same song is offered again and
+   * again as a fresh draft. Without this guard a weak reading would overwrite
+   * the wording a user already confirmed. An explicit verified/edited save
+   * still replaces whatever is stored.
+   */
   async upsertLyricsEntry(rawEntry) {
     const entry = sanitizeLyricsEntry(rawEntry);
     if (!entry) throw new Error('invalid lyrics entry');
     const normalized = normalizeLibraryTitle(entry.title);
-    await this.ctx.storage.put(`library:lyrics:entry:${normalized}`, {
+    const entryKey = `library:lyrics:entry:${normalized}`;
+    const existing = await this.ctx.storage.get(entryKey);
+    if (existing?.entry && entryVerification(entry) === 'draft' && isGroundTruth(existing.entry)) {
+      return existing.entry;
+    }
+    await this.ctx.storage.put(entryKey, {
       entry,
       updatedAt: new Date().toISOString(),
     });

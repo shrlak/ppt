@@ -180,3 +180,32 @@ describe('stacked verses printed under one staff', () => {
     ]);
   });
 });
+
+describe('artist recognition', () => {
+  it('keeps an artist the score printed, and drops a blank one', () => {
+    expect(coerceParsedScore({ title: '은혜의 노래', artist: ' 새로운 팀 ' }).artist).toBe('새로운 팀');
+    expect(coerceParsedScore({ title: '은혜의 노래', artist: '   ' }).artist).toBeUndefined();
+    expect(coerceParsedScore({ title: '은혜의 노래' }).artist).toBeUndefined();
+  });
+
+  it('carries the artist through the title-only batch pass', () => {
+    const [result] = coerceParsedScoreBatch(
+      { results: [{ imageIndex: 0, title: '은혜의 노래', artist: '새로운 팀', key: 'E' }] },
+      1,
+      'titles',
+    );
+    expect(result).toMatchObject({ title: '은혜의 노래', artist: '새로운 팀', key: 'E' });
+  });
+
+  it('parses an optional artist from a score response', () => {
+    expect(parseScoreText('{"title":"은혜의 노래","artist":"새로운 팀","order":[],"sections":[]}').artist).toBe(
+      '새로운 팀',
+    );
+  });
+
+  it('still reads plain OCR text that merely starts with a brace-free heading', () => {
+    const parsed = parseScoreText(['은혜의 노래 (E)', 'I-V-C', 'V', '빛으로 인도하시네'].join('\n'));
+    expect(parsed.title).toBe('은혜의 노래');
+    expect(parsed.artist).toBeUndefined();
+  });
+});

@@ -57,14 +57,15 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
     mode === 'titles'
       ? [
           '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
-          'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
+          'score 페이지에서만 찬양 제목과 조성을 읽고, 아티스트 이름이 인쇄되어 있으면 함께 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 읽지 마세요.',
-          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
+          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
+          'artist는 페이지에 인쇄된 이름만 적고, 없으면 빈 문자열로 두세요. 제목으로 추측하지 마세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
-          'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
+          'score 페이지에서만 제목, 아티스트, 조성, 진행 순서와 모든 가사를 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
           BASE_PROMPT,
         ];
