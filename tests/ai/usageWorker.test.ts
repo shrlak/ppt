@@ -133,8 +133,10 @@ describe('AI proxy usage records', () => {
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
-    // Only the four strongest free vision models are in the pool.
-    expect(pairs).toHaveLength(4);
+    // Three champions plus the free challengers used for cross-checking.
+    expect(pairs).toHaveLength(6);
+    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free' });
+    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-31b-it:free' });
   });
 
   it('shows a card for EVERY system model, including ones with no usage yet', () => {
@@ -166,7 +168,7 @@ describe('AI proxy usage records', () => {
       used: 0,
     });
     expect(snapshot.models.filter((model) => model.provider === 'openrouter')).toHaveLength(
-      RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length,
+      RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'openrouter').length,
     );
   });
 });

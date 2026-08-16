@@ -4,7 +4,10 @@ import {
   DEFAULT_EXCLUDED_TITLES,
   RECOGNITION_MODEL_CATALOG,
   attemptKey,
+  findModelInfo,
   getAiSettings,
+  isFreeVisionCatalogEntry,
+  migrateEngineName,
   sanitizeAttemptOrder,
   sanitizeExcludedTitles,
   sanitizeSharedSettings,
@@ -13,6 +16,7 @@ import {
   OPENROUTER_NEMOTRON_MODEL,
   RECOGNITION_MODEL_CATALOG as WORKER_CATALOG,
   DEFAULT_EXCLUDED_TITLES as WORKER_EXCLUDED,
+  migrateEngineName as workerMigrateEngineName,
   resolveOpenRouterRoute,
   sanitizeSharedSettings as workerSanitize,
 } from '../../worker/src/config.js';
@@ -25,11 +29,35 @@ describe('recognition model catalog', () => {
     expect(RECOGNITION_MODEL_CATALOG[0]).toMatchObject({ engine: 'gemini', model: 'gemini-3.6-flash' });
     // Multiple providers and multiple models per provider are available.
     expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'gemini').length).toBeGreaterThan(1);
-    expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length).toBeGreaterThan(1);
+    expect(RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'openrouter').length).toBeGreaterThan(1);
+  });
+
+  it('registers three initial champions and free challengers', () => {
+    expect(RECOGNITION_MODEL_CATALOG.filter((model) => model.role === 'champion')).toHaveLength(3);
+    expect(RECOGNITION_MODEL_CATALOG.filter((model) => model.role === 'challenger').length).toBeGreaterThanOrEqual(2);
+    expect(
+      RECOGNITION_MODEL_CATALOG.filter((model) => model.engine === 'openrouter').every((model) =>
+        model.upstreamModel.endsWith(':free'),
+      ),
+    ).toBe(true);
+    expect(RECOGNITION_MODEL_CATALOG.every(isFreeVisionCatalogEntry)).toBe(true);
+  });
+
+  it('leaves out the free Gemma variant the benchmark already rejected', () => {
+    expect(RECOGNITION_MODEL_CATALOG.map((entry) => entry.model)).not.toContain(
+      'google/gemma-4-26b-a4b-it:free',
+    );
   });
 
   it('matches the proxy-side catalog exactly (kept in lockstep)', () => {
-    expect(RECOGNITION_MODEL_CATALOG.map(({ engine, model }) => ({ engine, model }))).toEqual(WORKER_CATALOG);
+    expect(
+      RECOGNITION_MODEL_CATALOG.map(({ engine, model, upstreamModel, role }) => ({
+        engine,
+        model,
+        upstreamModel,
+        role,
+      })),
+    ).toEqual(WORKER_CATALOG);
     expect(DEFAULT_EXCLUDED_TITLES).toEqual(WORKER_EXCLUDED);
   });
 
@@ -42,17 +70,46 @@ describe('recognition model catalog', () => {
       configuredModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       upstreamModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
-    expect(resolveOpenRouterRoute('paid/or-made-up-model')).toEqual({
-      configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
-      upstreamModel: OPENROUTER_NEMOTRON_MODEL,
-    });
+    // A model outside the free catalog is refused, never silently swapped:
+    // substituting would spend the shared key on a request nobody made and
+    // would credit the accuracy to the wrong model.
+    expect(resolveOpenRouterRoute('paid/or-made-up-model')).toBeNull();
+  });
+});
+
+describe('migrateEngineName', () => {
+  it('maps the legacy nvidia lane onto openrouter and rejects anything else', () => {
+    expect(migrateEngineName('nvidia')).toBe('openrouter');
+    expect(migrateEngineName('openrouter')).toBe('openrouter');
+    expect(migrateEngineName('gemini')).toBe('gemini');
+    expect(migrateEngineName('off')).toBeUndefined();
+    expect(migrateEngineName(undefined)).toBeUndefined();
+  });
+
+  it('agrees with the proxy-side migration (kept in lockstep)', () => {
+    for (const value of ['nvidia', 'openrouter', 'gemini', 'off', '', null]) {
+      expect(migrateEngineName(value)).toBe(workerMigrateEngineName(value));
+    }
+  });
+
+  it('still resolves catalog info for a stored legacy attempt', () => {
+    expect(
+      findModelInfo({ engine: 'nvidia' as 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl' })?.role,
+    ).toBe('champion');
   });
 });
 
 describe('sanitizeAttemptOrder', () => {
+  it('migrates the legacy nvidia engine without changing its model', () => {
+    expect(sanitizeAttemptOrder([{ engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' }])[0]).toEqual({
+      engine: 'openrouter',
+      model: 'nvidia/nemotron-nano-12b-v2-vl',
+    });
+  });
+
   it('keeps a valid custom order and appends the missing catalog models', () => {
     const custom = [
-      { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
+      { engine: 'openrouter', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
       { engine: 'gemini', model: 'gemini-3.6-flash' },
     ];
     const order = sanitizeAttemptOrder(custom);
@@ -74,10 +131,10 @@ describe('sanitizeAttemptOrder', () => {
 
   it('expands legacy plain-engine entries into that engine’s catalog models', () => {
     const order = sanitizeAttemptOrder(['nvidia', 'gemini']);
-    expect(order[0].engine).toBe('nvidia');
+    expect(order[0].engine).toBe('openrouter');
     const firstGemini = order.findIndex((attempt) => attempt.engine === 'gemini');
-    const nvidiaCount = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length;
-    expect(firstGemini).toBe(nvidiaCount);
+    const openRouterCount = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'openrouter').length;
+    expect(firstGemini).toBe(openRouterCount);
   });
 
   it('falls back to the default order for non-array input', () => {
@@ -106,7 +163,11 @@ describe('sanitizeExcludedTitles', () => {
 describe('shared settings sanitizers (client vs proxy)', () => {
   it('produce identical results for the same raw payload', () => {
     const raw = {
-      attempts: [{ engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' }, 'gemini', { engine: 'x', model: 'y' }],
+      attempts: [
+        { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
+        'gemini',
+        { engine: 'x', model: 'y' },
+      ],
       excludedTitles: [' 공동체 고백송 ', 42, '준비 찬양'],
     };
     expect(sanitizeSharedSettings(raw)).toEqual(workerSanitize(raw));

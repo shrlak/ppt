@@ -760,6 +760,11 @@ export default {
       }
       const requested = typeof body?.model === 'string' ? body.model : '';
       const route = resolveOpenRouterRoute(requested);
+      // No silent substitution: a model outside the free catalog is refused
+      // rather than swapped for another one the caller never asked for.
+      if (!route) {
+        return jsonResponse({ error: `model not allowed: ${requested.slice(0, 100)}` }, 400, headers);
+      }
       if (!env.OPENROUTER_API_KEY) {
         return jsonResponse({ error: 'OPENROUTER_API_KEY not configured on the proxy' }, 500, headers);
       }

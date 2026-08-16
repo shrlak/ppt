@@ -5,7 +5,7 @@ import type { Section, Song } from '../utils/types';
 import { partFamily, type BatchRecognitionMode, type ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionAttempt, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
-import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
+import { recognizeBatchWithOpenRouter, recognizeWithOpenRouter } from './scoreNvidia';
 import { isTransientRecognitionError } from './recognitionError';
 import { bagSimilarity, lineKey, lineSimilarity, wordCounts } from '../lyrics/textSimilarity';
 import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
@@ -58,10 +58,10 @@ async function recognizeWithEngine(
     if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
     return recognizeWithGemini(dataUrl, key, attempt.model, settings.geminiUseSearch, PROXY_URL);
   }
-  if (attempt.engine === 'nvidia') {
+  if (attempt.engine === 'openrouter') {
     const key = settings.openrouterApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
-    return recognizeWithNvidia(dataUrl, key, attempt.model, PROXY_URL);
+    return recognizeWithOpenRouter(dataUrl, key, attempt.model, PROXY_URL);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -98,10 +98,10 @@ async function recognizeBatchWithEngine(
       hints,
     );
   }
-  if (attempt.engine === 'nvidia') {
+  if (attempt.engine === 'openrouter') {
     const key = settings.openrouterApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
-    return recognizeBatchWithNvidia(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
+    return recognizeBatchWithOpenRouter(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }

@@ -35,7 +35,7 @@ export function toImageDataUrl(image: string): string {
 }
 
 /** Build the OpenAI-style request body for one score image. */
-export function buildNvidiaBody(dataUrl: string, model: string = DEFAULT_NVIDIA_MODEL): unknown {
+export function buildOpenRouterBody(dataUrl: string, model: string = DEFAULT_NVIDIA_MODEL): unknown {
   return {
     model,
     messages: [
@@ -81,7 +81,7 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
 }
 
 /** Build one request covering every pending score page. */
-export function buildNvidiaBatchBody(
+export function buildOpenRouterBatchBody(
   dataUrls: string[],
   mode: BatchRecognitionMode,
   model: string = DEFAULT_NVIDIA_MODEL,
@@ -105,7 +105,7 @@ export function buildNvidiaBatchBody(
 }
 
 /** Pull the assistant's text out of a chat-completions response. */
-export function extractNvidiaText(response: unknown): string {
+export function extractOpenRouterText(response: unknown): string {
   const r = response as { choices?: { message?: { content?: unknown } }[] };
   const content = r?.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content;
@@ -149,7 +149,7 @@ async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string):
     throw new RecognitionError(`OpenRouter 호출 실패: ${detail}`, res.status);
   }
 
-  return extractNvidiaText((await res.json()) as unknown);
+  return extractOpenRouterText((await res.json()) as unknown);
 }
 
 /**
@@ -158,13 +158,13 @@ async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string):
  * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through
  * the shared Cloudflare proxy (see worker/) that holds the OpenRouter key.
  */
-export async function recognizeWithNvidia(
+export async function recognizeWithOpenRouter(
   dataUrl: string,
   apiKey: string,
   model: string = DEFAULT_NVIDIA_MODEL,
   proxyUrl?: string,
 ): Promise<ParsedScore> {
-  const text = await callOpenRouter(buildNvidiaBody(dataUrl, model), apiKey, proxyUrl);
+  const text = await callOpenRouter(buildOpenRouterBody(dataUrl, model), apiKey, proxyUrl);
   const payload = parseModelJson(
     text,
     'OpenRouter 응답이 비어 있습니다.',
@@ -174,7 +174,7 @@ export async function recognizeWithNvidia(
 }
 
 /** Recognize every supplied score image in one OpenRouter request. */
-export async function recognizeBatchWithNvidia(
+export async function recognizeBatchWithOpenRouter(
   dataUrls: string[],
   apiKey: string,
   mode: BatchRecognitionMode,
@@ -183,7 +183,7 @@ export async function recognizeBatchWithNvidia(
   hints?: (string | undefined)[],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
-  const text = await callOpenRouter(buildNvidiaBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
+  const text = await callOpenRouter(buildOpenRouterBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
   const payload = parseModelJson(
     text,
     'OpenRouter 일괄 응답이 비어 있습니다.',
@@ -191,3 +191,16 @@ export async function recognizeBatchWithNvidia(
   );
   return coerceParsedScoreBatch(payload, dataUrls.length, mode);
 }
+
+// Deprecated aliases kept for one release so anything still importing the old
+// NVIDIA-era names keeps working. Remove after the next deploy.
+/** @deprecated use recognizeWithOpenRouter */
+export const recognizeWithNvidia = recognizeWithOpenRouter;
+/** @deprecated use recognizeBatchWithOpenRouter */
+export const recognizeBatchWithNvidia = recognizeBatchWithOpenRouter;
+/** @deprecated use buildOpenRouterBody */
+export const buildNvidiaBody = buildOpenRouterBody;
+/** @deprecated use buildOpenRouterBatchBody */
+export const buildNvidiaBatchBody = buildOpenRouterBatchBody;
+/** @deprecated use extractOpenRouterText */
+export const extractNvidiaText = extractOpenRouterText;

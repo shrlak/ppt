@@ -20,7 +20,8 @@ export interface RecogState {
 
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
-  // Legacy engine ID: all current entries in this lane are OpenRouter free models.
+  openrouter: 'OpenRouter',
+  // Pre-rename engine ID, still possible in a restored deck's saved state.
   nvidia: 'OpenRouter',
   library: '라이브러리',
 };
