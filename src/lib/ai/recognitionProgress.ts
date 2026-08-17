@@ -8,7 +8,7 @@
 // claims 100% before the work is actually done.
 
 /** Pipeline stages, in execution order. */
-export type RecognitionPhase = 'render' | 'titles' | 'lyrics' | 'rescue' | 'web';
+export type RecognitionPhase = 'render' | 'titles' | 'lyrics' | 'crosscheck' | 'rescue' | 'web';
 
 export interface PhaseSpan {
   /** Overall fraction where this stage begins. */
@@ -22,9 +22,12 @@ export interface PhaseSpan {
 export const RECOGNITION_PHASES: Record<RecognitionPhase, PhaseSpan> = {
   render: { start: 0, end: 0.12, expectedMs: 4000 },
   titles: { start: 0.12, end: 0.4, expectedMs: 9000 },
-  lyrics: { start: 0.4, end: 0.88, expectedMs: 22000 },
+  lyrics: { start: 0.4, end: 0.78, expectedMs: 22000 },
+  // Cross-check sends only the pages the champions disagreed on to a
+  // challenger, so it is usually skipped entirely and always short.
+  crosscheck: { start: 0.74, end: 0.86, expectedMs: 10000 },
   // Rescue re-runs only the pages the batch pass missed; it overlaps the tail
-  // of the lyrics span so the bar keeps creeping instead of jumping back.
+  // of the cross-check span so the bar keeps creeping instead of jumping back.
   rescue: { start: 0.82, end: 0.9, expectedMs: 15000 },
   // The web lookup runs last, once a title and the score's reading are both in
   // hand, and only for songs the library doesn't already have.

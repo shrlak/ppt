@@ -20,12 +20,12 @@ import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
-import {
-  applyScoreToSong,
-  recognizeScoreBatch,
-  recognizeScoreBatchEnsemble,
-  recognizeScoreRaced,
-} from '../lib/ai/scoreRecognition';
+import { applyScoreToSong, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
+import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
+import { fetchModelReliabilities } from '../lib/learning/learningClient';
+import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
+import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
+import { hashPageImage } from '../lib/ai/pageHash';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup } from '../lib/lyrics/webLyrics';
 import { mergeWebLyrics } from '../lib/lyrics/mergeWebLyrics';
@@ -55,6 +55,23 @@ const PROGRESS_TICK_MS = 400;
 
 function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
+}
+
+/**
+ * What recognition produced, before the user touched it.
+ *
+ * Kept on the song so an explicit save can diff the final wording against the
+ * machine's own answer: that diff is what tells 'verified' apart from
+ * 'edited', and it is what each model's accuracy is measured from.
+ */
+function recognitionBaseline(score: ParsedScore): NonNullable<Song['provenance']>['baseline'] {
+  return {
+    title: score.title,
+    artist: score.artist,
+    key: score.key,
+    sections: structuredClone(score.sections),
+    order: [...score.order],
+  };
 }
 
 /** Vision engines may identify a non-score page explicitly or by returning
@@ -405,11 +422,44 @@ export default function LyricsGenerator({
        */
       const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
 
+      /**
+       * Everything recognition learned about each song this run: the page it
+       * was read from, every model's answer, and how settled the consensus
+       * was. Held here until an explicit library save turns it into training
+       * data — an automatic save is a draft and proves nothing.
+       */
+      const evidence = new Map<
+        string,
+        { pageHash?: string; observations: RecognitionObservation[]; confidence: number; needsReview: boolean }
+      >();
+
       /** Commit a finished song: write the lyrics, allow auto-save, mark done. */
-      const applyRecognizedScore = (id: string, score: ParsedScore, engine: string) => {
+      const applyRecognizedScore = (
+        id: string,
+        score: ParsedScore,
+        engine: string,
+        provenance?: Partial<NonNullable<Song['provenance']>>,
+      ) => {
         pendingAutoSaveRef.current.add(id);
+        const found = evidence.get(id);
         setSongs((current) =>
-          current.map((song) => (song.id === id && !isCancelled(id) ? applyScoreToSong(song, score) : song)),
+          current.map((song) => {
+            if (song.id !== id || isCancelled(id)) return song;
+            const next = applyScoreToSong(song, score);
+            return {
+              ...next,
+              // A machine answer is a draft until somebody stands behind it.
+              verification: 'draft',
+              provenance: {
+                ...song.provenance,
+                pageHash: found?.pageHash,
+                baseline: song.provenance?.baseline ?? recognitionBaseline(score),
+                source: 'models',
+                confidence: found?.confidence,
+                ...provenance,
+              },
+            };
+          }),
         );
         markDone([id], engine);
       };
@@ -453,6 +503,9 @@ export default function LyricsGenerator({
 
       enterPhase('render', tracked.ids);
 
+      /** Models whose free daily allowance ran out during this conti. */
+      const exhausted = new Set<string>();
+
       try {
         // Rendering and recognition are both batched: no per-song request loop.
         let renderedPages = 0;
@@ -468,13 +521,31 @@ export default function LyricsGenerator({
         // Shared settings: concurrent model pool and the
         // excluded-title list, synced across every device via the proxy.
         const settings = await getSyncedAiSettings();
-
+        // Measured accuracy decides which models read every page and how much
+        // each answer counts. No proxy, or a failed lookup, just means the
+        // catalog's own roles are used.
+        const reliabilities = await fetchModelReliabilities();
+        // Page hashes tie this run's evidence to the page it came from, so a
+        // correction saved next week still knows which reading it corrected.
+        const pageHashes = await Promise.all(
+          images.map((image) => hashPageImage(image).catch(() => undefined)),
+        );
+        active.forEach((song, index) => {
+          evidence.set(song.id, {
+            pageHash: pageHashes[index],
+            observations: [],
+            confidence: 0,
+            needsReview: true,
+          });
+        });
         // Quick title pass. Best-effort: on failure the full pass still runs,
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
         let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
         try {
-          titleScores = (await recognizeScoreBatch(images, settings, 'titles')).scores;
+          const titleResult = await recognizeAdaptiveBatch(images, settings, 'titles', undefined, reliabilities);
+          titleScores = titleResult.scores;
+          for (const modelKey of titleResult.exhaustedModels) exhausted.add(modelKey);
         } catch (error) {
           console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
         }
@@ -543,17 +614,25 @@ export default function LyricsGenerator({
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
-          // Every model reads the conti at once and works on the answer
-          // together: the strongest model that read a page wins it, and the
-          // other models fill in whatever fields it missed.
-          const lyricResult = await recognizeScoreBatchEnsemble(
+          // Three champions read every page; only a page they disagreed on is
+          // escalated to a challenger, one at a time and one page at a time.
+          const lyricResult = await recognizeAdaptiveBatch(
             remaining.map(({ image }) => image),
             settings,
             'full',
             remaining.map(hintFor),
+            reliabilities,
           );
           lyricScores = lyricResult.scores;
           lyricEngine = lyricResult.engine;
+          for (const modelKey of lyricResult.exhaustedModels) exhausted.add(modelKey);
+          remaining.forEach(({ song }, index) => {
+            const found = evidence.get(song.id);
+            if (!found) return;
+            found.observations = lyricResult.observations[index] ?? [];
+            found.confidence = lyricResult.confidence[index] ?? 0;
+            found.needsReview = lyricResult.needsReview[index] ?? true;
+          });
         } catch (error) {
           console.warn('가사 일괄 인식 실패, 곡별 인식으로 전환:', error instanceof Error ? error.message : error);
         }
@@ -707,6 +786,12 @@ export default function LyricsGenerator({
         });
       } finally {
         window.clearInterval(ticker);
+        if (exhausted.size > 0) {
+          // A spent free allowance is not a recognition failure, and saying so
+          // is the difference between "try again tomorrow" and "something is
+          // broken".
+          showToast(`${ERROR_CATEGORY_LABELS.quota}: ${exhausted.size}개 모델의 오늘 무료 한도가 끝났습니다.`);
+        }
       }
     },
     [fillFromLibrary, excludeRecognizedSong, discardNonScorePage],

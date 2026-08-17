@@ -338,14 +338,14 @@ async function recognizeBatchWithAllModels(
 }
 
 /** One model's whole batch: its answers, or the category of its failure. */
-interface BatchAttemptResult {
+export interface BatchAttemptResult {
   attempt: RecognitionAttempt;
   scores?: ParsedScore[];
   error?: ReturnType<typeof classifyRecognitionError>;
   latencyMs: number;
 }
 
-async function runBatchAttempt(
+export async function runBatchAttempt(
   attempt: RecognitionAttempt,
   dataUrls: string[],
   settings: AiSettings,
