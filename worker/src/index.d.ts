@@ -24,6 +24,16 @@ export declare class UsageTracker {
   deleteLyricsEntry(title: unknown): Promise<void>;
   modelStats(): Promise<Record<string, unknown>[]>;
   recordMemoryContribution(raw: unknown): Promise<void>;
+  corpusManifests(): Promise<Record<string, unknown>[]>;
+  corpusStatus(): Promise<Record<string, number>>;
+  putCorpusManifest(rawManifest: unknown): Promise<Record<string, unknown>>;
+  putCorpusChunk(id: string, index: number, data: ArrayBuffer): Promise<void>;
+  getCorpusChunk(id: string, index: number): Promise<ArrayBuffer | null>;
+  deleteCorpusRecord(id: string): Promise<void>;
+  markCorpusExported(
+    ids: unknown,
+    at?: string,
+  ): Promise<{ marked: number; status: Record<string, number> }>;
   learningMemory(title?: string): Promise<{
     titleAliases: unknown[];
     corrections: unknown[];

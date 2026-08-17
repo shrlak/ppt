@@ -5,6 +5,7 @@
 // runs on catalog defaults instead of measured accuracy, never that it stops.
 import type { ModelReliability } from '../ai/modelReliability';
 import { EMPTY_MEMORY, type LearningMemory } from './onlineLearning';
+import { ADMIN_PASSWORD } from '../adminAuth';
 
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
 
@@ -155,5 +156,65 @@ export async function fetchLearningMemory(title = ''): Promise<LearningMemory> {
     };
   } catch {
     return EMPTY_MEMORY;
+  }
+}
+
+/** Chunk size the proxy expects for a training image. */
+const TRAINING_CHUNK_BYTES = 1024 * 1024;
+
+function adminHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { Authorization: `Bearer ${ADMIN_PASSWORD}`, ...extra };
+}
+
+/**
+ * Store one verified page in the training corpus: metadata first, then the
+ * image in chunks.
+ *
+ * Best-effort like everything else here. A save has already succeeded by the
+ * time this runs, so a failure costs one training example and nothing the user
+ * can see.
+ */
+export async function uploadTrainingRecord(
+  manifest: Record<string, unknown>,
+  image?: Uint8Array,
+): Promise<boolean> {
+  const stored = await learningFetch('/learning/corpus', {
+    method: 'PUT',
+    headers: adminHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ manifest }),
+  });
+  if (!stored?.ok) return false;
+  if (!image) return true;
+
+  const id = String(manifest.id);
+  for (let index = 0; index * TRAINING_CHUNK_BYTES < image.byteLength; index += 1) {
+    const chunk = image.slice(index * TRAINING_CHUNK_BYTES, (index + 1) * TRAINING_CHUNK_BYTES);
+    const response = await learningFetch(`/learning/corpus/${encodeURIComponent(id)}/chunks/${index}`, {
+      method: 'PUT',
+      headers: adminHeaders({ 'Content-Type': 'application/octet-stream' }),
+      body: chunk as BodyInit,
+    });
+    if (!response?.ok) return false;
+  }
+  return true;
+}
+
+export interface TrainingCorpusStatus {
+  total: number;
+  verified: number;
+  edited: number;
+  withImage: number;
+  exported: number;
+  bytes: number;
+  limit: number;
+}
+
+export async function fetchTrainingCorpusStatus(): Promise<TrainingCorpusStatus | null> {
+  const response = await learningFetch('/learning/corpus', { method: 'GET', headers: adminHeaders() });
+  if (!response?.ok) return null;
+  try {
+    return (await response.json()) as TrainingCorpusStatus;
+  } catch {
+    return null;
   }
 }

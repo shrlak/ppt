@@ -21,6 +21,7 @@
 //   POST /learning/models/evaluations-> record accuracy from verified corrections
 //   POST /learning/feedback          -> store one verified user correction
 //   GET  /learning/memory            -> title aliases, safe corrections, examples
+//   GET/PUT/DELETE /learning/corpus  -> verified training corpus (관리자 전용)
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -68,6 +69,21 @@ import {
   sanitizeFeedbackExample,
   sanitizeModelEvaluation,
 } from './modelStats.js';
+import {
+  CORPUS_CHUNK_PREFIX,
+  CORPUS_META_PREFIX,
+  MAX_TRAINING_IMAGES,
+  corpusChunkKey,
+  corpusMetaKey,
+  corpusStatus,
+  evictableCorpusIds,
+  expectedChunkBytes,
+  matchCorpusChunkRoute,
+  matchCorpusRecordRoute,
+  sanitizeCorpusManifest,
+  TRAINING_CHUNK_BYTES,
+  validCorpusId,
+} from './trainingCorpus.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 import { fetchLyricsCandidates } from './lyrics.js';
 
@@ -354,6 +370,103 @@ export class UsageTracker extends DurableObject {
     };
   }
 
+  // ---- Training corpus -------------------------------------------------
+  //
+  // The only place the proxy keeps score IMAGES. Everything here is
+  // administrator-only, capped, and deliberately outside the weekly PPT purge:
+  // a corpus wiped every Sunday could never train anything.
+
+  async corpusManifests() {
+    const stored = await this.ctx.storage.list({ prefix: CORPUS_META_PREFIX });
+    return [...stored.values()].filter(Boolean);
+  }
+
+  async corpusStatus() {
+    return corpusStatus(await this.corpusManifests());
+  }
+
+  async putCorpusManifest(rawManifest) {
+    const manifest = sanitizeCorpusManifest(rawManifest);
+    if (!manifest) throw new Error('invalid corpus manifest');
+
+    const existing = await this.ctx.storage.get(corpusMetaKey(manifest.id));
+    if (existing?.image && existing.image.sha256 !== manifest.image?.sha256) {
+      await this.deleteCorpusChunks(manifest.id, existing.image.chunkCount);
+    }
+    // A page verified again is a better answer for the SAME page, so the
+    // record keeps its identity and gains a version. That is what bounds the
+    // corpus while preserving how the answer converged.
+    const merged = existing
+      ? {
+          ...manifest,
+          createdAt: existing.createdAt,
+          versions: dedupeVersions([...(existing.versions ?? []), ...manifest.versions]),
+          // A newer version has not been exported, whatever the old one had.
+          exportedAt: undefined,
+        }
+      : manifest;
+    await this.ctx.storage.put(corpusMetaKey(manifest.id), merged);
+
+    // Evict only what has already been exported; anything else has not made
+    // it into a training artifact yet.
+    for (const id of evictableCorpusIds(await this.corpusManifests(), MAX_TRAINING_IMAGES)) {
+      if (id !== manifest.id) await this.deleteCorpusRecord(id);
+    }
+    return merged;
+  }
+
+  async putCorpusChunk(id, index, data) {
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (!manifest?.image) throw new Error('unknown corpus record');
+    if (!Number.isSafeInteger(index) || index < 0 || index >= manifest.image.chunkCount) {
+      throw new Error('invalid chunk index');
+    }
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0 || data.byteLength > TRAINING_CHUNK_BYTES) {
+      throw new Error('invalid chunk body');
+    }
+    if (data.byteLength !== expectedChunkBytes(manifest.image, index)) {
+      throw new Error('chunk size does not match manifest');
+    }
+    await this.ctx.storage.put(corpusChunkKey(id, index), data);
+  }
+
+  async getCorpusChunk(id, index) {
+    if (!validCorpusId(id)) return null;
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (!manifest?.image || !Number.isSafeInteger(index) || index < 0 || index >= manifest.image.chunkCount) {
+      return null;
+    }
+    return (await this.ctx.storage.get(corpusChunkKey(id, index))) ?? null;
+  }
+
+  async deleteCorpusChunks(id, chunkCount) {
+    const keys = [];
+    for (let index = 0; index < chunkCount; index += 1) keys.push(corpusChunkKey(id, index));
+    for (let index = 0; index < keys.length; index += 128) {
+      await this.ctx.storage.delete(keys.slice(index, index + 128));
+    }
+  }
+
+  async deleteCorpusRecord(id) {
+    if (!validCorpusId(id)) throw new Error('invalid corpus id');
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (manifest?.image) await this.deleteCorpusChunks(id, manifest.image.chunkCount);
+    await this.ctx.storage.delete(corpusMetaKey(id));
+  }
+
+  /** Mark records as having reached a downloaded training artifact. */
+  async markCorpusExported(ids, at = new Date().toISOString()) {
+    let marked = 0;
+    for (const id of Array.isArray(ids) ? ids.slice(0, MAX_TRAINING_IMAGES) : []) {
+      if (!validCorpusId(id)) continue;
+      const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+      if (!manifest) continue;
+      await this.ctx.storage.put(corpusMetaKey(id), { ...manifest, exportedAt: at });
+      marked += 1;
+    }
+    return { marked, status: await this.corpusStatus() };
+  }
+
   async cleanupPptUpload(uploadId, files) {
     const keys = [];
     for (const kind of PPT_FILE_KINDS) {
@@ -537,6 +650,19 @@ export class UsageTracker extends DurableObject {
     }
     await this.ctx.storage.put(`library:ppt:deleted:${id}`, { id, deletedAt: new Date().toISOString() });
   }
+}
+
+/** Keep each distinct verified answer once, oldest first. */
+function dedupeVersions(versions) {
+  const seen = new Set();
+  const unique = [];
+  for (const version of versions.slice(-20)) {
+    const key = JSON.stringify(version);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(version);
+  }
+  return unique;
 }
 
 function usageTracker(env) {
@@ -729,6 +855,67 @@ export default {
     // What the app has already learned to fix. Read-only and open: aliases,
     // correction pairs and a few short before/after snippets carry no stored
     // song, so recognition can fetch them before every run.
+    // Training corpus. Administrator-only in both directions: the records
+    // carry score images and the lyrics a user verified.
+    if (url.pathname.startsWith('/learning/corpus')) {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      try {
+        if (url.pathname === '/learning/corpus') {
+          if (request.method === 'GET') {
+            return jsonResponse(await tracker.corpusStatus(), 200, { ...headers, 'Cache-Control': 'no-store' });
+          }
+          if (request.method === 'PUT') {
+            const body = JSON.parse(await request.text());
+            return jsonResponse({ manifest: await tracker.putCorpusManifest(body.manifest) }, 200, {
+              ...headers,
+              'Cache-Control': 'no-store',
+            });
+          }
+          return libraryError('not found', headers, 404);
+        }
+
+        if (url.pathname === '/learning/corpus/manifests' && request.method === 'GET') {
+          return jsonResponse({ manifests: await tracker.corpusManifests() }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+
+        if (url.pathname === '/learning/corpus/exported' && request.method === 'POST') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse(await tracker.markCorpusExported(body.ids), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+
+        const chunk = matchCorpusChunkRoute(url.pathname);
+        if (chunk && request.method === 'PUT') {
+          await tracker.putCorpusChunk(chunk.id, chunk.index, await request.arrayBuffer());
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+        if (chunk && request.method === 'GET') {
+          const data = await tracker.getCorpusChunk(chunk.id, chunk.index);
+          if (!(data instanceof ArrayBuffer)) return libraryError('corpus chunk not found', headers, 404);
+          return new Response(data, {
+            status: 200,
+            headers: { ...headers, 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' },
+          });
+        }
+
+        const record = matchCorpusRecordRoute(url.pathname);
+        if (record && request.method === 'DELETE') {
+          await tracker.deleteCorpusRecord(record.id);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
     if (url.pathname === '/learning/memory') {
       const tracker = usageTracker(env);
       if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);

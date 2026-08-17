@@ -44,6 +44,8 @@ import {
   type FeedbackDiff,
 } from '../lib/learning/feedbackDiff';
 import { flushFeedbackQueue, queueFeedback } from '../lib/learning/feedbackQueue';
+import { dataUrlToBytes, resizeTrainingImage } from '../lib/learning/trainingCorpus';
+import { uploadTrainingRecord } from '../lib/learning/learningClient';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
@@ -85,6 +87,8 @@ function songHasLyrics(song: Song): boolean {
 /** One page's recognition evidence, held until the user decides about it. */
 interface PageEvidence {
   pageHash?: string;
+  /** The rendered page, for pairing a verified correction with its image. */
+  image?: string;
   observations: RecognitionObservation[];
   confidence: number;
   needsReview: boolean;
@@ -657,6 +661,10 @@ export default function LyricsGenerator({
         active.forEach((song, index) => {
           evidence.set(song.id, {
             pageHash: pageHashes[index],
+            // Kept so an explicit save can pair the correction with the page
+            // it corrected. Recognition renders these anyway; storing the
+            // reference costs nothing until somebody verifies the song.
+            image: images[index],
             observations: [],
             confidence: 0,
             needsReview: true,
@@ -1078,6 +1086,44 @@ export default function LyricsGenerator({
   }, []);
 
   /**
+   * Pair one verified correction with a shrunken copy of the page it came
+   * from, and store it in the training corpus.
+   */
+  const storeTrainingRecord = useCallback(
+    async (evidence: PageEvidence, finalHash: string, final: ParsedScore, diff: FeedbackDiff) => {
+      const pageHash = evidence.pageHash;
+      if (!pageHash) return;
+      const resized = evidence.image ? await resizeTrainingImage(evidence.image) : null;
+      const bytes = resized ? dataUrlToBytes(resized.dataUrl) : undefined;
+      await uploadTrainingRecord(
+        {
+          // Derived from the page, so re-verifying the same page adds a
+          // version instead of a second record.
+          id: pageHash.slice(0, 32),
+          pageHash,
+          feedbackId: finalHash,
+          createdAt: new Date().toISOString(),
+          imageAvailable: !!bytes,
+          ...(bytes && resized
+            ? {
+                image: {
+                  mimeType: resized.mimeType,
+                  size: bytes.byteLength,
+                  sha256: await hashText(resized.dataUrl),
+                  chunkCount: Math.max(1, Math.ceil(bytes.byteLength / (1024 * 1024))),
+                },
+              }
+            : {}),
+          versions: [final],
+          diff,
+        },
+        bytes,
+      );
+    },
+    [],
+  );
+
+  /**
    * Turn one explicit save into a training record and queue it.
    *
    * Everything here is best-effort and deliberately after the library write:
@@ -1149,8 +1195,13 @@ export default function LyricsGenerator({
         evaluations: evidence.observations.map((observation) => scoreObservation(observation, final)),
         memory: memoryContribution,
       });
+
+      // The training copy is stored after the record is safely queued and is
+      // never allowed to hold up a save: a page whose image cannot be captured
+      // still contributes its correction as metadata.
+      void storeTrainingRecord(evidence, finalHash, final, diff).catch(() => undefined);
     },
-    [],
+    [storeTrainingRecord],
   );
 
   /**
