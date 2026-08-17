@@ -282,34 +282,93 @@ export function looksLikeInfoPage(text: string): boolean {
     .some((rawLine) => INFO_PAGE_MARKERS.some((marker) => marker.test(rawLine.trim())));
 }
 
+/**
+ * How far into a conti the cover can reach.
+ *
+ * A cover is the first page, or the first two when the write-up runs over.
+ * Bounding the search is what stops a later page from being mistaken for one:
+ * a score page carrying a stray 본문 line, or the printed-passage section, can
+ * otherwise look cover-shaped, and a wrong cover takes the whole song list
+ * with it.
+ */
+export const MAX_COVER_PAGES = 2;
+
+/**
+ * Does this page read as a conti cover?
+ *
+ * Two independent signals, because covers are laid out differently from week
+ * to week:
+ *
+ *  - a **song list plus service context** — what parseCoverText already
+ *    requires, and the richest signal when the layout is one it can read;
+ *  - a **sermon title and scripture together**. Those two are always written
+ *    as a pair on the cover and nowhere else, so their co-location identifies
+ *    the page even when the song list is laid out in a way the table parser
+ *    cannot follow.
+ *
+ * The second signal matters most for a sparse cover — a date, the two sermon
+ * fields, and a bare numbered song list with no key column. That page has too
+ * little prose to look like an information page, so without this it would fall
+ * through to musicPages and be recognized as an imaginary song.
+ */
+export function looksLikeCoverText(text: string): boolean {
+  if (parseCoverText(text)) return true;
+  const { sermonTitle, scripture } = parseSermonInfoText(text);
+  return !!sermonTitle && !!scripture;
+}
+
+/**
+ * The one or two leading pages that make up the cover, or an empty list.
+ *
+ * A second page joins the cover either on its own merits or as the typed
+ * continuation of the first — the write-up commonly spills over, carrying the
+ * last song's commentary and the printed 본문. Reading both as one cover is
+ * what keeps that commentary attached to its song.
+ */
+export function findCoverPages(pageTexts: string[]): number[] {
+  const limit = Math.min(MAX_COVER_PAGES, pageTexts.length);
+  const pages: number[] = [];
+  for (let page = 1; page <= limit; page++) {
+    if (looksLikeCoverText(pageTexts[page - 1])) pages.push(page);
+  }
+  if (pages.length === 0) return [];
+  if (pages.length === 1 && pages[0] === 1 && limit >= 2 && looksLikeInfoPage(pageTexts[1])) {
+    pages.push(2);
+  }
+  return pages;
+}
+
 /** Classify PDF pages (1-based): cover, session-notes, and sheet-music pages. */
 export function classifyPages(pageTexts: string[]): {
+  /** Every page the cover spans, in order; empty when there is no cover. */
+  coverPages: number[];
+  /** First cover page, or null. Kept for callers that only need the one. */
   coverIndex: number | null;
   notesIndex: number | null;
-  /** Typed information pages (cover continuations) that carry no score. */
+  /** Typed information pages beyond the cover that carry no score. */
   infoPages: number[];
   musicPages: number[];
 } {
-  let coverIndex: number | null = null;
-  let notesIndex: number | null = null;
+  const coverPages = findCoverPages(pageTexts);
+  const cover = new Set(coverPages);
 
-  for (let i = 0; i < pageTexts.length; i++) {
-    const page = i + 1;
-    if (coverIndex === null && parseCoverText(pageTexts[i])) {
-      coverIndex = page;
-    } else if (notesIndex === null && NOTES_RE.test(pageTexts[i])) {
+  let notesIndex: number | null = null;
+  for (let page = 1; page <= pageTexts.length; page++) {
+    if (cover.has(page)) continue;
+    if (NOTES_RE.test(pageTexts[page - 1])) {
       notesIndex = page;
+      break;
     }
   }
 
   const infoPages: number[] = [];
   const musicPages: number[] = [];
   for (let page = 1; page <= pageTexts.length; page++) {
-    if (page === coverIndex || page === notesIndex) continue;
+    if (cover.has(page) || page === notesIndex) continue;
     if (looksLikeInfoPage(pageTexts[page - 1])) infoPages.push(page);
     else musicPages.push(page);
   }
-  return { coverIndex, notesIndex, infoPages, musicPages };
+  return { coverPages, coverIndex: coverPages[0] ?? null, notesIndex, infoPages, musicPages };
 }
 
 /**
