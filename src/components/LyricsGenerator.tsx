@@ -45,7 +45,8 @@ import {
 } from '../lib/learning/feedbackDiff';
 import { flushFeedbackQueue, queueFeedback } from '../lib/learning/feedbackQueue';
 import { dataUrlToBytes, resizeTrainingImage } from '../lib/learning/trainingCorpus';
-import { uploadTrainingRecord } from '../lib/learning/learningClient';
+import { loadActiveCorrectionRunner, uploadTrainingRecord } from '../lib/learning/learningClient';
+import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
@@ -653,6 +654,10 @@ export default function LyricsGenerator({
         // repeating a correction the user already made.
         const memory = await fetchLearningMemory();
         memoryRef.current = memory;
+        // The hand-trained corrector, when this deployment has one. Loading it
+        // is what pulls in the inference runtime, so a deployment without an
+        // artifact never downloads it.
+        const corrector = await loadActiveCorrectionRunner();
         // Page hashes tie this run's evidence to the page it came from, so a
         // correction saved next week still knows which reading it corrected.
         const pageHashes = await Promise.all(
@@ -814,6 +819,24 @@ export default function LyricsGenerator({
             ),
           );
         });
+
+        // The hand-trained corrector runs last among the local steps: it has
+        // seen this deployment's own hard pages, so it can propose a fix where
+        // every vision model made the same mistake and consensus had nothing
+        // to choose between. Every failure leaves consensus exactly as it was.
+        if (corrector) {
+          enterPhase('crosscheck', [...scoreById.keys()]);
+          for (const [id, score] of [...scoreById.entries()]) {
+            if (isCancelled(id)) continue;
+            const found = evidence.get(id);
+            scoreById.set(
+              id,
+              await correctConsensus(score, found?.observations ?? [], corrector, {
+                titleConfidence: found?.confidence,
+              }),
+            );
+          }
+        }
 
         // A full response can occasionally identify a title that the quick
         // title pass missed. Apply the exclusion list first, then prefer the

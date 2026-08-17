@@ -24,6 +24,12 @@ export declare class UsageTracker {
   deleteLyricsEntry(title: unknown): Promise<void>;
   modelStats(): Promise<Record<string, unknown>[]>;
   recordMemoryContribution(raw: unknown): Promise<void>;
+  correctionModelSlots(): Promise<{ active: unknown; previous: unknown }>;
+  stageCorrectionModel(rawManifest: unknown): Promise<Record<string, unknown>>;
+  putCorrectionChunk(version: string, path: string, index: number, data: ArrayBuffer): Promise<void>;
+  activateCorrectionModel(version: unknown): Promise<{ active: unknown; previous: unknown }>;
+  rollbackCorrectionModel(): Promise<{ active: unknown; previous: unknown }>;
+  readCorrectionFile(version: string, path: string): Promise<ArrayBuffer | null>;
   corpusManifests(): Promise<Record<string, unknown>[]>;
   corpusStatus(): Promise<Record<string, number>>;
   putCorpusManifest(rawManifest: unknown): Promise<Record<string, unknown>>;

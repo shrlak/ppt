@@ -17,11 +17,14 @@ import {
   type ModelReliability,
   type RankedModel,
 } from '../lib/ai/modelReliability';
+import JSZip from 'jszip';
 import {
+  fetchCorrectionModelSlots,
   fetchModelReliabilities,
   fetchTrainingCorpusStatus,
   learningFetch,
   hasLearningProxy,
+  type CorrectionModelSlots,
   type TrainingCorpusStatus,
 } from '../lib/learning/learningClient';
 import { ADMIN_PASSWORD } from '../lib/adminAuth';
@@ -176,6 +179,8 @@ export default function LearningAdminSection({ settings, onRoleOverride, bugsScr
         </div>
       </section>
 
+      <CorrectionModelPanel />
+
       <section className="admin-deck admin-recognition" data-testid="admin-learning-sources">
         <div className="admin-deck-info">
           <h4>웹 가사 출처</h4>
@@ -193,6 +198,163 @@ export default function LearningAdminSection({ settings, onRoleOverride, bugsScr
       </section>
     </>
   );
+}
+
+/**
+ * Upload, activate and roll back the hand-trained correction model.
+ *
+ * The artifact is produced by notebooks/lyrics-correction-finetune.ipynb and
+ * should be checked with scripts/validate-correction-model.mjs first; the
+ * proxy re-checks the score gate regardless, because it is what decides
+ * whether a version may go live.
+ */
+function CorrectionModelPanel() {
+  const [slots, setSlots] = useState<CorrectionModelSlots>({ active: null, previous: null });
+  const [busy, setBusy] = useState('');
+
+  const refresh = useCallback(async () => {
+    setSlots(await fetchCorrectionModelSlots());
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const upload = useCallback(
+    async (file: File) => {
+      setBusy('업로드 중…');
+      try {
+        const version = await uploadCorrectionArtifact(file, (message) => setBusy(message));
+        await refresh();
+        showToast(`교정 모델 ${version}을(를) 적용했습니다.`);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy('');
+      }
+    },
+    [refresh],
+  );
+
+  const rollback = useCallback(async () => {
+    setBusy('되돌리는 중…');
+    try {
+      const response = await learningFetch('/learning/correction-model/rollback', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ADMIN_PASSWORD}` },
+      });
+      if (!response?.ok) throw new Error('되돌리지 못했습니다.');
+      await refresh();
+      showToast('이전 교정 모델로 되돌렸습니다.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  }, [refresh]);
+
+  const active = slots.active;
+  return (
+    <section className="admin-deck admin-recognition" data-testid="admin-correction-model">
+      <div className="admin-deck-info">
+        <h4>가사 교정 모델 (선택)</h4>
+        <p>
+          여러 인식 모델이 <strong>모두 같은 실수</strong>를 한 페이지를 다듬습니다. 없으면 아무 일도
+          일어나지 않고, 추론 런타임도 내려받지 않습니다. 학습은{' '}
+          <code>notebooks/lyrics-correction-finetune.ipynb</code>에서 무료로 실행하고, 올리기 전에{' '}
+          <code>npm run validate:correction-model &lt;파일&gt;</code>로 확인하세요.
+        </p>
+        <p className="learning-corpus-count" data-testid="correction-model-status">
+          {active
+            ? `활성 ${active.version} · ${active.baseModel} · 표본 ${active.samples}건 · ` +
+              `전체 ${percent(active.baselineOverall)} → ${percent(active.meanOverall)} · ` +
+              `가사 ${percent(active.baselineLyricsScore)} → ${percent(active.lyricsScore)}`
+            : '활성 모델 없음 — 합의 결과를 그대로 사용합니다.'}
+        </p>
+        {slots.previous && (
+          <p className="learning-model-stats">이전 버전 {slots.previous.version} (되돌릴 수 있음)</p>
+        )}
+        <div className="admin-actions">
+          <label className="btn" data-testid="correction-model-upload-label">
+            {busy || '아티팩트 ZIP 올리기'}
+            <input
+              type="file"
+              accept=".zip"
+              className="visually-hidden"
+              data-testid="correction-model-upload"
+              disabled={!!busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void upload(file);
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn"
+            data-testid="correction-model-rollback"
+            disabled={!slots.previous || !!busy}
+            onClick={() => void rollback()}
+          >
+            이전 버전으로 되돌리기
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Send one artifact ZIP: manifest first, then each file in chunks, then
+ * activate. Activation is last so a half-finished upload is never live.
+ */
+async function uploadCorrectionArtifact(file: File, onProgress: (message: string) => void): Promise<string> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const manifestEntry = zip.file('manifest.json');
+  if (!manifestEntry) throw new Error('manifest.json이 없습니다 — 교정 모델 아티팩트가 맞는지 확인하세요.');
+  const manifest = JSON.parse(await manifestEntry.async('string')) as {
+    version: string;
+    files: { path: string }[];
+  };
+
+  const staged = await learningFetch('/learning/correction-model', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_PASSWORD}` },
+    body: JSON.stringify({ manifest }),
+  });
+  if (!staged?.ok) {
+    throw new Error(
+      (await staged?.json().catch(() => null))?.error ?? '아티팩트를 서버가 받아들이지 않았습니다.',
+    );
+  }
+
+  const chunkBytes = 1024 * 1024;
+  for (const [index, entry] of manifest.files.entries()) {
+    onProgress(`업로드 중… ${index + 1}/${manifest.files.length}`);
+    const bytes = await zip.file(entry.path)!.async('uint8array');
+    for (let chunk = 0; chunk * chunkBytes < bytes.byteLength; chunk += 1) {
+      const body = bytes.slice(chunk * chunkBytes, (chunk + 1) * chunkBytes);
+      const response = await learningFetch(
+        `/learning/correction-model/${encodeURIComponent(manifest.version)}/files/${entry.path}/chunks/${chunk}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${ADMIN_PASSWORD}` },
+          body: body as BodyInit,
+        },
+      );
+      if (!response?.ok) throw new Error(`${entry.path} 전송에 실패했습니다.`);
+    }
+  }
+
+  onProgress('적용 중…');
+  const activated = await learningFetch('/learning/correction-model/activate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_PASSWORD}` },
+    body: JSON.stringify({ version: manifest.version }),
+  });
+  if (!activated?.ok) throw new Error('업로드는 됐지만 적용하지 못했습니다.');
+  return manifest.version;
 }
 
 function ModelRow({

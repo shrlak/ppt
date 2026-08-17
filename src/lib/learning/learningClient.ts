@@ -6,6 +6,12 @@
 import type { ModelReliability } from '../ai/modelReliability';
 import { EMPTY_MEMORY, type LearningMemory } from './onlineLearning';
 import { ADMIN_PASSWORD } from '../adminAuth';
+import {
+  acceptCorrectionManifest,
+  loadCorrectionModel,
+  type CorrectionModelManifest,
+  type CorrectionRunner,
+} from './correctionModel';
 
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
 
@@ -217,4 +223,43 @@ export async function fetchTrainingCorpusStatus(): Promise<TrainingCorpusStatus 
   } catch {
     return null;
   }
+}
+
+/** Where the browser runtime fetches model files from, or undefined. */
+export function correctionModelHost(): string | undefined {
+  const url = learningUrl('/learning/correction-model/');
+  return url ?? undefined;
+}
+
+export interface CorrectionModelSlots {
+  active: CorrectionModelManifest | null;
+  previous: CorrectionModelManifest | null;
+}
+
+/** Which correction model, if any, this deployment has active. */
+export async function fetchCorrectionModelSlots(): Promise<CorrectionModelSlots> {
+  const response = await learningFetch('/learning/correction-model', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response?.ok) return { active: null, previous: null };
+  try {
+    const payload = (await response.json()) as CorrectionModelSlots;
+    return { active: payload.active ?? null, previous: payload.previous ?? null };
+  } catch {
+    return { active: null, previous: null };
+  }
+}
+
+/**
+ * Load the correction model for this run, or nothing.
+ *
+ * The runtime is only imported once an artifact is actually active, so a
+ * deployment that has never trained one downloads nothing.
+ */
+export async function loadActiveCorrectionRunner(): Promise<CorrectionRunner | null> {
+  if (!hasLearningProxy()) return null;
+  const { active } = await fetchCorrectionModelSlots();
+  if (!active || !acceptCorrectionManifest(active)) return null;
+  return loadCorrectionModel(active, correctionModelHost());
 }

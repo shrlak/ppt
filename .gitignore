@@ -12,6 +12,11 @@ desktop/src-tauri/gen/schemas
 public/back-slides.pptx
 bench/out/
 
+# Hand-trained correction-model artifacts. Built in a notebook, validated
+# locally, uploaded to the proxy — never committed: they are derived from
+# copyrighted 악보 and are far too large for git.
+artifacts/lyrics-corrector/
+
 # Real-악보 benchmark corpus — fetched on demand, never committed (see bench/corpus/README.md)
 bench/corpus/pages/
 bench/real/

@@ -22,6 +22,7 @@
 //   POST /learning/feedback          -> store one verified user correction
 //   GET  /learning/memory            -> title aliases, safe corrections, examples
 //   GET/PUT/DELETE /learning/corpus  -> verified training corpus (관리자 전용)
+//   /learning/correction-model/*     -> hand-trained correction model artifacts
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -69,6 +70,20 @@ import {
   sanitizeFeedbackExample,
   sanitizeModelEvaluation,
 } from './modelStats.js';
+import {
+  CORRECTION_CHUNK_BYTES,
+  MAX_CORRECTION_VERSIONS,
+  acceptCorrectionManifest,
+  expectedFileChunkBytes,
+  fileKey,
+  isAllowedModelOrigin,
+  manifestKey,
+  matchCorrectionReadRoute,
+  matchCorrectionUploadRoute,
+  publicCorrectionManifest,
+  sanitizeCorrectionManifest,
+  validVersion,
+} from './correctionModel.js';
 import {
   CORPUS_CHUNK_PREFIX,
   CORPUS_META_PREFIX,
@@ -468,6 +483,126 @@ export class UsageTracker extends DurableObject {
     return { marked, status: await this.corpusStatus() };
   }
 
+  // ---- Hand-trained correction model -----------------------------------
+
+  async correctionModelSlots() {
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    return {
+      active: publicCorrectionManifest(active ?? null),
+      previous: publicCorrectionManifest(previous ?? null),
+    };
+  }
+
+  async stageCorrectionModel(rawManifest) {
+    const manifest = sanitizeCorrectionManifest(rawManifest);
+    if (!manifest) throw new Error('invalid correction model manifest');
+    // The score gate lives here as well as in the browser: the proxy decides
+    // what may become active, so a client that skipped its own check cannot
+    // activate a model that made things worse.
+    if (!acceptCorrectionManifest(manifest)) throw new Error('correction model does not improve on the baseline');
+    await this.ctx.storage.put(manifestKey(`staged:${manifest.version}`), manifest);
+    return manifest;
+  }
+
+  async putCorrectionChunk(version, path, index, data) {
+    const staged = await this.ctx.storage.get(manifestKey(`staged:${version}`));
+    const file = staged?.files?.find((candidate) => candidate.path === path);
+    if (!file) throw new Error('unknown correction model file');
+    if (!Number.isSafeInteger(index) || index < 0 || index >= file.chunkCount) {
+      throw new Error('invalid chunk index');
+    }
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0 || data.byteLength > CORRECTION_CHUNK_BYTES) {
+      throw new Error('invalid chunk body');
+    }
+    if (data.byteLength !== expectedFileChunkBytes(file, index)) {
+      throw new Error('chunk size does not match manifest');
+    }
+    await this.ctx.storage.put(fileKey(version, path, index), data);
+  }
+
+  /**
+   * Promote a fully uploaded version to active.
+   *
+   * Every declared chunk has to be present first: a half-uploaded model would
+   * fail at generation time, inside a page the user is waiting on, rather than
+   * here where it can simply be refused.
+   */
+  async activateCorrectionModel(version) {
+    if (!validVersion(version)) throw new Error('invalid correction model version');
+    const staged = await this.ctx.storage.get(manifestKey(`staged:${version}`));
+    if (!staged) throw new Error('correction model was not uploaded');
+    for (const file of staged.files) {
+      for (let index = 0; index < file.chunkCount; index += 1) {
+        const chunk = await this.ctx.storage.get(fileKey(version, file.path, index));
+        if (!(chunk instanceof ArrayBuffer)) throw new Error(`missing ${file.path} chunk ${index}`);
+      }
+    }
+
+    const active = await this.ctx.storage.get(manifestKey('active'));
+    const previous = await this.ctx.storage.get(manifestKey('previous'));
+    if (previous && previous.version !== version && previous.version !== active?.version) {
+      await this.deleteCorrectionVersion(previous);
+    }
+    if (active) await this.ctx.storage.put(manifestKey('previous'), active);
+    await this.ctx.storage.put(manifestKey('active'), staged);
+    await this.ctx.storage.delete(manifestKey(`staged:${version}`));
+    return this.correctionModelSlots();
+  }
+
+  /** Swap active and previous, for when a new model turns out to be worse. */
+  async rollbackCorrectionModel() {
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    if (!previous) throw new Error('no previous correction model to roll back to');
+    await this.ctx.storage.put(manifestKey('active'), previous);
+    if (active) await this.ctx.storage.put(manifestKey('previous'), active);
+    else await this.ctx.storage.delete(manifestKey('previous'));
+    return this.correctionModelSlots();
+  }
+
+  async deleteCorrectionVersion(manifest) {
+    const keys = [];
+    for (const file of manifest.files ?? []) {
+      for (let index = 0; index < file.chunkCount; index += 1) keys.push(fileKey(manifest.version, file.path, index));
+    }
+    for (let index = 0; index < keys.length; index += 128) {
+      await this.ctx.storage.delete(keys.slice(index, index + 128));
+    }
+    void MAX_CORRECTION_VERSIONS;
+  }
+
+  async readCorrectionFile(version, path) {
+    if (!validVersion(version)) return null;
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    // Only a version that is (or was) live is readable; a staged upload is not
+    // servable until it has been activated.
+    const manifest = [active, previous].find((candidate) => candidate?.version === version);
+    const file = manifest?.files?.find((candidate) => candidate.path === path);
+    if (!file) return null;
+
+    const parts = [];
+    for (let index = 0; index < file.chunkCount; index += 1) {
+      const chunk = await this.ctx.storage.get(fileKey(version, path, index));
+      if (!(chunk instanceof ArrayBuffer)) return null;
+      parts.push(new Uint8Array(chunk));
+    }
+    const bytes = new Uint8Array(file.size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return bytes.buffer;
+  }
+
   async cleanupPptUpload(uploadId, files) {
     const keys = [];
     for (const kind of PPT_FILE_KINDS) {
@@ -856,6 +991,72 @@ export default {
     // What the app has already learned to fix. Read-only and open: aliases,
     // correction pairs and a few short before/after snippets carry no stored
     // song, so recognition can fetch them before every run.
+    // The hand-trained correction model. Writes are administrator-only; the
+    // model FILES are read by the browser runtime itself, so they are served
+    // from stable versioned URLs to the app's own origins with immutable
+    // caching. No training record is reachable through them.
+    if (url.pathname.startsWith('/learning/correction-model')) {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+
+      const read = matchCorrectionReadRoute(url.pathname);
+      if (read && request.method === 'GET') {
+        if (!isAllowedModelOrigin(request, allowedOrigins(env))) {
+          return libraryError('origin not allowed', headers, 403);
+        }
+        const file = await tracker.readCorrectionFile(read.version, read.path);
+        if (!(file instanceof ArrayBuffer)) return libraryError('model file not found', headers, 404);
+        return new Response(file, {
+          status: 200,
+          headers: {
+            ...headers,
+            'Content-Type': 'application/octet-stream',
+            // Versioned URL, so the bytes at it never change.
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        });
+      }
+
+      if (url.pathname === '/learning/correction-model' && request.method === 'GET') {
+        return jsonResponse(await tracker.correctionModelSlots(), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      }
+
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      try {
+        if (url.pathname === '/learning/correction-model' && request.method === 'PUT') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse({ manifest: await tracker.stageCorrectionModel(body.manifest) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (url.pathname === '/learning/correction-model/activate' && request.method === 'POST') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse(await tracker.activateCorrectionModel(body.version), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (url.pathname === '/learning/correction-model/rollback' && request.method === 'POST') {
+          return jsonResponse(await tracker.rollbackCorrectionModel(), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        const upload = matchCorrectionUploadRoute(url.pathname);
+        if (upload && request.method === 'PUT') {
+          await tracker.putCorrectionChunk(upload.version, upload.path, upload.index, await request.arrayBuffer());
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
     // Training corpus. Administrator-only in both directions: the records
     // carry score images and the lyrics a user verified.
     if (url.pathname.startsWith('/learning/corpus')) {
