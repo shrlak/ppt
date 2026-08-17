@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   classifyPages,
+  findCoverPages,
+  looksLikeCoverText,
   deriveSongsFromMusicPages,
   looksLikeInfoPage,
   matchSongsToPages,
@@ -141,6 +143,29 @@ describe('parseSermonInfoText', () => {
   });
 });
 
+describe('findCoverPages', () => {
+  it('reads a cover that spans two pages as one document', () => {
+    // 어려운 일 당할 때 is a table row on page 1 and a commentary bullet on
+    // page 2. Parsing the pages separately loses the pairing, and the song
+    // keeps its order number but never gains its description.
+    const pages = [coverTableText, continuationText, 'I - V - C - junk OCR'];
+    expect(findCoverPages(pages)).toEqual([1, 2]);
+
+    const cover = parseCoverText(findCoverPages(pages).map((page) => pages[page - 1]).join('\n'));
+    const hard = cover?.songs.find((song) => song.title === '어려운 일 당할 때');
+    expect(hard?.key).toBe('F -> Ab -> G');
+    expect(hard?.description).toContain('하나님은 우리와 함께');
+  });
+
+  it('stops at one page when nothing follows the cover', () => {
+    expect(findCoverPages([coverText, 'I - V - C - junk OCR'])).toEqual([1]);
+  });
+
+  it('has no cover to find in a conti of nothing but scores', () => {
+    expect(findCoverPages(['I - V - C', 'I - V - C'])).toEqual([]);
+  });
+});
+
 describe('classifyPages', () => {
   it('identifies cover, notes, and music pages', () => {
     const { coverIndex, notesIndex, musicPages } = classifyPages([
@@ -154,18 +179,67 @@ describe('classifyPages', () => {
     expect(musicPages).toEqual([3, 4]);
   });
 
-  it('keeps a typed cover continuation out of the score pages', () => {
+  it('reads a two-page cover as one cover, not as a score page', () => {
     // The 08.09.26 conti runs its write-up onto a second page. Left in
     // musicPages it would be matched to 어려운 일 당할 때, then dropped as a
     // non-score page — taking the song with it.
-    const { coverIndex, infoPages, musicPages } = classifyPages([
+    const { coverPages, coverIndex, infoPages, musicPages } = classifyPages([
       coverTableText,
       continuationText,
       'I - V - C - junk OCR',
     ]);
+    expect(coverPages).toEqual([1, 2]);
     expect(coverIndex).toBe(1);
-    expect(infoPages).toEqual([2]);
+    expect(infoPages).toEqual([]);
     expect(musicPages).toEqual([3]);
+  });
+
+  it('never looks past the second page for a cover', () => {
+    // A score page whose OCR happens to carry both sermon fields would
+    // otherwise be taken for the cover, and a wrong cover takes the whole
+    // song list with it.
+    const lateCoverShapedPage = ['설교: 뒤늦게 나온 제목', '본문: 시편 1편 1-6절'].join('\n');
+    const { coverPages, musicPages } = classifyPages([
+      'I - V - C - junk OCR',
+      'I - V - C - junk OCR',
+      lateCoverShapedPage,
+    ]);
+    expect(coverPages).toEqual([]);
+    expect(musicPages).toEqual([1, 2, 3]);
+  });
+
+  it('finds a sparse cover by its sermon title and 본문 sitting together', () => {
+    // Too little prose to look like an information page and no key column for
+    // the song table, so without the paired sermon fields this page would fall
+    // through to musicPages and be recognized as an imaginary song.
+    const sparseCover = [
+      '2026.08.09',
+      '설교 제목: 청년의 때',
+      '본문: 전도서 12장 1-8절',
+      '1. 매일매일',
+      '2. 청년의 기도',
+    ].join('\n');
+    const { coverPages, musicPages } = classifyPages([sparseCover, 'I - V - C - junk OCR']);
+    expect(coverPages).toEqual([1]);
+    expect(musicPages).toEqual([2]);
+  });
+
+  it('does not call a page a cover on one sermon field alone', () => {
+    // 본문 turns up on its own all over a conti — in the printed-passage
+    // section, and in OCR noise. Only the pair identifies the cover.
+    expect(looksLikeCoverText('본문: 전도서 12장 1-8절')).toBe(false);
+    expect(looksLikeCoverText('설교 제목: 청년의 때')).toBe(false);
+    expect(looksLikeCoverText('설교 제목: 청년의 때\n본문: 전도서 12장 1-8절')).toBe(true);
+  });
+
+  it('takes the cover from page 2 when page 1 is a blank title page', () => {
+    const { coverPages, musicPages } = classifyPages([
+      '   ',
+      '설교 제목: 청년의 때\n본문: 전도서 12장 1-8절',
+      'I - V - C - junk OCR',
+    ]);
+    expect(coverPages).toEqual([2]);
+    expect(musicPages).toEqual([1, 3]);
   });
 
   it('leaves a score page with a lyric text layer alone', () => {

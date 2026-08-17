@@ -87,14 +87,23 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
     }
   }
 
-  const { coverIndex, musicPages } = classifyPages(pageTexts);
-  const info: ContiInfo = (coverIndex !== null ? parseCoverText(pageTexts[coverIndex - 1]) : null) ?? {
-    songs: [],
-  };
-  // A sermon-information page may be separate from the song-list cover. Read
-  // any embedded PDF text now; image-only pages are handled by vision models
+  const { coverPages, musicPages } = classifyPages(pageTexts);
+  // The cover is read as ONE document even when it spans two pages: a song
+  // table on the first page and its commentary bullets on the second belong
+  // to the same list, and parsing them separately loses the pairing.
+  const coverText = coverPages.map((page) => pageTexts[page - 1]).join('\n');
+  const info: ContiInfo = (coverPages.length > 0 ? parseCoverText(coverText) : null) ?? { songs: [] };
+
+  // The sermon title and 본문 are written together on the cover, so that is
+  // where they are taken from first.
+  const fromCover = parseSermonInfoText(coverText);
+  info.sermonTitle ??= fromCover.sermonTitle;
+  info.scripture ??= fromCover.scripture;
+  // Failing that, a conti may put them on a page of their own. Read any
+  // embedded PDF text now; image-only pages are handled by vision models
   // during the title/classification pass.
   for (const pageText of pageTexts) {
+    if (info.sermonTitle && info.scripture) break;
     const detected = parseSermonInfoText(pageText);
     info.sermonTitle ??= detected.sermonTitle;
     info.scripture ??= detected.scripture;
