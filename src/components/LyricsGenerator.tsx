@@ -27,7 +27,7 @@ import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
 import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
 import { hashPageImage } from '../lib/ai/pageHash';
 import type { ParsedScore } from '../lib/ai/scoreParser';
-import { fetchWebLyrics, hasWebLyricsLookup } from '../lib/lyrics/webLyrics';
+import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeWebLyrics } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
@@ -486,10 +486,18 @@ export default function LyricsGenerator({
         enterPhase('web', pending.map(([id]) => id));
         await Promise.all(
           pending.map(async ([id, { score, engine, title }]) => {
-            const web = title ? await fetchWebLyrics(title) : null;
+            // What the models read is sent as matching evidence, so a page
+            // that merely shares this title cannot be mistaken for this song.
+            const lookup = title
+              ? await fetchWebLyrics({ title, sample: lyricSample(score.sections) })
+              : { candidates: [], links: [] };
             if (isCancelled(id)) return;
+            const web = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
             const merged = mergeWebLyrics(score, web);
-            applyRecognizedScore(id, merged.score, engine);
+            applyRecognizedScore(id, merged.score, engine, {
+              source: web ? 'web' : 'models',
+              webSourceUrl: web?.sourceUrl,
+            });
             if (web && merged.outcome !== 'unused') {
               showToast(
                 merged.outcome === 'filled'

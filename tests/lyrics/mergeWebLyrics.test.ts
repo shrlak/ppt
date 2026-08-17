@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { crossReferenceLines, mergeWebLyrics } from '../../src/lib/lyrics/mergeWebLyrics';
-import type { WebLyrics } from '../../src/lib/lyrics/webLyrics';
+import type { ScoredLyricsCandidate } from '../../src/lib/lyrics/webLyrics';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
 // Placeholder text. The "recognized" copies carry the kind of single-syllable
@@ -11,12 +11,24 @@ const C_TRUE = ['높이 높이 노래해', '영원토록 노래해'];
 const C_OCR = ['높이 높이 노래해', '영원토록 노래혜'];
 const B_TRUE = ['잔잔한 강물처럼', '흘러가는 노래로'];
 
-function web(sections: { label: string; lines: string[] }[]): WebLyrics {
+function web(
+  sections: { label: string; lines: string[] }[],
+  overrides: Partial<ScoredLyricsCandidate> = {},
+): ScoredLyricsCandidate {
   return {
+    id: 'ccm:ccm.co.kr/song/1',
+    title: '가나다라 마바사',
     sections,
     order: ['I', ...sections.map((s) => s.label)],
     sourceUrl: 'https://ccm.co.kr/song/1',
     sourceHost: 'ccm.co.kr',
+    source: 'ccm',
+    score: 0.95,
+    titleScore: 1,
+    artistScore: 0,
+    lyricsScore: 0.9,
+    decision: 'auto',
+    ...overrides,
   };
 }
 

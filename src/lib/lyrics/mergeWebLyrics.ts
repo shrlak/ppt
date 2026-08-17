@@ -18,7 +18,7 @@ import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from '../utils/types';
 import { normalizeKoreanLyricLines } from './koreanSpelling';
 import { lineSimilarity, sectionSimilarity } from './textSimilarity';
-import type { WebLyrics } from './webLyrics';
+import type { ScoredLyricsCandidate } from './webLyrics';
 
 /**
  * How alike a recognized part and a published part must read before the
@@ -136,7 +136,7 @@ function pairParts(recognized: Section[], published: Section[]): Map<number, num
  * one that matches nothing, the score comes back unchanged apart from having
  * its lyrics normalized to 한국어 맞춤법.
  */
-export function mergeWebLyrics(score: ParsedScore, web: WebLyrics | null): WebLyricsMerge {
+export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | null): WebLyricsMerge {
   // The recognized reading is normalized either way — this whole path only
   // runs for songs that are new to the library.
   const normalized: Section[] = score.sections.map((section) => ({

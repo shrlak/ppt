@@ -10,7 +10,7 @@
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
-//   GET  /lyrics          -> published lyrics for a recognized 찬양 제목
+//   GET  /lyrics          -> scored lyric candidates for a recognized 찬양
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
@@ -49,6 +49,7 @@ import {
   sanitizePptUpload,
   validLibraryId,
 } from './library.js';
+import { normalizeSample } from './lyricsCandidates.js';
 import {
   MAX_TRACKED_MODELS,
   mergeModelEvaluation,
@@ -57,7 +58,7 @@ import {
   sanitizeModelEvaluation,
 } from './modelStats.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
-import { fetchWebLyrics } from './lyrics.js';
+import { fetchLyricsCandidates } from './lyrics.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -711,12 +712,19 @@ export default {
     if (request.method === 'GET' && url.pathname === '/lyrics') {
       const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
       if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+      const artist = (url.searchParams.get('artist') || '').trim().slice(0, 100);
+      // The sample is a slice of what the models read off the 악보. It is what
+      // separates "the right song" from "a different song with this title", so
+      // it has to be part of the cache key as well as the query.
+      const sample = normalizeSample(url.searchParams.get('sample') || '');
 
       // Published lyrics do not change, and a conti is opened repeatedly while
       // a deck is built — serve repeats from the edge instead of re-scraping.
-      const cacheKey = new Request(`${url.origin}/lyrics?title=${encodeURIComponent(title)}`, {
-        method: 'GET',
-      });
+      const cacheKey = new Request(
+        `${url.origin}/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}` +
+          `&sample=${encodeURIComponent(sample)}`,
+        { method: 'GET' },
+      );
       const cache = caches.default;
       const cached = await cache.match(cacheKey);
       if (cached) {
@@ -724,17 +732,25 @@ export default {
         return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
       }
 
-      let found = null;
+      let found = { candidates: [], links: [] };
       try {
-        found = await fetchWebLyrics(title);
+        found = await fetchLyricsCandidates({ title, artist, sample }, env);
       } catch (error) {
         console.warn('lyrics lookup failed:', error instanceof Error ? error.message : error);
       }
-      const payload = found
-        ? { title, lines: found.lines, url: found.url, host: found.host }
-        : { title, lines: [] };
+      const best = found.candidates.find((candidate) => candidate.decision === 'auto');
+      const payload = {
+        title,
+        candidates: found.candidates,
+        links: found.links,
+        // Legacy shape, so a browser still running the previous bundle keeps
+        // working until it reloads. Only an auto candidate fills it.
+        lines: best?.lines ?? [],
+        url: best?.url,
+        host: best?.host,
+      };
       const body = JSON.stringify(payload);
-      if (found) {
+      if (found.candidates.length > 0) {
         await cache.put(
           cacheKey,
           new Response(body, {

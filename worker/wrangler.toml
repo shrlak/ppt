@@ -22,6 +22,11 @@ OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 # PURGE_WEEKDAY overrides the day and follows JavaScript's Date#getDay()
 # (0 = Sunday) — NOT the cron weekday numbering below. Changing any of these
 # means changing the cron expression to match.
+# Bugs is a commercial service; scraping its pages is a permission decision,
+# not a code decision. Left "false", the proxy may show a Bugs search result as
+# a link the user can open, but never fetches the page itself. Set to "true"
+# only once the deployment's administrator has permission to read those pages.
+BUGS_SCRAPING_ALLOWED = "false"
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"
 
