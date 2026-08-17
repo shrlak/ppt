@@ -154,6 +154,9 @@ describe('concurrent batch recognition', () => {
     vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
     vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new Error('down'));
   });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('launches every model together for the title pass', async () => {
     vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
@@ -209,23 +212,41 @@ describe('concurrent batch recognition', () => {
     expect(out.engine).toBe('gemini');
   });
 
-  it('does not wait for weaker models once every stronger model has settled', async () => {
-    vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [first, second];
-      throw new Error('down');
-    });
-    // The last model never settles — a lower-priority straggler must not block.
-    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [first, second];
-      if (model === LAST_MODEL) return new Promise(() => {});
-      throw new Error('down');
-    });
+  it('records every model’s answer as an observation instead of dropping the losers', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new RecognitionError('rate limited', 429));
 
     const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
 
-    expect(out.engine).toBe('openrouter');
+    // One observation per model per page, successful or not. The losing
+    // answers are what a later verified correction scores each model against.
+    expect(out.observations).toHaveLength(2);
+    expect(out.observations[0]).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
+    expect(out.observations[0].filter((observation) => observation.score)).toHaveLength(GEMINI_MODEL_COUNT);
+    // A failure is stored as a category, never as the provider's response body.
+    expect(out.observations[0].filter((observation) => observation.error === 'rate-limit')).toHaveLength(
+      OPENROUTER_MODEL_COUNT,
+    );
+    expect(out.confidence[0]).toBeGreaterThan(0);
+    expect(out.needsReview).toHaveLength(2);
+  });
+
+  it('does not let a model that never answers hang the whole conti', async () => {
+    // Consensus waits for every model rather than finishing on the first
+    // usable answer, so a provider that accepts a request and never responds
+    // would otherwise stall the job forever.
+    vi.useFakeTimers();
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(() => new Promise(() => {}));
+
+    const pending = recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+    await vi.advanceTimersByTimeAsync(130_000);
+    const out = await pending;
+
     expect(out.scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
+    expect(out.observations[0].filter((observation) => observation.error === 'timeout')).toHaveLength(
+      OPENROUTER_MODEL_COUNT,
+    );
   });
 
   it('fills the fields the winning model missed from the other models (working together)', async () => {
