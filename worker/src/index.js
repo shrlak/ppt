@@ -17,6 +17,8 @@
 //   GET/PUT/DELETE /libraries/lyrics -> shared lyrics library
 //   GET/POST/DELETE /libraries/ppt   -> shared PPT library and chunk transfer
 //   GET/POST /libraries/ppt/purge    -> weekly purge status / run it now
+//   GET  /learning/models            -> measured per-model recognition accuracy
+//   POST /learning/models/evaluations-> record accuracy from verified corrections
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -47,6 +49,13 @@ import {
   sanitizePptUpload,
   validLibraryId,
 } from './library.js';
+import {
+  MAX_TRACKED_MODELS,
+  mergeModelEvaluation,
+  modelStatsKey,
+  publicModelStats,
+  sanitizeModelEvaluation,
+} from './modelStats.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 import { fetchWebLyrics } from './lyrics.js';
 
@@ -180,6 +189,41 @@ export class UsageTracker extends DurableObject {
       normalizedTitle: normalized,
       deletedAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Per-model accuracy measured against verified user corrections.
+   *
+   * Only NUMBERS live here. The client compares each model's answer to the
+   * lyrics the user confirmed and posts the resulting field scores, so no
+   * lyric text or score image is ever stored under these keys.
+   */
+  async modelStats() {
+    const stored = await this.ctx.storage.list({ prefix: 'learning:model:' });
+    return [...stored.values()].filter(Boolean).map(publicModelStats);
+  }
+
+  async recordModelEvaluation(rawEvaluations, at = new Date().toISOString()) {
+    const evaluations = (Array.isArray(rawEvaluations) ? rawEvaluations : [rawEvaluations])
+      .map(sanitizeModelEvaluation)
+      .filter(Boolean);
+    if (evaluations.length === 0) throw new Error('no valid model evaluations');
+    const now = new Date(at);
+    const timestamp = Number.isFinite(now.getTime()) ? now : new Date();
+
+    for (const evaluation of evaluations) {
+      const key = modelStatsKey(evaluation.modelKey);
+      if (!key) continue;
+      const current = (await this.ctx.storage.get(key)) ?? null;
+      if (!current) {
+        const tracked = await this.ctx.storage.list({ prefix: 'learning:model:' });
+        // A bounded set of models can be tracked, so a client sending made-up
+        // keys cannot grow this storage without limit.
+        if (tracked.size >= MAX_TRACKED_MODELS) continue;
+      }
+      await this.ctx.storage.put(key, mergeModelEvaluation(current, evaluation, timestamp));
+    }
+    return this.modelStats();
   }
 
   async cleanupPptUpload(uploadId, files) {
@@ -517,6 +561,38 @@ export default {
         return libraryError(error, headers);
       }
       return libraryError('not found', headers, 404);
+    }
+
+    // Measured model accuracy. Reads are open (the numbers carry no lyrics);
+    // writes take the administrator password, like every other shared write.
+    if (url.pathname === '/learning/models') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (request.method !== 'GET') return libraryError('not found', headers, 404);
+      try {
+        return jsonResponse({ models: await tracker.modelStats() }, 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers, 500);
+      }
+    }
+
+    if (url.pathname === '/learning/models/evaluations') {
+      if (request.method !== 'POST') return libraryError('not found', headers, 404);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      try {
+        const body = JSON.parse(await request.text());
+        return jsonResponse({ models: await tracker.recordModelEvaluation(body.evaluations) }, 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers);
+      }
     }
 
     if (url.pathname === '/libraries/ppt') {
