@@ -10,7 +10,9 @@
 //     merge per song by priority (recognizeScoreBatchEnsemble).
 //   BENCH_MODEL="gemini-3.6-flash" — single-model direct engine call.
 //
-// Other knobs: BENCH_BATCH (pages per request, default 10), BENCH_COUNT
+// Other knobs: BENCH_ROLE=champion|challenger (recorded in the comparison
+// file, see bench/compare-models.mjs), BENCH_BATCH (pages per request,
+// default 10), BENCH_COUNT
 // (limit songs), BENCH_OUT (default bench/out), BENCH_SEARCH=1 for Google
 // Search grounding, BENCH_DIFF_BELOW (print per-section diffs for songs
 // under this lyrics score; default 0.98).
@@ -33,6 +35,10 @@ const ENSEMBLE = !SINGLE_MODEL;
 const BATCH = Math.max(1, Number(process.env.BENCH_BATCH ?? 10));
 const USE_SEARCH = process.env.BENCH_SEARCH === '1';
 const DIFF_BELOW = Number(process.env.BENCH_DIFF_BELOW ?? 0.98);
+// Which role this trial is measuring. It does not change what runs; it is
+// recorded in the comparison file so compare-models.mjs knows whether a result
+// is a sitting champion's or a challenger's bid to replace one.
+const ROLE = (process.env.BENCH_ROLE ?? 'challenger') as 'champion' | 'challenger';
 const API_KEY = process.env.GEMINI_API_KEY ?? '';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -150,6 +156,24 @@ function printDiff(parsed: ParsedScore | undefined, truth: TruthSong): void {
   }
 }
 
+/**
+ * Wilson lower bound, matching src/lib/ai/modelReliability.ts.
+ *
+ * A benchmark number and a production reliability number have to be the same
+ * measurement, or a model promoted on the bench arrives with a different score
+ * than the one it was promoted for.
+ */
+function conservativeBound(mean: number, samples: number): number {
+  const p = Math.min(1, Math.max(0, mean));
+  if (samples <= 0) return 0;
+  const z = 1.96;
+  const z2 = z * z;
+  const denominator = 1 + z2 / samples;
+  const center = (p + z2 / (2 * samples)) / denominator;
+  const margin = (z / denominator) * Math.sqrt((p * (1 - p)) / samples + z2 / (4 * samples * samples));
+  return Math.max(0, center - margin);
+}
+
 async function main() {
   if (!API_KEY.trim()) {
     console.error('GEMINI_API_KEY is not set — cannot run the benchmark.');
@@ -233,6 +257,34 @@ async function main() {
   writeFileSync(
     join(OUT, 'report.json'),
     JSON.stringify({ models: MODELS, ensemble: ENSEMBLE, useSearch: USE_SEARCH, summary, reports }, null, 2),
+  );
+
+  // The raw per-song readings stay local (bench/out is gitignored): they are
+  // model output over copyrighted 악보 and have no business in a comparison
+  // file that gets pasted into a pull request.
+  writeFileSync(join(OUT, 'observations.json'), JSON.stringify({ models: MODELS, reports }, null, 2));
+
+  // The comparison file carries numbers only, so it can be shared and diffed.
+  writeFileSync(
+    join(OUT, 'comparison.json'),
+    JSON.stringify(
+      {
+        model: MODELS.join('+'),
+        role: ROLE,
+        ensemble: ENSEMBLE,
+        useSearch: USE_SEARCH,
+        samples: summary.songs,
+        failureRate: attempted === 0 ? 1 : summary.failed / attempted,
+        title: summary.meanTitle,
+        order: summary.meanOrder,
+        lyrics: summary.meanLyrics,
+        overall: summary.meanOverall,
+        conservative: conservativeBound(summary.meanOverall, summary.songs),
+        ranAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
   );
   writeFileSync(join(OUT, 'summary.md'), lines.join('\n') + '\n');
   console.log('\n' + lines.join('\n'));

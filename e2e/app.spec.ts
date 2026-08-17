@@ -1184,3 +1184,95 @@ test.describe('learning admin dashboard', () => {
     expect(overflows).toBe(false);
   });
 });
+
+test.describe('adaptive learning loop', () => {
+  test('escalates, reviews, verifies, and then skips recognition entirely', async ({ page }) => {
+    // Champion 0 reads the page one syllable differently from the other two,
+    // which is what sends the page to a challenger.
+    const correct = ['가나다라 마바사 아자차', '카타파하 그 이름 높이'];
+    const misread = ['가나다라 마바사 아자차', '카타파하 그 이름 높히'];
+    const counts = await stubRecognitionProxy(page, {
+      score: () => stubScore(),
+      lyrics: {
+        candidates: [
+          webCandidate({ lines: [...correct, '높이 높이 노래해', '영원토록 노래해'] }),
+          webCandidate({
+            id: 'ccmpia:other',
+            host: 'ccmpia.com',
+            source: 'ccmpia',
+            url: 'https://ccmpia.com/other',
+            title: '가나다라 마바사 (다른 편곡)',
+            lines: [...correct, '전혀 다른 후렴'],
+            score: 0.67,
+          }),
+        ],
+        links: [],
+      },
+    });
+
+    // Per-model answers, so one champion disagrees and a challenger settles it.
+    const answered: string[] = [];
+    const bodyFor = (model: string) =>
+      JSON.stringify({
+        results: [
+          {
+            imageIndex: 0,
+            ...stubScore({
+              sections: [
+                { label: 'V', lines: model === 'gemini-3.6-flash' ? misread : correct },
+                { label: 'C', lines: ['높이 높이 노래해', '영원토록 노래해'] },
+              ],
+            }),
+          },
+        ],
+      });
+
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      const model = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      answered.push(model);
+      await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: bodyFor(model) }] } }] } });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      const model = (route.request().postDataJSON() as { model?: string }).model ?? '';
+      answered.push(model);
+      await route.fulfill({ json: { choices: [{ message: { content: bodyFor(model) } }] } });
+    });
+
+    await page.goto('./');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    // Three champions read the page; a challenger was brought in for it.
+    const champions = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.role === 'champion');
+    for (const champion of champions) {
+      expect(answered.filter((model) => model === champion.model).length).toBeGreaterThan(0);
+    }
+    const challengerCalls = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.role === 'challenger').filter(
+      (entry) => answered.includes(entry.model),
+    );
+    expect(challengerCalls.length).toBeGreaterThan(0);
+
+    // Two plausible pages, so the user picks rather than one applying itself.
+    await card.getByTestId('web-candidate').first().click();
+    await expect(card.getByTestId('web-review')).toBeHidden();
+
+    // Correct one line by hand, then save: that makes it an edited ground truth.
+    const verse = card.getByTestId('section-textarea').first();
+    await verse.fill(`${correct[0]}\n카타파하 그 이름 높여`);
+    await card.getByRole('button', { name: '라이브러리에 저장' }).click();
+    await expect(card.getByTestId('song-trust')).toHaveText(/검증됨/);
+
+    // Reload with the same conti: a verified entry is reused as it stands, so
+    // no model and no web lookup are asked about it again.
+    const before = { gemini: counts.gemini, openrouter: counts.openrouter, lyrics: counts.lyrics };
+    answered.length = 0;
+    await page.reload();
+    await uploadExamplePdf(page);
+    const reopened = page.getByTestId('song-card').first();
+    await expect(reopened.getByTestId('section-textarea').first()).toHaveValue(/카타파하 그 이름 높여/);
+    expect(answered).toEqual([]);
+    expect(counts.lyrics).toBe(before.lyrics);
+    expect(counts.gemini).toBe(before.gemini);
+    expect(counts.openrouter).toBe(before.openrouter);
+  });
+});
