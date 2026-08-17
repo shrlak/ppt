@@ -17,10 +17,12 @@ import {
   sanitizeExcludedTitles,
   saveLocalSharedSettings,
   type SharedRecognitionSettings,
+  type ModelRole,
 } from '../lib/ai/aiSettings';
 import { showToast } from '../lib/utils/toast';
 import { ADMIN_PASSWORD, ADMIN_UNLOCK_KEY } from '../lib/adminAuth';
 import Icon from './Icon';
+import LearningAdminSection from './LearningAdminSection';
 
 interface Props {
   onClose: () => void;
@@ -216,6 +218,9 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
 function RecognitionSettingsSection() {
   const [settings, setSettings] = useState<SharedRecognitionSettings>(() => loadLocalSharedSettings());
   const [excludedText, setExcludedText] = useState(() => settings.excludedTitles.join('\n'));
+  // Deployment state rather than a setting: only the Worker's environment can
+  // grant permission to read Bugs pages, so this is displayed, never toggled.
+  const [bugsScrapingAllowed, setBugsScrapingAllowed] = useState(false);
   const [sync, setSync] = useState<{ state: 'loading' | 'saving' | 'synced' | 'local' | 'error'; message: string }>({
     state: hasSharedSettings() ? 'loading' : 'local',
     message: hasSharedSettings() ? '공유 설정 확인 중…' : '공유 프록시 미연결 — 이 브라우저에만 저장됩니다.',
@@ -234,6 +239,7 @@ function RecognitionSettingsSection() {
       if (shared) {
         setSettings(shared);
         setExcludedText(shared.excludedTitles.join('\n'));
+        setBugsScrapingAllowed(!!(shared as { bugsScrapingAllowed?: boolean }).bugsScrapingAllowed);
         setSync({ state: 'synced', message: '모든 기기와 동기화되어 있습니다.' });
       } else {
         setSync({ state: 'error', message: '공유 설정을 불러오지 못해 이 브라우저의 값을 사용합니다.' });
@@ -264,6 +270,22 @@ function RecognitionSettingsSection() {
       );
   }, []);
 
+  /**
+   * Pin (or unpin) a model's role.
+   *
+   * Measured accuracy decides roles on its own; this exists for what
+   * measurement cannot see yet, such as a provider announcing a deprecation.
+   */
+  const setRoleOverride = useCallback(
+    (modelKey: string, role: ModelRole | null) => {
+      const roleOverrides = { ...settings.roleOverrides };
+      if (role) roleOverrides[modelKey] = role;
+      else delete roleOverrides[modelKey];
+      persist({ ...settings, roleOverrides });
+    },
+    [persist, settings],
+  );
+
   function saveExcluded() {
     const excludedTitles = sanitizeExcludedTitles(excludedText.split('\n'));
     setExcludedText(excludedTitles.join('\n'));
@@ -273,6 +295,11 @@ function RecognitionSettingsSection() {
 
   return (
     <>
+      <LearningAdminSection
+        settings={settings}
+        onRoleOverride={setRoleOverride}
+        bugsScrapingAllowed={bugsScrapingAllowed}
+      />
       <section className="admin-deck admin-recognition" data-testid="admin-recognition-order">
         <div className="admin-deck-info">
           <h4>가사 인식 동시 실행 모델</h4>

@@ -3,7 +3,7 @@
 // here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
 // travel as data: URLs in an OpenAI-compatible chat-completions request.
 import { RecognitionError } from './recognitionError';
-import { basePrompt } from './scorePrompt';
+import { basePrompt, correctionExampleLines } from './scorePrompt';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -35,7 +35,7 @@ export function toImageDataUrl(image: string): string {
 }
 
 /** Build the OpenAI-style request body for one score image. */
-export function buildNvidiaBody(dataUrl: string, model: string = DEFAULT_NVIDIA_MODEL): unknown {
+export function buildOpenRouterBody(dataUrl: string, model: string = DEFAULT_NVIDIA_MODEL): unknown {
   return {
     model,
     messages: [
@@ -52,19 +52,31 @@ export function buildNvidiaBody(dataUrl: string, model: string = DEFAULT_NVIDIA_
   };
 }
 
-function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: boolean): string {
+/** Past corrections the caller wants the model warned about. */
+export interface PromptExample {
+  before: string;
+  after: string;
+}
+
+function batchPrompt(
+  imageCount: number,
+  mode: BatchRecognitionMode,
+  hasHints: boolean,
+  examples: PromptExample[] = [],
+): string {
   const task =
     mode === 'titles'
       ? [
           '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
-          'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
+          'score 페이지에서만 찬양 제목과 조성을 읽고, 아티스트 이름이 인쇄되어 있으면 함께 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 읽지 마세요.',
-          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
+          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
+          'artist는 페이지에 인쇄된 이름만 적고, 없으면 빈 문자열로 두세요. 제목으로 추측하지 마세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
-          'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
+          'score 페이지에서만 제목, 아티스트, 조성, 진행 순서와 모든 가사를 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
           BASE_PROMPT,
         ];
@@ -75,20 +87,22 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']
       : []),
     ...task,
+    ...correctionExampleLines(examples),
     '반드시 {"results":[...]} 형태의 JSON 객체 하나만 출력하세요.',
   ].join('\n');
 }
 
 /** Build one request covering every pending score page. */
-export function buildNvidiaBatchBody(
+export function buildOpenRouterBatchBody(
   dataUrls: string[],
   mode: BatchRecognitionMode,
   model: string = DEFAULT_NVIDIA_MODEL,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): unknown {
   const hasHints = (hints ?? []).some((hint) => hint && hint.trim());
   const content: Record<string, unknown>[] = [
-    { type: 'text', text: batchPrompt(dataUrls.length, mode, hasHints) },
+    { type: 'text', text: batchPrompt(dataUrls.length, mode, hasHints, examples) },
   ];
   dataUrls.forEach((dataUrl, imageIndex) => {
     const hint = hints?.[imageIndex]?.trim();
@@ -104,7 +118,7 @@ export function buildNvidiaBatchBody(
 }
 
 /** Pull the assistant's text out of a chat-completions response. */
-export function extractNvidiaText(response: unknown): string {
+export function extractOpenRouterText(response: unknown): string {
   const r = response as { choices?: { message?: { content?: unknown } }[] };
   const content = r?.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content;
@@ -148,7 +162,7 @@ async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string):
     throw new RecognitionError(`OpenRouter 호출 실패: ${detail}`, res.status);
   }
 
-  return extractNvidiaText((await res.json()) as unknown);
+  return extractOpenRouterText((await res.json()) as unknown);
 }
 
 /**
@@ -157,13 +171,13 @@ async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string):
  * When `apiKey` is blank and `proxyUrl` is supplied, the request goes through
  * the shared Cloudflare proxy (see worker/) that holds the OpenRouter key.
  */
-export async function recognizeWithNvidia(
+export async function recognizeWithOpenRouter(
   dataUrl: string,
   apiKey: string,
   model: string = DEFAULT_NVIDIA_MODEL,
   proxyUrl?: string,
 ): Promise<ParsedScore> {
-  const text = await callOpenRouter(buildNvidiaBody(dataUrl, model), apiKey, proxyUrl);
+  const text = await callOpenRouter(buildOpenRouterBody(dataUrl, model), apiKey, proxyUrl);
   const payload = parseModelJson(
     text,
     'OpenRouter 응답이 비어 있습니다.',
@@ -173,16 +187,21 @@ export async function recognizeWithNvidia(
 }
 
 /** Recognize every supplied score image in one OpenRouter request. */
-export async function recognizeBatchWithNvidia(
+export async function recognizeBatchWithOpenRouter(
   dataUrls: string[],
   apiKey: string,
   mode: BatchRecognitionMode,
   model: string = DEFAULT_NVIDIA_MODEL,
   proxyUrl?: string,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
-  const text = await callOpenRouter(buildNvidiaBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
+  const text = await callOpenRouter(
+    buildOpenRouterBatchBody(dataUrls, mode, model, hints, examples),
+    apiKey,
+    proxyUrl,
+  );
   const payload = parseModelJson(
     text,
     'OpenRouter 일괄 응답이 비어 있습니다.',
@@ -190,3 +209,16 @@ export async function recognizeBatchWithNvidia(
   );
   return coerceParsedScoreBatch(payload, dataUrls.length, mode);
 }
+
+// Deprecated aliases kept for one release so anything still importing the old
+// NVIDIA-era names keeps working. Remove after the next deploy.
+/** @deprecated use recognizeWithOpenRouter */
+export const recognizeWithNvidia = recognizeWithOpenRouter;
+/** @deprecated use recognizeBatchWithOpenRouter */
+export const recognizeBatchWithNvidia = recognizeBatchWithOpenRouter;
+/** @deprecated use buildOpenRouterBody */
+export const buildNvidiaBody = buildOpenRouterBody;
+/** @deprecated use buildOpenRouterBatchBody */
+export const buildNvidiaBatchBody = buildOpenRouterBatchBody;
+/** @deprecated use extractOpenRouterText */
+export const extractNvidiaText = extractOpenRouterText;

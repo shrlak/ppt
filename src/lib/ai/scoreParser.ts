@@ -15,6 +15,8 @@ export interface ParsedScore {
   /** Scripture reference (본문) read from a page without sheet music. */
   scripture?: string;
   title?: string;
+  /** Artist/사역팀 printed on the score. Never inferred from the title alone. */
+  artist?: string;
   key?: string;
   /** Normalized play-order tokens, e.g. ["I","V1","V2","PC","C","C"] */
   order: string[];
@@ -57,6 +59,7 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
   const scripture =
     typeof obj.scripture === 'string' && obj.scripture.trim() ? obj.scripture.trim() : undefined;
   const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
+  const artist = typeof obj.artist === 'string' && obj.artist.trim() ? obj.artist.trim() : undefined;
   const key = typeof obj.key === 'string' && obj.key.trim() ? obj.key.trim() : undefined;
 
   const orderTokens = Array.isArray(obj.order) ? obj.order.filter((t): t is string => typeof t === 'string') : [];
@@ -79,7 +82,7 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
     sections.push(...splitNumberedVerses({ label, lines }));
   }
 
-  return { pageType, sermonTitle, scripture, title, key, order, lyricRowCount, sections };
+  return { pageType, sermonTitle, scripture, title, artist, key, order, lyricRowCount, sections };
 }
 
 /** A verse number printed at the start of a lyric row: "1.", "2)", "3 ". */
@@ -160,6 +163,7 @@ export function coerceParsedScoreBatch(
             sermonTitle: score.sermonTitle,
             scripture: score.scripture,
             title: score.title,
+            artist: score.artist,
             key: score.key,
             order: [],
             sections: [],
@@ -184,6 +188,24 @@ export function parseModelJson(text: string, emptyMessage: string, unparsableMes
     if (start === -1 || end <= start) throw new Error(unparsableMessage);
     return JSON.parse(trimmed.slice(start, end + 1));
   }
+}
+
+/**
+ * Read a JSON answer (optionally wrapped in prose or a ```json fence) as a
+ * ParsedScore. Returns undefined when the text is not JSON at all, so the OCR
+ * text parser can take over.
+ */
+function parseScoreJson(text: string): ParsedScore | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('```')) return undefined;
+  let payload: unknown;
+  try {
+    payload = parseModelJson(trimmed, 'empty', 'unparsable');
+  } catch {
+    return undefined;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+  return coerceParsedScore(payload);
 }
 
 /** A bare canonical part token like I, V1, PC, C2, B, O, T. */
@@ -321,6 +343,13 @@ function sectionsFromLabels(lyricLines: string[]): Section[] | null {
  *   parts named in the order, with the recognized lyric text seeded into it.
  */
 export function parseScoreText(text: string): ParsedScore {
+  // A model (or the local correction model) may hand back the JSON shape
+  // directly rather than OCR text. Recognizing that here keeps one entry
+  // point for "turn this answer into a ParsedScore" instead of making every
+  // caller guess which form it holds.
+  const jsonScore = parseScoreJson(text);
+  if (jsonScore) return jsonScore;
+
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())

@@ -1,8 +1,23 @@
+export type VerificationState = 'draft' | 'verified' | 'edited';
+
+export interface StoredProvenance {
+  pageHash?: string;
+  source?: 'library' | 'models' | 'web' | 'manual';
+  webSourceUrl?: string;
+  confidence?: number;
+  correctionModelVersion?: string;
+}
+
 export interface LyricsLibraryEntry {
   title: string;
+  artist?: string;
   key?: string;
   sections: { label: string; lines: string[] }[];
   order: string[];
+  verification: VerificationState;
+  version: number;
+  updatedAt?: string;
+  provenance?: StoredProvenance;
 }
 
 export interface PptFileDescriptor {
@@ -35,7 +50,12 @@ export const MAX_PPT_LIBRARY_BYTES: number;
 export const MAX_PPT_LIBRARY_DECKS: number;
 export const PPT_FILE_KINDS: readonly ['pptx', 'contiPdf', 'sermonPptx', 'source', 'additionalFiles'];
 
+export const VERIFICATION_STATES: readonly VerificationState[];
+
 export function normalizeLibraryTitle(value: unknown): string;
+export function sanitizeStoredProvenance(raw: unknown): StoredProvenance | null;
+export function entryVerification(entry: unknown): VerificationState;
+export function isGroundTruth(entry: unknown): boolean;
 export function sanitizeLyricsEntry(raw: unknown): LyricsLibraryEntry | null;
 export function sanitizeLyricsEntries(raw: unknown): LyricsLibraryEntry[];
 export function validLibraryId(value: unknown, maxLength?: number): value is string;

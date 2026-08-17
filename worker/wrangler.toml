@@ -22,6 +22,11 @@ OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 # PURGE_WEEKDAY overrides the day and follows JavaScript's Date#getDay()
 # (0 = Sunday) — NOT the cron weekday numbering below. Changing any of these
 # means changing the cron expression to match.
+# Bugs is a commercial service; scraping its pages is a permission decision,
+# not a code decision. Left "false", the proxy may show a Bugs search result as
+# a link the user can open, but never fetches the page itself. Set to "true"
+# only once the deployment's administrator has permission to read those pages.
+BUGS_SCRAPING_ALLOWED = "false"
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"
 
@@ -42,8 +47,15 @@ crons = ["0 21,22 * * SUN"]
 name = "USAGE_TRACKER"
 class_name = "UsageTracker"
 
-# This existing SQLite Durable Object stores shared AI usage/settings plus the
-# cross-device lyrics library and chunked PPT library. No R2/D1 binding needed.
+# This existing SQLite Durable Object stores shared AI usage/settings, the
+# cross-device lyrics library, the chunked PPT library, and the learning store
+# (model accuracy, verified corrections, and the training corpus). No R2/D1
+# binding needed.
+#
+# The weekly purge below deletes the PPT library only. Learning keys
+# (learning:*) are deliberately outside it: a corpus wiped every Sunday could
+# never train anything. The corpus is capped at 300 page images instead, and
+# only records already exported into an artifact are evicted.
 
 [[migrations]]
 tag = "v1"

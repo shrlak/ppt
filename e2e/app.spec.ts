@@ -82,6 +82,158 @@ async function moveFromBibleToDownload(page: Page): Promise<void> {
   await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
 }
 
+// --- Shared recognition proxy stubs ------------------------------------------
+//
+// The bundle is built with a proxy URL pointing back at the preview server, so
+// every recognition, web-lyrics and learning call is interceptable here. All
+// lyric text below is invented: no real 악보 or published lyrics belong in a
+// fixture.
+
+const PROXY = '**/ppt/__proxy';
+
+/** A page of made-up lyrics in the shape the models are asked to answer with. */
+function stubScore(overrides: Record<string, unknown> = {}) {
+  return {
+    pageType: 'score',
+    sermonTitle: '',
+    scripture: '',
+    title: '가나다라 마바사',
+    artist: '',
+    key: 'E',
+    order: ['I', 'V', 'C'],
+    lyricRowCount: 1,
+    sections: [
+      { label: 'V', lines: ['가나다라 마바사 아자차', '카타파하 그 이름 높이'] },
+      { label: 'C', lines: ['높이 높이 노래해', '영원토록 노래해'] },
+    ],
+    ...overrides,
+  };
+}
+
+interface ProxyStubs {
+  /** Answer every model with this, indexed by image position. */
+  score?: (imageIndex: number) => Record<string, unknown>;
+  /** Body for GET /lyrics. Omit for "the web found nothing". */
+  lyrics?: Record<string, unknown>;
+  /** Rows for GET /learning/models. */
+  models?: Record<string, unknown>[];
+}
+
+/** Count of requests each proxy route received, for asserting what ran. */
+interface ProxyCounts {
+  gemini: number;
+  openrouter: number;
+  lyrics: number;
+}
+
+async function stubRecognitionProxy(page: Page, stubs: ProxyStubs = {}): Promise<ProxyCounts> {
+  const counts: ProxyCounts = { gemini: 0, openrouter: 0, lyrics: 0 };
+  const score = stubs.score ?? (() => stubScore());
+
+  const batchBody = (imageCount: number) =>
+    JSON.stringify({
+      results: Array.from({ length: imageCount }, (_, imageIndex) => ({ imageIndex, ...score(imageIndex) })),
+    });
+
+  // The bundled starter library already holds the sample conti's songs, and a
+  // saved song skips recognition entirely. Emptying it is what makes these
+  // tests exercise the recognition path at all.
+  await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [] }));
+  await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+  await page.route(`${PROXY}/learning/models`, (route) =>
+    route.fulfill({ json: { models: stubs.models ?? [] } }),
+  );
+
+  await page.route(`${PROXY}/gemini/**`, async (route) => {
+    counts.gemini += 1;
+    const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+    const images = (payload.contents?.[0]?.parts ?? []).filter(
+      (part) => !!(part as { inlineData?: unknown }).inlineData,
+    ).length;
+    await route.fulfill({
+      json: { candidates: [{ content: { parts: [{ text: batchBody(Math.max(1, images)) }] } }] },
+    });
+  });
+
+  await page.route(`${PROXY}/openrouter`, async (route) => {
+    counts.openrouter += 1;
+    const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+    const images = (payload.messages?.[0]?.content ?? []).filter(
+      (part) => (part as { type?: string }).type === 'image_url',
+    ).length;
+    await route.fulfill({
+      json: { choices: [{ message: { content: batchBody(Math.max(1, images)) } }] },
+    });
+  });
+
+  await page.route(`${PROXY}/lyrics*`, async (route) => {
+    counts.lyrics += 1;
+    await route.fulfill({ json: stubs.lyrics ?? { candidates: [], links: [] } });
+  });
+
+  return counts;
+}
+
+/** A scored web candidate as the proxy would return it. */
+function webCandidate(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ccm:ccm.co.kr/song/1',
+    title: '가나다라 마바사',
+    artist: '어느 사역팀',
+    lines: ['가나다라 마바사 아자차', '카타파하 그 이름 높이', '높이 높이 노래해', '영원토록 노래해'],
+    url: 'https://ccm.co.kr/song/1',
+    host: 'ccm.co.kr',
+    source: 'ccm',
+    sourceTrust: 0.9,
+    score: 0.72,
+    titleScore: 1,
+    artistScore: 0,
+    lyricsScore: 0.6,
+    decision: 'review',
+    ...overrides,
+  };
+}
+
+/** Unlock 관리자 설정 and leave the panel open. */
+async function unlockAdmin(page: Page): Promise<void> {
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+}
+
+/**
+ * Let a shared-library delete succeed.
+ *
+ * The e2e bundle is built with a proxy URL, so deleting a saved deck now also
+ * asks the shared server to drop it — and refuses to delete the local copy if
+ * that call fails, rather than resurrecting the deck on the next sync. Tests
+ * that delete therefore have to answer that one call. Everything else is left
+ * unrouted and 404s, which every caller already falls back from.
+ */
+async function allowSharedLibraryDeletes(page: Page): Promise<void> {
+  await page.route(`${PROXY}/libraries/ppt/*`, async (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    await route.fulfill({ json: { ok: true } });
+  });
+}
+
+/**
+ * Recognize the first song and wait for the whole staged flow to settle.
+ *
+ * Automatic recognition is deliberately skipped under browser automation, so
+ * the tests press the same button a user would.
+ */
+async function recognizeFirstSong(page: Page) {
+  const card = page.getByTestId('song-card').first();
+  await expect(card).toBeVisible({ timeout: PARSE_TIMEOUT });
+  await card.getByTestId('recognize-btn').click();
+  await expect(card.getByTestId('recog-running')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await expect(card.getByTestId('recog-done').or(card.locator('.recog-error'))).toBeVisible({
+    timeout: PARSE_TIMEOUT,
+  });
+  return card;
+}
+
 test('moves through the six-step wizard with next and back buttons', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
@@ -372,6 +524,7 @@ test('a real PowerPoint deck\'s placeholder text inherits position/size/font fro
 test('PPT library saves a generated deck with its source files and can re-download or delete it later', async ({
   page,
 }) => {
+  await allowSharedLibraryDeletes(page);
   await page.goto('./');
   // Check the library is empty before there is anything to auto-save.
   await page.getByTestId('library-open').click();
@@ -858,4 +1011,268 @@ test('keeps PowerPoint ids valid with a parsed conti and an uploaded sermon deck
   expect(allText).toContain('주님의 사랑');
   expect(allText).toContain('{{SERMON_TITLE}}');
   expect(allText).toContain('공동체 고백송');
+});
+
+test.describe('web lyrics candidate review', () => {
+  test('waits for a choice, applies the chosen page, and keeps the printed order', async ({ page }) => {
+    const counts = await stubRecognitionProxy(page, {
+      // Two plausible pages: neither is clearly ahead, so neither may apply
+      // itself — several different worship songs share a title.
+      lyrics: {
+        candidates: [
+          webCandidate(),
+          webCandidate({
+            id: 'ccmpia:ccmpia.com/song/2',
+            host: 'ccmpia.com',
+            source: 'ccmpia',
+            url: 'https://ccmpia.com/song/2',
+            title: '가나다라 마바사 (다른 편곡)',
+            lines: ['가나다라 마바사 아자차', '전혀 다른 둘째 줄', '높이 높이 노래해', '영원토록 노래해'],
+            score: 0.68,
+          }),
+        ],
+        links: [],
+      },
+    });
+
+    await page.goto('./');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    // The card says what it is waiting for, in words rather than by colour.
+    await expect(card.getByTestId('song-trust')).toHaveText(/웹 확인/);
+    const review = card.getByTestId('web-review');
+    await expect(review).toBeVisible();
+    await expect(review.getByTestId('web-candidate')).toHaveCount(2);
+    await expect(review.getByTestId('web-candidate').first()).toContainText('ccm.co.kr');
+    await expect(review.getByTestId('web-candidate').first()).toContainText('%');
+
+    // Nothing has been applied yet: the models' own reading is still showing.
+    const firstPart = card.getByTestId('section-textarea').first();
+    await expect(firstPart).toHaveValue(/가나다라 마바사 아자차/);
+    const orderBefore = await card.getByTestId('order-input').inputValue();
+
+    await review.getByTestId('web-candidate').first().click();
+
+    await expect(card.getByTestId('order-input')).toHaveValue(orderBefore);
+    await expect(firstPart).toHaveValue(/가나다라 마바사 아자차/);
+    expect(counts.lyrics).toBeGreaterThan(0);
+  });
+
+  test('a rejected candidate leaves the recognized lyrics untouched', async ({ page }) => {
+    await stubRecognitionProxy(page, { lyrics: { candidates: [webCandidate()], links: [] } });
+
+    await page.goto('./');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    const before = await card.getByTestId('section-textarea').first().inputValue();
+    await card.getByTestId('web-candidate-none').click();
+
+    await expect(card.getByTestId('web-review')).toBeHidden();
+    await expect(card.getByTestId('section-textarea').first()).toHaveValue(before);
+  });
+
+  test('an auto candidate fills the lyrics in without asking', async ({ page }) => {
+    await stubRecognitionProxy(page, {
+      // One strong, clearly-ahead page: no question to put to the user.
+      lyrics: {
+        candidates: [
+          webCandidate({
+            decision: 'auto',
+            score: 0.95,
+            lines: ['가나다라 마바사 아자차', '카타파하 그 이름 높이', '높이 높이 노래해', '영원토록 노래해'],
+          }),
+        ],
+        links: [],
+      },
+    });
+
+    await page.goto('./');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    await expect(card.getByTestId('web-review')).toHaveCount(0);
+    await expect(card.getByTestId('section-textarea').first()).toHaveValue(/가나다라 마바사 아자차/);
+  });
+});
+
+test.describe('learning admin dashboard', () => {
+  /** Measured accuracy for every catalog model, best last so ranking shows. */
+  const modelRows = RECOGNITION_MODEL_CATALOG.map((entry, index) => ({
+    modelKey: `${entry.engine}:${entry.model}`,
+    samples: 40,
+    title: 0.9,
+    artist: 0.8,
+    artistSamples: 20,
+    order: 0.9,
+    lyrics: 0.7 + index * 0.02,
+    successRate: 1,
+    latencyMs: 1200,
+    updatedAt: new Date().toISOString(),
+    baseline: 0.8,
+    paused: false,
+  }));
+
+  const corpusManifest = {
+    id: 'a'.repeat(32),
+    pageHash: 'a'.repeat(64),
+    feedbackId: 'b'.repeat(64),
+    createdAt: '2026-08-14T00:00:00.000Z',
+    imageAvailable: false,
+    versions: [{ order: ['I', 'V'], sections: [{ label: 'V', lines: ['가나다라 마바사 아자차'] }] }],
+  };
+
+  test('admin can inspect model roles and export verified training data', async ({ page }) => {
+    await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: { bugsScrapingAllowed: false } }));
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: modelRows } }));
+    await page.route(`${PROXY}/learning/corpus`, (route) =>
+      route.fulfill({
+        json: { total: 140, verified: 120, edited: 20, withImage: 100, exported: 0, bytes: 51_200, limit: 300 },
+      }),
+    );
+    await page.route(`${PROXY}/learning/corpus/manifests`, (route) =>
+      route.fulfill({ json: { manifests: [corpusManifest] } }),
+    );
+    await page.route(`${PROXY}/learning/corpus/exported`, (route) =>
+      route.fulfill({ json: { marked: 1, status: {} } }),
+    );
+
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    // Three models read every page; the rest wait in reserve.
+    await expect(page.getByTestId('learning-model-champion')).toHaveCount(3);
+    await expect(page.getByTestId('training-corpus-count')).toContainText('검증 120');
+    // Enough verified pages, none exported yet: a training run is worth doing.
+    await expect(page.getByTestId('training-recommended')).toBeVisible();
+    // Permission to read Bugs is deployment state, shown but not offered.
+    await expect(page.getByTestId('bugs-permission')).toContainText('비활성');
+
+    const download = page.waitForEvent('download');
+    await page.getByTestId('training-export').click();
+    expect((await download).suggestedFilename()).toMatch(/lyrics-training-.*\.zip/);
+  });
+
+  test('says so plainly when nothing has been measured yet', async ({ page }) => {
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+    await page.route(`${PROXY}/learning/corpus`, (route) =>
+      route.fulfill({
+        json: { total: 0, verified: 0, edited: 0, withImage: 0, exported: 0, bytes: 0, limit: 300 },
+      }),
+    );
+
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    // Catalog roles stand in until measurement takes over.
+    await expect(page.getByTestId('learning-model-champion')).toHaveCount(3);
+    await expect(page.getByTestId('admin-learning-models')).toContainText('아직 측정된 표본이 없습니다');
+    await expect(page.getByTestId('training-recommended')).toHaveCount(0);
+  });
+
+  test('stays readable at 320px without overflowing sideways', async ({ page }) => {
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: modelRows } }));
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    await expect(page.getByTestId('admin-learning-models')).toBeVisible();
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    );
+    expect(overflows).toBe(false);
+  });
+});
+
+test.describe('adaptive learning loop', () => {
+  test('escalates, reviews, verifies, and then skips recognition entirely', async ({ page }) => {
+    // Champion 0 reads the page one syllable differently from the other two,
+    // which is what sends the page to a challenger.
+    const correct = ['가나다라 마바사 아자차', '카타파하 그 이름 높이'];
+    const misread = ['가나다라 마바사 아자차', '카타파하 그 이름 높히'];
+    const counts = await stubRecognitionProxy(page, {
+      score: () => stubScore(),
+      lyrics: {
+        candidates: [
+          webCandidate({ lines: [...correct, '높이 높이 노래해', '영원토록 노래해'] }),
+          webCandidate({
+            id: 'ccmpia:other',
+            host: 'ccmpia.com',
+            source: 'ccmpia',
+            url: 'https://ccmpia.com/other',
+            title: '가나다라 마바사 (다른 편곡)',
+            lines: [...correct, '전혀 다른 후렴'],
+            score: 0.67,
+          }),
+        ],
+        links: [],
+      },
+    });
+
+    // Per-model answers, so one champion disagrees and a challenger settles it.
+    const answered: string[] = [];
+    const bodyFor = (model: string) =>
+      JSON.stringify({
+        results: [
+          {
+            imageIndex: 0,
+            ...stubScore({
+              sections: [
+                { label: 'V', lines: model === 'gemini-3.6-flash' ? misread : correct },
+                { label: 'C', lines: ['높이 높이 노래해', '영원토록 노래해'] },
+              ],
+            }),
+          },
+        ],
+      });
+
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      const model = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      answered.push(model);
+      await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: bodyFor(model) }] } }] } });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      const model = (route.request().postDataJSON() as { model?: string }).model ?? '';
+      answered.push(model);
+      await route.fulfill({ json: { choices: [{ message: { content: bodyFor(model) } }] } });
+    });
+
+    await page.goto('./');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    // Three champions read the page; a challenger was brought in for it.
+    const champions = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.role === 'champion');
+    for (const champion of champions) {
+      expect(answered.filter((model) => model === champion.model).length).toBeGreaterThan(0);
+    }
+    const challengerCalls = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.role === 'challenger').filter(
+      (entry) => answered.includes(entry.model),
+    );
+    expect(challengerCalls.length).toBeGreaterThan(0);
+
+    // Two plausible pages, so the user picks rather than one applying itself.
+    await card.getByTestId('web-candidate').first().click();
+    await expect(card.getByTestId('web-review')).toBeHidden();
+
+    // Correct one line by hand, then save: that makes it an edited ground truth.
+    const verse = card.getByTestId('section-textarea').first();
+    await verse.fill(`${correct[0]}\n카타파하 그 이름 높여`);
+    await card.getByRole('button', { name: '라이브러리에 저장' }).click();
+    await expect(card.getByTestId('song-trust')).toHaveText(/검증됨/);
+
+    // Reload with the same conti: a verified entry is reused as it stands, so
+    // no model and no web lookup are asked about it again.
+    const before = { gemini: counts.gemini, openrouter: counts.openrouter, lyrics: counts.lyrics };
+    answered.length = 0;
+    await page.reload();
+    await uploadExamplePdf(page);
+    const reopened = page.getByTestId('song-card').first();
+    await expect(reopened.getByTestId('section-textarea').first()).toHaveValue(/카타파하 그 이름 높여/);
+    expect(answered).toEqual([]);
+    expect(counts.lyrics).toBe(before.lyrics);
+    expect(counts.gemini).toBe(before.gemini);
+    expect(counts.openrouter).toBe(before.openrouter);
+  });
 });

@@ -77,6 +77,8 @@ export const BASE_PROMPT_LINES: string[] = [
   '- scripture: non_score 페이지에 명시된 본문 성경 구절/범위. 없으면 빈 문자열.',
   'pageType이 "score"일 때만 아래 찬양 필드를 읽으세요:',
   '- title: 곡 제목',
+  '- artist: 악보에 인쇄된 아티스트·사역팀·작사작곡자 이름. 페이지에 적혀 있지 않으면 빈 문자열.',
+  '  제목만 보고 아티스트를 추측하지 마세요. 인쇄된 이름이 없으면 반드시 빈 문자열입니다.',
   '- key: 조성(예: E, F, F#m). 안 보이면 빈 문자열.',
   '- order: 악보 맨 위의 진행 순서. 보통 I(간주)로 시작합니다. 예: ["I","V","V2","PC","C","C"]. 없으면 빈 배열.',
   '  진행 순서는 악보에 인쇄된 그대로 옮기세요. 같은 파트가 연달아 두 번 적혀 있으면(예: C C, Cx2)',
@@ -101,7 +103,7 @@ export const BASE_PROMPT_LINES: string[] = [
   '같은 가사 줄이 연달아 여러 번 인쇄되어 있으면 인쇄된 횟수만큼 그대로 반복해서 넣으세요.',
   '중복이라고 판단해 한 번으로 줄이지 마세요.',
   '가사에 없는 내용을 지어내지 말고, 확신이 없는 글자도 보이는 대로 최대한 읽으세요.',
-  'pageType이 "non_score"이면 title과 key는 빈 문자열, order와 sections는 빈 배열,',
+  'pageType이 "non_score"이면 title과 artist와 key는 빈 문자열, order와 sections는 빈 배열,',
   'lyricRowCount는 0으로 반환하세요.',
   'non_score 페이지에서는 다른 안내문을 추측하지 말고 설교 제목과 본문만 옮기세요.',
   '',
@@ -133,4 +135,28 @@ export const SEARCH_PROMPT_LINES: string[] = [
 /** The shared instruction block as one string, plus any engine-specific tail. */
 export function basePrompt(...extraLines: string[]): string {
   return [...BASE_PROMPT_LINES, ...extraLines].join('\n');
+}
+
+/**
+ * Past corrections, shown to the model so it makes the fix itself.
+ *
+ * These are the app's own verified corrections for this song or this kind of
+ * part, not general advice: a model that is told how this exact line was
+ * corrected last week usually reads it right this week. Framed as examples of
+ * previous MISREADINGS so the model treats them as a warning about its own
+ * failure modes rather than as text to copy — the score is still the only
+ * source of the words.
+ */
+export function correctionExampleLines(
+  examples: { before: string; after: string }[],
+): string[] {
+  if (examples.length === 0) return [];
+  return [
+    '',
+    '【검증된 과거 교정 예시】',
+    '아래는 같은 종류의 악보에서 이 앱이 실제로 잘못 읽었다가 사람이 바로잡은 사례입니다.',
+    '같은 실수를 반복하지 마세요. 다만 가사는 반드시 이 악보에 인쇄된 대로 읽고,',
+    '아래 문장을 그대로 베껴 넣지 마세요.',
+    ...examples.map((example) => `  잘못 읽음: ${example.before}  →  실제: ${example.after}`),
+  ];
 }

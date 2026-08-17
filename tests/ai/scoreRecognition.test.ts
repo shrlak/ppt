@@ -12,7 +12,9 @@ import type { Song } from '../../src/lib/utils/types';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
 const GEMINI_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'gemini').length;
-const NVIDIA_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.engine === 'nvidia').length;
+const OPENROUTER_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter(
+  (entry) => entry.engine === 'openrouter',
+).length;
 /** Lowest-priority model in the pool — the one every other model outranks. */
 const LAST_MODEL = RECOGNITION_MODEL_CATALOG[RECOGNITION_MODEL_CATALOG.length - 1].model;
 
@@ -21,12 +23,12 @@ vi.mock('../../src/lib/ai/scoreAi', () => ({
   recognizeBatchWithGemini: vi.fn(),
 }));
 vi.mock('../../src/lib/ai/scoreNvidia', () => ({
-  recognizeWithNvidia: vi.fn(),
-  recognizeBatchWithNvidia: vi.fn(),
+  recognizeWithOpenRouter: vi.fn(),
+  recognizeBatchWithOpenRouter: vi.fn(),
 }));
 
 import { recognizeBatchWithGemini, recognizeWithGemini } from '../../src/lib/ai/scoreAi';
-import { recognizeBatchWithNvidia, recognizeWithNvidia } from '../../src/lib/ai/scoreNvidia';
+import { recognizeBatchWithOpenRouter, recognizeWithOpenRouter } from '../../src/lib/ai/scoreNvidia';
 
 const stub: Song = {
   id: '1',
@@ -60,57 +62,57 @@ describe('concurrent single-page recognition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(recognizeWithGemini).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeWithOpenRouter).mockRejectedValue(new Error('down'));
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it('launches the complete model pool together and returns the first usable result', async () => {
-    vi.mocked(recognizeWithNvidia).mockImplementation(async (_url, _key, model) => {
+    vi.mocked(recognizeWithOpenRouter).mockImplementation(async (_url, _key, model) => {
       if (model === 'nvidia/nemotron-nano-12b-v2-vl') return result;
       throw new Error('down');
     });
 
     const out = await recognizeScore('data:image/png;base64,x', settings);
 
-    expect(out.engine).toBe('nvidia');
+    expect(out.engine).toBe('openrouter');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 
   it('lets a later-listed provider win by finishing first', async () => {
-    vi.mocked(recognizeWithNvidia).mockImplementation(async (_url, _key, model) => {
+    vi.mocked(recognizeWithOpenRouter).mockImplementation(async (_url, _key, model) => {
       if (model === LAST_MODEL) return result;
       throw new Error('down');
     });
     const out = await recognizeScore('data:image/png;base64,x', settings);
-    expect(out.engine).toBe('nvidia');
+    expect(out.engine).toBe('openrouter');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 
   it('ignores empty answers while the other concurrent models continue', async () => {
     vi.mocked(recognizeWithGemini).mockResolvedValue(emptyScore);
-    vi.mocked(recognizeWithNvidia).mockImplementation(async (_url, _key, model) => {
+    vi.mocked(recognizeWithOpenRouter).mockImplementation(async (_url, _key, model) => {
       if (model === LAST_MODEL) return result;
       throw new Error('down');
     });
     const out = await recognizeScore('data:image/png;base64,x', settings);
-    expect(out.engine).toBe('nvidia');
+    expect(out.engine).toBe('openrouter');
   });
 
   it('treats an explicit non-score classification as usable without inventing a song', async () => {
     const nonScore: ParsedScore = { pageType: 'non_score', order: [], sections: [] };
-    vi.mocked(recognizeWithNvidia).mockResolvedValue(nonScore);
+    vi.mocked(recognizeWithOpenRouter).mockResolvedValue(nonScore);
     const out = await recognizeScore('data:image/png;base64,x', settings);
-    expect(out).toMatchObject({ engine: 'nvidia', score: { pageType: 'non_score' } });
+    expect(out).toMatchObject({ engine: 'openrouter', score: { pageType: 'non_score' } });
   });
 
   it('throws once every concurrently started model fails', async () => {
     await expect(recognizeScore('data:image/png;base64,x', settings)).rejects.toThrow('down');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 
   it('retries an individual model once after a transient server failure', async () => {
@@ -131,14 +133,14 @@ describe('concurrent single-page recognition', () => {
   });
 
   it('keeps the rescue API on the same all-model race', async () => {
-    vi.mocked(recognizeWithNvidia).mockImplementation(async (_url, _key, model) => {
+    vi.mocked(recognizeWithOpenRouter).mockImplementation(async (_url, _key, model) => {
       if (model === LAST_MODEL) return result;
       throw new Error('down');
     });
     const out = await recognizeScoreRaced('data:image/png;base64,x', settings);
-    expect(out.engine).toBe('nvidia');
+    expect(out.engine).toBe('openrouter');
     expect(recognizeWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 });
 
@@ -150,7 +152,10 @@ describe('concurrent batch recognition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new Error('down'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('launches every model together for the title pass', async () => {
@@ -163,7 +168,7 @@ describe('concurrent batch recognition', () => {
 
     expect(out.scores).toEqual([first, second]);
     expect(recognizeBatchWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeBatchWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeBatchWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 
   it('keeps a non-score page in the aligned title results for caller-side filtering', async () => {
@@ -174,7 +179,7 @@ describe('concurrent batch recognition', () => {
       order: [],
       sections: [],
     };
-    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([nonScore, second]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockResolvedValue([nonScore, second]);
 
     const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'titles');
 
@@ -190,7 +195,7 @@ describe('concurrent batch recognition', () => {
     vi.mocked(recognizeBatchWithGemini).mockImplementation((_urls, _key, model) =>
       model === 'gemini-3.6-flash' ? gemini : Promise.reject(new Error('down')),
     );
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation((_urls, _key, _mode, model) =>
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation((_urls, _key, _mode, model) =>
       model === 'nvidia/nemotron-nano-12b-v2-vl' ? openRouter : Promise.reject(new Error('down')),
     );
 
@@ -207,23 +212,41 @@ describe('concurrent batch recognition', () => {
     expect(out.engine).toBe('gemini');
   });
 
-  it('does not wait for weaker models once every stronger model has settled', async () => {
-    vi.mocked(recognizeBatchWithGemini).mockRejectedValue(new Error('down'));
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [first, second];
-      throw new Error('down');
-    });
-    // The last model never settles — a lower-priority straggler must not block.
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [first, second];
-      if (model === LAST_MODEL) return new Promise(() => {});
-      throw new Error('down');
-    });
+  it('records every model’s answer as an observation instead of dropping the losers', async () => {
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new RecognitionError('rate limited', 429));
 
     const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
 
-    expect(out.engine).toBe('nvidia');
+    // One observation per model per page, successful or not. The losing
+    // answers are what a later verified correction scores each model against.
+    expect(out.observations).toHaveLength(2);
+    expect(out.observations[0]).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
+    expect(out.observations[0].filter((observation) => observation.score)).toHaveLength(GEMINI_MODEL_COUNT);
+    // A failure is stored as a category, never as the provider's response body.
+    expect(out.observations[0].filter((observation) => observation.error === 'rate-limit')).toHaveLength(
+      OPENROUTER_MODEL_COUNT,
+    );
+    expect(out.confidence[0]).toBeGreaterThan(0);
+    expect(out.needsReview).toHaveLength(2);
+  });
+
+  it('does not let a model that never answers hang the whole conti', async () => {
+    // Consensus waits for every model rather than finishing on the first
+    // usable answer, so a provider that accepts a request and never responds
+    // would otherwise stall the job forever.
+    vi.useFakeTimers();
+    vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(() => new Promise(() => {}));
+
+    const pending = recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+    await vi.advanceTimersByTimeAsync(130_000);
+    const out = await pending;
+
     expect(out.scores.map((score) => score.title)).toEqual(['첫째 곡', '둘째 곡']);
+    expect(out.observations[0].filter((observation) => observation.error === 'timeout')).toHaveLength(
+      OPENROUTER_MODEL_COUNT,
+    );
   });
 
   it('fills the fields the winning model missed from the other models (working together)', async () => {
@@ -238,7 +261,7 @@ describe('concurrent batch recognition', () => {
       if (model === 'gemini-3.6-flash') return [geminiAnswer];
       throw new Error('down');
     });
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
       if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [openRouterAnswer];
       throw new Error('down');
     });
@@ -282,7 +305,7 @@ describe('concurrent batch recognition', () => {
       if (model === 'gemini-3.6-flash') return [merged];
       throw new Error('down');
     });
-    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([split]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockResolvedValue([split]);
 
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
 
@@ -314,7 +337,7 @@ describe('concurrent batch recognition', () => {
       if (model === 'gemini-3.6-flash') return [merged];
       throw new Error('down');
     });
-    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([split]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockResolvedValue([split]);
 
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
 
@@ -338,7 +361,7 @@ describe('concurrent batch recognition', () => {
       if (model === 'gemini-3.6-flash') return [winner];
       throw new Error('down');
     });
-    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([unrelated]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockResolvedValue([unrelated]);
 
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
 
@@ -363,7 +386,7 @@ describe('concurrent batch recognition', () => {
       if (model === 'gemini-3.6-flash') return [nonScore];
       throw new Error('down');
     });
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
       if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [disagreeing];
       throw new Error('down');
     });
@@ -396,16 +419,16 @@ describe('concurrent batch recognition', () => {
   });
 
   it('uses the same complete pool for the full-lyrics ensemble API', async () => {
-    vi.mocked(recognizeBatchWithNvidia).mockImplementation(async (_urls, _key, _mode, model) => {
+    vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
       if (model === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free') return [first, second];
       throw new Error('down');
     });
 
     const out = await recognizeScoreBatchEnsemble(['image-1', 'image-2'], settings, 'full');
 
-    expect(out.engine).toBe('nvidia');
+    expect(out.engine).toBe('openrouter');
     expect(recognizeBatchWithGemini).toHaveBeenCalledTimes(GEMINI_MODEL_COUNT);
-    expect(recognizeBatchWithNvidia).toHaveBeenCalledTimes(NVIDIA_MODEL_COUNT);
+    expect(recognizeBatchWithOpenRouter).toHaveBeenCalledTimes(OPENROUTER_MODEL_COUNT);
   });
 });
 
@@ -466,7 +489,7 @@ describe('line-level consensus across the model pool', () => {
     vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
       model === 'gemini-3.6-flash' ? [winner] : [second],
     );
-    vi.mocked(recognizeBatchWithNvidia).mockResolvedValue([third]);
+    vi.mocked(recognizeBatchWithOpenRouter).mockResolvedValue([third]);
   };
   const one = (lines: string[]): ParsedScore => ({
     title: '믿음과 삶',
@@ -518,7 +541,7 @@ describe('line-level consensus across the model pool', () => {
     vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
       model === 'gemini-3.6-flash' ? [one(['능력이'])] : [one(['실력이'])],
     );
-    vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new Error('down'));
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
     expect(out.scores[0].sections[0].lines[0]).toBe('능력이');
   });
@@ -529,7 +552,7 @@ describe('lines the winning model stopped short of', () => {
     vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
       model === 'gemini-3.6-flash' ? [winner] : [other],
     );
-    vi.mocked(recognizeBatchWithNvidia).mockRejectedValue(new Error('down'));
+    vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new Error('down'));
   };
 
   it('appends a dropped tail from a model that read further', async () => {

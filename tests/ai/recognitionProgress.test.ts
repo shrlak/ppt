@@ -15,6 +15,15 @@ describe('recognition phase spans', () => {
     expect(RECOGNITION_PHASES.lyrics.end).toBeLessThan(1);
     expect(RECOGNITION_PHASES.rescue.end).toBeLessThan(1);
   });
+
+  it('slots cross-checking between the lyric pass and the rescue pass', () => {
+    // Cross-check only runs for pages the champions disagreed on, so it
+    // overlaps the tail of the lyrics span rather than resetting the bar.
+    expect(RECOGNITION_PHASES.crosscheck.start).toBeLessThan(RECOGNITION_PHASES.lyrics.end);
+    expect(RECOGNITION_PHASES.crosscheck.start).toBeGreaterThan(RECOGNITION_PHASES.lyrics.start);
+    expect(RECOGNITION_PHASES.crosscheck.end).toBeLessThanOrEqual(RECOGNITION_PHASES.rescue.end);
+    expect(RECOGNITION_PHASES.rescue.start).toBeLessThan(RECOGNITION_PHASES.crosscheck.end);
+  });
 });
 
 describe('easedPhaseFraction', () => {

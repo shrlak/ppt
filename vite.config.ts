@@ -25,5 +25,11 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
+    alias: {
+      // The shared proxy extends Cloudflare's DurableObject base class. Tests
+      // run its routes in plain Node, so the import resolves to a stub and the
+      // storage comes from tests/support/workerHarness.ts.
+      'cloudflare:workers': new URL('./tests/support/cloudflare-workers-stub.ts', import.meta.url).pathname,
+    },
   },
 });

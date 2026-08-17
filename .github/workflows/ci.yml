@@ -31,8 +31,22 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # playwright.config.ts builds the app itself, with a proxy URL baked in
+      # so the recognition, web-lookup and learning paths are reachable and
+      # every test can intercept them.
       - name: End-to-end tests
         run: npm run test:e2e
+
+      - name: Check no training data or model weights were committed
+        run: |
+          tracked=$(git ls-files \
+            | grep -Ei 'learning|corpus|models|artifacts' \
+            | grep -Ei '\.(png|jpe?g|webp|zip|onnx|bin|safetensors)$' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::copyrighted 악보 or model weights must never be committed:"
+            echo "$tracked"
+            exit 1
+          fi
 
       - name: Upload Playwright report
         if: failure()

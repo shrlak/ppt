@@ -19,6 +19,12 @@ Browser  ──GET  /lyrics────────▶  Worker (search + scrape)
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
+Everyone ◀──GET /learning/models── measured per-model accuracy (numbers only)
+Everyone ◀──GET /learning/memory── title aliases, safe corrections, examples
+Admin    ──POST /learning/feedback▶ one verified user correction
+Admin    ◀─▶ /learning/corpus──── verified training corpus (metadata + images)
+Admin    ──▶ /learning/correction-model── upload / activate / roll back
+Everyone ◀──GET /learning/correction-model/:v/resolve/*── model files (app origins)
 Everyone ◀──GET /libraries/lyrics── shared user-added lyrics
 Admin    ──PUT/DELETE /libraries/lyrics── save or delete lyrics
 Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
@@ -241,3 +247,79 @@ check; the decision and the deleted-file counts are logged to the `wrangler
 dev` console. `POST /libraries/ppt/purge` skips the schedule entirely. The
 pure schedule logic is unit tested in `tests/storage/pptLibraryPurge.test.ts`
 (`npm test` in the repo root).
+
+
+## Learning routes
+
+Recognition improves from corrections a user explicitly verified. The Worker is
+the shared store for that; it does no learning itself.
+
+| route | who | what it holds |
+| --- | --- | --- |
+| `GET /learning/models` | anyone | Per-model accuracy for title, artist, order and lyrics, plus failure rate and sample count. **Numbers only** — the browser does the comparison, so no lyric text or score image is ever stored under these keys. Safe to read from the dashboard. |
+| `POST /learning/models/evaluations` | admin | Field scores the client already calculated. Every value must be finite and in `[0,1]`; one out-of-range value could not be averaged back out. |
+| `POST /learning/feedback` | admin | One verified correction: the models' answers, the reading consensus produced, and the reading the user saved. The page hash plus the hash of the saved answer is the idempotency key — a deck is re-saved constantly while it is edited, and counting the same evidence twice would inflate every model's sample count. Model accuracy is only updated alongside a record that was newly stored. |
+| `GET /learning/memory?title=` | anyone | Title aliases, correction pairs and at most three short before/after snippets. No stored song is returned whole. |
+| `GET/PUT /learning/corpus`, `…/manifests`, `…/:id/chunks/:i`, `…/exported`, `DELETE …/:id` | admin | The training corpus: one record per verified page, its saved answers, and the page image in 1 MiB chunks. **Administrator-only in both directions** — this is the only place the proxy keeps score images. |
+| `GET/PUT /learning/correction-model`, `…/activate`, `…/rollback`, `…/:v/files/<path>/chunks/:i` | admin | The hand-trained correction model. The proxy re-checks the score gate before a version may go live, so a client that skipped its own check cannot activate a model that made things worse. |
+| `GET /learning/correction-model/:version/resolve/<path>` | app origins | The model files themselves, fetched by the browser runtime. Versioned URL, `immutable` caching, restricted to `ALLOWED_ORIGINS`. No training record is reachable through it. |
+
+### Storage caps
+
+| what | cap | what happens at the cap |
+| --- | --- | --- |
+| tracked models | 100 | a new model key is ignored, so made-up keys cannot grow storage |
+| verified corrections | 2000 | oldest first; the corpus is a rolling window, not an archive |
+| training images | 300 | **only records already exported** are evicted, oldest first. Over the cap with nothing exported, the corpus is allowed to overflow — evicting an unexported record would silently lose a correction somebody made, and the dashboard surfaces the overflow instead. |
+| correction-model versions | 2 | the older of the two is deleted on the next activation, so a rollback target always exists |
+
+**The weekly PPT purge does not touch `learning:*`.** A corpus wiped every
+Sunday could never train anything; see `wrangler.toml`.
+
+### Secrets and variables
+
+| name | kind | purpose |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | secret | Gemini free-tier key |
+| `OPENROUTER_API_KEY` | secret | OpenRouter key, used only for `:free` vision models |
+| `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
+| `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
+| `BUGS_SCRAPING_ALLOWED` | var | `"false"` by default. Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
+
+```bash
+npx wrangler secret put ADMIN_PASSWORD
+# Only after the deployment's administrator actually has permission:
+npx wrangler deploy --var BUGS_SCRAPING_ALLOWED:true
+```
+
+### Training a correction model (all free)
+
+1. 관리자 설정 → 학습 자료 → **학습 자료 ZIP 내려받기**.
+2. Run `notebooks/lyrics-correction-finetune.ipynb` on a free Colab (T4) or
+   Kaggle session. It refuses to produce an artifact unless overall accuracy
+   improves by at least one point and lyric accuracy does not fall.
+3. Check the artifact before uploading:
+
+   ```bash
+   npm run validate:correction-model artifacts/lyrics-corrector/lyrics-corrector-v1.zip
+   ```
+
+   It verifies every file hash against the manifest, the score gate, the base
+   model allowlist and the files the runtime cannot start without, and prints
+   the exact version, scores, byte count and SHA-256 values the upload screen
+   will show.
+4. Upload and activate in 관리자 설정 → 학습. If the model turns out worse in
+   practice, **이전 버전으로 되돌리기** switches back in one request.
+
+Artifacts are gitignored (`artifacts/lyrics-corrector/`): they are derived from
+copyrighted 악보 and are far too large for git.
+
+### What is not stored
+
+- No score image outside `learning:corpus:*`, which is administrator-only.
+- No lyric text in model statistics, in the memory endpoint's counters, or in
+  any error message or log line — a provider response body can echo the prompt
+  back, and the prompt carries lyrics, so failures are recorded as a
+  **category** (`quota`, `rate-limit`, `timeout`, …) and nothing else.
+- No third-party lyric text: a web candidate is stored as provenance (which
+  page was offered, how it scored), never as its lines.

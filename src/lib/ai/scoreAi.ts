@@ -3,7 +3,8 @@
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
 import { RecognitionError } from './recognitionError';
-import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES } from './scorePrompt';
+import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES, correctionExampleLines } from './scorePrompt';
+import type { PromptExample } from './scoreNvidia';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -29,6 +30,7 @@ const RESPONSE_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     lyricRowCount: { type: 'integer' },
@@ -55,6 +57,7 @@ const BATCH_TITLE_ITEM_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
   },
   required: ['imageIndex', 'pageType', 'sermonTitle', 'scripture', 'title'],
@@ -68,6 +71,7 @@ const BATCH_FULL_ITEM_SCHEMA = {
     sermonTitle: { type: 'string' },
     scripture: { type: 'string' },
     title: { type: 'string' },
+    artist: { type: 'string' },
     key: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     lyricRowCount: { type: 'integer' },
@@ -134,6 +138,7 @@ export function buildGeminiBatchBody(
   mode: BatchRecognitionMode,
   useSearch = false,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): unknown {
   const task =
     mode === 'titles'
@@ -142,13 +147,13 @@ export function buildGeminiBatchBody(
           'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 인식하지 마세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, key를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
           'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, key, order, lyricRowCount, sections를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key, order, lyricRowCount, sections를 포함하세요.',
           ...BASE_PROMPT_LINES,
         ];
   const hasHints = (hints ?? []).some((hint) => hint && hint.trim());
@@ -159,6 +164,7 @@ export function buildGeminiBatchBody(
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']
       : []),
     ...task,
+    ...correctionExampleLines(examples),
     ...(mode === 'full' && useSearch ? SEARCH_PROMPT_LINES : ['반드시 유효한 JSON 객체 하나만 출력하세요.']),
   ].join('\n');
 
@@ -267,6 +273,7 @@ export async function recognizeBatchWithGemini(
   useSearch = false,
   proxyUrl?: string,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
   const useProxy = !apiKey.trim() && !!proxyUrl;
@@ -276,7 +283,7 @@ export async function recognizeBatchWithGemini(
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch, hints)),
+    body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch, hints, examples)),
   });
 
   if (!res.ok) {

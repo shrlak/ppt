@@ -3,7 +3,8 @@ import type { Song } from '../lib/utils/types';
 import { formatOrder, parseOrder } from '../lib/utils/orderParser';
 import { planSlides, unmatchedTokens } from '../lib/utils/slidePlanner';
 import { progressPercent, type RecognitionPhase } from '../lib/ai/recognitionProgress';
-import { nextAvailableLabel } from './songLabels';
+import { candidateScorePercent, nextAvailableLabel, songTrustBadge } from './songLabels';
+import type { WebReviewState } from '../lib/lyrics/mergeWebLyrics';
 import Icon from './Icon';
 
 /** Live status of auto-recognizing a song's score image. */
@@ -16,11 +17,19 @@ export interface RecogState {
   phase?: RecognitionPhase;
   /** Engine that produced the result, or 'library' when recognition was skipped. */
   engine?: string;
+  /** True when the models did not settle on this page. */
+  needsReview?: boolean;
+  /** Per-part lyric confidence, so only unsure parts are highlighted. */
+  sectionConfidence?: Record<string, number>;
 }
+
+/** Below this a part is highlighted as "the models disagreed here". */
+const LOW_CONFIDENCE = 0.75;
 
 const ENGINE_LABELS: Record<string, string> = {
   gemini: 'Gemini',
-  // Legacy engine ID: all current entries in this lane are OpenRouter free models.
+  openrouter: 'OpenRouter',
+  // Pre-rename engine ID, still possible in a restored deck's saved state.
   nvidia: 'OpenRouter',
   library: '라이브러리',
 };
@@ -29,6 +38,7 @@ const PHASE_LABELS: Record<RecognitionPhase, string> = {
   render: '악보 이미지 준비 중',
   titles: '전체 곡 제목 확인 중',
   lyrics: '전체 가사 일괄 인식 중',
+  crosscheck: '헷갈리는 곡 교차 확인 중',
   rescue: '남은 곡 다시 인식 중',
   web: '웹에서 가사 확인 중',
 };
@@ -47,6 +57,10 @@ interface Props {
   onSaveToLibrary: (song: Song) => void;
   onZoom: () => void;
   onTitleBlur: (title: string) => void;
+  /** Web-lookup candidates awaiting a choice, when there are any. */
+  webReview?: WebReviewState;
+  /** Chosen candidate ID, or null for "none of these". */
+  onSelectWebCandidate?: (candidateId: string | null) => void;
   /**
    * Render only the header + lyric editor + slide preview (no score pane) —
    * used as the right side of the split-screen conti view, where the score
@@ -75,6 +89,8 @@ export default function SongCard({
   onSaveToLibrary,
   onZoom,
   onTitleBlur,
+  webReview,
+  onSelectWebCandidate,
   editorOnly = false,
 }: Props) {
   const [orderText, setOrderText] = useState(formatOrder(song.order));
@@ -88,6 +104,15 @@ export default function SongCard({
 
   const missing = new Set(unmatchedTokens(song));
   const plans = planSlides(song);
+  const trust = songTrustBadge({
+    verification: song.verification,
+    needsReview: recog?.needsReview,
+    webDecision: webReview?.decision,
+  });
+  // Only parts the models actually disagreed on are marked. Highlighting a
+  // whole song teaches the user to ignore the highlight.
+  const isLowConfidence = (label: string) =>
+    !!recog?.sectionConfidence && (recog.sectionConfidence[label] ?? 1) < LOW_CONFIDENCE;
 
   function setSection(i: number, patch: Partial<{ label: string; text: string }>) {
     const sections = song.sections.map((s, idx) => {
@@ -116,6 +141,61 @@ export default function SongCard({
     [sections[i], sections[j]] = [sections[j], sections[i]];
     onChange({ ...song, sections });
   }
+
+  /**
+   * The web found several plausible pages for this title.
+   *
+   * They are offered as a choice rather than applied, because the pages differ
+   * in exactly the way that matters: several different Korean worship songs
+   * share a title, and picking the wrong one replaces the conti's lyrics with
+   * another song's. Each button carries what the user needs to tell them
+   * apart — title, artist, the site it came from, and how well it matched.
+   */
+  const webCandidateChooser = webReview?.decision === 'review' && onSelectWebCandidate && (
+    <div className="web-review" data-testid="web-review">
+      <p className="web-review-question">웹에서 비슷한 곡을 찾았습니다. 이 곡의 가사가 맞나요?</p>
+      <div className="web-review-options">
+        {webReview.candidates.slice(0, 3).map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            className={`btn btn-chip web-review-option${
+              webReview.selectedId === candidate.id ? ' is-selected' : ''
+            }`}
+            data-testid="web-candidate"
+            aria-pressed={webReview.selectedId === candidate.id}
+            onClick={() => onSelectWebCandidate(candidate.id)}
+          >
+            <span className="web-candidate-title">{candidate.title || '제목 미상'}</span>
+            {candidate.artist && <span className="web-candidate-artist">{candidate.artist}</span>}
+            <span className="web-candidate-host">{candidate.sourceHost}</span>
+            <span className="web-candidate-score">일치 {candidateScorePercent(candidate.score)}%</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`btn btn-chip web-review-option${webReview.selectedId === undefined ? ' is-selected' : ''}`}
+          data-testid="web-candidate-none"
+          aria-pressed={webReview.selectedId === undefined}
+          onClick={() => onSelectWebCandidate(null)}
+        >
+          사용하지 않음
+        </button>
+      </div>
+      {webReview.links && webReview.links.length > 0 && (
+        <p className="web-review-links">
+          {/* Pages this deployment has no permission to read: a link is all we
+              can offer, and the user can decide for themselves. */}
+          참고 링크:{' '}
+          {webReview.links.map((link) => (
+            <a key={link.url} href={link.url} target="_blank" rel="noreferrer noopener">
+              {link.host}
+            </a>
+          ))}
+        </p>
+      )}
+    </div>
+  );
 
   // Recognition status + trigger, rendered inside the score pane normally
   // and directly above the editor in the split-screen (editorOnly) view.
@@ -172,7 +252,7 @@ export default function SongCard({
             </span>
           )}
           {recog?.status === 'done' && (
-            <span className="recog-done">
+            <span className="recog-done" data-testid="recog-done">
               <Icon name="check" />
               {recog.engine === 'library'
                 ? '라이브러리의 저장된 가사를 불러왔습니다'
@@ -181,6 +261,7 @@ export default function SongCard({
           )}
         </>
       )}
+      {webCandidateChooser}
     </div>
   );
 
@@ -210,6 +291,17 @@ export default function SongCard({
           value={song.key ?? ''}
           onChange={(e) => onChange({ ...song, key: e.target.value || undefined })}
         />
+        {trust && (
+          <span
+            className={`song-trust song-trust-${trust.tone}`}
+            data-testid="song-trust"
+            data-tone={trust.tone}
+            title={trust.detail}
+          >
+            {trust.label}
+            <span className="visually-hidden"> — {trust.detail}</span>
+          </span>
+        )}
         <div className="song-actions">
           <button
             type="button"
@@ -263,6 +355,10 @@ export default function SongCard({
 
         <div className="editor-pane">
           {editorOnly && recogBox}
+          {/* One explanation for every marked part, referenced by aria-describedby. */}
+          <p id={`${song.id}-low-confidence`} className="visually-hidden">
+            표시된 파트는 인식 모델들이 서로 다르게 읽은 부분입니다. 악보와 비교해 확인해 주세요.
+          </p>
           {song.sections.map((sec, i) => (
             <div className="section-row" key={i}>
               <input
@@ -274,6 +370,8 @@ export default function SongCard({
               />
               <textarea
                 data-testid="section-textarea"
+                data-confidence={isLowConfidence(sec.label) ? 'low' : undefined}
+                aria-describedby={isLowConfidence(sec.label) ? `${song.id}-low-confidence` : undefined}
                 rows={Math.max(2, sec.lines.length)}
                 placeholder="가사를 한 줄씩 입력하세요 (빈 줄 = 슬라이드 나누기)"
                 title="빈 줄을 넣으면 그 앞의 가사와 뒤의 가사가 서로 다른 슬라이드로 나뉩니다"

@@ -3005,3 +3005,228 @@ main[data-direction='back'] .wizard-panel.active {
 .score-zoom img {
   display: block;
 }
+
+/* --------------------------------------------------------------------------
+   Adaptive recognition: how sure the app is, and what the user can do about it
+
+   The rule these follow is that the answer never depends on colour: the badge
+   says 확인 필요 / 웹 확인 / 검증됨 in words, and a low-confidence part is
+   marked with a left edge AND described to screen readers by the paragraph the
+   textarea points at.
+   -------------------------------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.song-trust {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.song-trust-warn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
+}
+
+.song-trust-info {
+  background: var(--info-bg);
+  border-color: var(--notice-border);
+  color: var(--info-ink);
+}
+
+.song-trust-ok {
+  background: var(--accent-soft);
+  border-color: var(--notice-border);
+  color: var(--accent-dark);
+}
+
+/* A part the models read differently. The marker is an edge rather than a
+   fill so the lyric text keeps its full contrast against the field. */
+.section-row textarea[data-confidence='low'] {
+  border-inline-start: 3px solid var(--alert-border);
+  background: var(--alert-bg);
+}
+
+.web-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  background: var(--info-bg);
+  border: 1px solid var(--notice-border);
+  border-radius: var(--radius-md);
+}
+
+.web-review-question {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+
+.web-review-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* Each option carries title, artist, host and match percentage, so the
+   choice can be made without opening any of the pages. */
+.web-review-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: var(--control-h);
+  max-width: 100%;
+  padding: var(--s-2) var(--s-3);
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.web-review-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.web-candidate-title {
+  font-weight: 600;
+}
+
+.web-candidate-artist,
+.web-candidate-host,
+.web-candidate-score {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+
+.web-review-links {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+
+.web-review-links a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.web-review-links a + a {
+  margin-inline-start: var(--s-2);
+}
+
+@media (max-width: 480px) {
+  /* At 320px the options stack full-width rather than overflowing the card. */
+  .web-review-option {
+    width: 100%;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Admin: what recognition has learned
+
+   Roles and pause reasons are always spelled out in words; the colour on a
+   role chip repeats the label rather than carrying it.
+   -------------------------------------------------------------------------- */
+
+.learning-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.learning-model {
+  padding: var(--s-3);
+  background: var(--field);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.learning-model-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.learning-model-name {
+  font-weight: 600;
+}
+
+.learning-model-role {
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.learning-model-role-champion {
+  background: var(--accent-soft);
+  border-color: var(--notice-border);
+  color: var(--accent-dark);
+}
+
+.learning-model-role-challenger {
+  background: var(--info-bg);
+  border-color: var(--notice-border);
+  color: var(--info-ink);
+}
+
+.learning-model-role-paused {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
+}
+
+.learning-model-pinned {
+  font-weight: 600;
+}
+
+.learning-model-stats,
+.learning-model-paused,
+.learning-corpus-count {
+  margin: var(--s-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.learning-model-paused {
+  color: var(--warn-ink);
+}
+
+.learning-corpus-count {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  /* At 320px the role-pinning chips stack instead of overflowing the card. */
+  .learning-model .admin-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

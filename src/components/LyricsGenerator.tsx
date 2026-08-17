@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
+import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import {
   fetchBundledLibrary,
   findEntry,
+  findReusableEntry,
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
@@ -20,15 +21,35 @@ import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
+import { applyScoreToSong, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
+import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
+import { fetchLearningMemory, fetchModelReliabilities } from '../lib/learning/learningClient';
 import {
-  applyScoreToSong,
-  recognizeScoreBatch,
-  recognizeScoreBatchEnsemble,
-  recognizeScoreRaced,
-} from '../lib/ai/scoreRecognition';
+  applySafeCorrections,
+  buildLearningMemory,
+  promptExamplesFor,
+  resolveTitleAlias,
+  EMPTY_MEMORY,
+  type LearningMemory,
+} from '../lib/learning/onlineLearning';
+import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
+import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
+import { hashPageImage, hashText } from '../lib/ai/pageHash';
+import { scoreObservation } from '../lib/ai/modelReliability';
+import {
+  canonicalScore,
+  diffFeedback,
+  feedbackCandidate,
+  verificationFor,
+  type FeedbackDiff,
+} from '../lib/learning/feedbackDiff';
+import { flushFeedbackQueue, queueFeedback } from '../lib/learning/feedbackQueue';
+import { dataUrlToBytes, resizeTrainingImage } from '../lib/learning/trainingCorpus';
+import { loadActiveCorrectionRunner, uploadTrainingRecord } from '../lib/learning/learningClient';
+import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
-import { fetchWebLyrics, hasWebLyricsLookup } from '../lib/lyrics/webLyrics';
-import { mergeWebLyrics } from '../lib/lyrics/mergeWebLyrics';
+import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
+import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
@@ -55,6 +76,33 @@ const PROGRESS_TICK_MS = 400;
 
 function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
+}
+
+/**
+ * What recognition produced, before the user touched it.
+ *
+ * Kept on the song so an explicit save can diff the final wording against the
+ * machine's own answer: that diff is what tells 'verified' apart from
+ * 'edited', and it is what each model's accuracy is measured from.
+ */
+/** One page's recognition evidence, held until the user decides about it. */
+interface PageEvidence {
+  pageHash?: string;
+  /** The rendered page, for pairing a verified correction with its image. */
+  image?: string;
+  observations: RecognitionObservation[];
+  confidence: number;
+  needsReview: boolean;
+}
+
+function recognitionBaseline(score: ParsedScore): NonNullable<Song['provenance']>['baseline'] {
+  return {
+    title: score.title,
+    artist: score.artist,
+    key: score.key,
+    sections: structuredClone(score.sections),
+    order: [...score.order],
+  };
 }
 
 /** Vision engines may identify a non-score page explicitly or by returning
@@ -126,6 +174,28 @@ export default function LyricsGenerator({
   const [parsing, setParsing] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recog, setRecog] = useState<Record<string, RecogState>>({});
+  /**
+   * Web candidates a song is still waiting on a decision about.
+   *
+   * Held apart from the song itself: nothing here has been applied, and the
+   * song must stay exactly as the models read it until the user picks.
+   */
+  const [webReview, setWebReview] = useState<Record<string, WebReviewState>>({});
+  // The consensus reading each pending review would be merged into.
+  const webBaselineRef = useRef<Record<string, ParsedScore>>({});
+  // Latest review state, for callbacks that must stay referentially stable.
+  const webReviewRef = useRef<Record<string, WebReviewState>>({});
+  /**
+   * What recognition learned about each song: the page it read, every model's
+   * answer, and how settled the consensus was.
+   *
+   * Kept until the user explicitly saves. An automatic save is a draft and
+   * proves nothing, so evidence only becomes training data when somebody
+   * stands behind the result.
+   */
+  const evidenceRef = useRef<Map<string, PageEvidence>>(new Map());
+  // Latest learning memory, for the rescue path that runs after the main flow.
+  const memoryRef = useRef<LearningMemory>(EMPTY_MEMORY);
   // Song being edited in the split-screen conti view (null = closed).
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
@@ -142,6 +212,9 @@ export default function LyricsGenerator({
   useEffect(() => {
     libraryRef.current = library;
   }, [library]);
+  useEffect(() => {
+    webReviewRef.current = webReview;
+  }, [webReview]);
   // Mirror of pageImages for async loops that must see the latest cache.
   const pageImagesRef = useRef<Record<number, string>>({});
   useEffect(() => {
@@ -225,6 +298,9 @@ export default function LyricsGenerator({
     const refreshOnFocus = () => {
       if (document.visibilityState === 'hidden') return;
       libraryPromiseRef.current = refreshLibrary();
+      // Queued corrections retry on the same signal the library sync uses, so
+      // a save made offline reaches the proxy the next time the tab is used.
+      void flushFeedbackQueue().catch(() => undefined);
     };
     window.addEventListener('focus', refreshOnFocus);
     document.addEventListener('visibilitychange', refreshOnFocus);
@@ -235,13 +311,36 @@ export default function LyricsGenerator({
     };
   }, [refreshLibrary]);
 
-  const saveToLibrary = useCallback((song: Song) => {
+  /**
+   * Write a song to the library at a given trust level.
+   *
+   * A draft is what automatic recognition produces; it is stored so the song
+   * is not lost, but upsertEntry refuses to let it replace an entry somebody
+   * already confirmed. Only an explicit save passes 'verified' or 'edited'.
+   */
+  const saveToLibrary = useCallback((song: Song, verification: VerificationState = 'draft') => {
     if (!song.title.trim()) return;
+    const previous = findEntry(libraryRef.current, song.title);
     const entry: LibraryEntry = {
       title: song.title.trim(),
+      artist: song.artist,
       key: song.key,
       sections: structuredClone(song.sections),
       order: [...song.order],
+      verification,
+      version: (previous?.version ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      ...(song.provenance
+        ? {
+            provenance: {
+              pageHash: song.provenance.pageHash,
+              source: song.provenance.source,
+              webSourceUrl: song.provenance.webSourceUrl,
+              confidence: song.provenance.confidence,
+              correctionModelVersion: song.provenance.correctionModelVersion,
+            },
+          }
+        : {}),
     };
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
@@ -270,8 +369,11 @@ export default function LyricsGenerator({
         songHasLyrics(song) &&
         !findEntry(libraryRef.current, song.title)
       ) {
-        saveToLibrary(song);
-        showToast(`'${song.title}' 을(를) 라이브러리에 자동으로 저장했습니다.`);
+        // Automatic recognition produces a DRAFT. Nobody has looked at it, so
+        // it must not become the ground truth a later conti reuses, nor count
+        // as evidence that any model read the page correctly.
+        saveToLibrary(song, 'draft');
+        showToast(`'${song.title}' 을(를) 초안으로 저장했습니다.`);
       }
       pendingAutoSaveRef.current.delete(id);
     }
@@ -386,12 +488,16 @@ export default function LyricsGenerator({
       const ticker = window.setInterval(applyProgress, PROGRESS_TICK_MS);
 
       const resolvedIds = new Set<string>();
+      /** Pages the models did not settle on, so the card can say so. */
+      let reviewFlags = new Map<string, boolean>();
       const markDone = (ids: string[], engine: string) => {
         for (const id of ids) resolvedIds.add(id);
         setRecog((current) => {
           const next = { ...current };
           for (const id of ids) {
-            if (!isCancelled(id)) next[id] = { status: 'done', engine };
+            if (!isCancelled(id)) {
+              next[id] = { status: 'done', engine, needsReview: reviewFlags.get(id) || undefined };
+            }
           }
           return next;
         });
@@ -405,11 +511,39 @@ export default function LyricsGenerator({
        */
       const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
 
+      // Everything recognition learns about each song is kept on the component
+      // (see evidenceRef): an explicit save happens long after this function
+      // has returned, and that save is the only thing that turns evidence into
+      // training data.
+      const evidence = evidenceRef.current;
+
       /** Commit a finished song: write the lyrics, allow auto-save, mark done. */
-      const applyRecognizedScore = (id: string, score: ParsedScore, engine: string) => {
+      const applyRecognizedScore = (
+        id: string,
+        score: ParsedScore,
+        engine: string,
+        provenance?: Partial<NonNullable<Song['provenance']>>,
+      ) => {
         pendingAutoSaveRef.current.add(id);
+        const found = evidence.get(id);
         setSongs((current) =>
-          current.map((song) => (song.id === id && !isCancelled(id) ? applyScoreToSong(song, score) : song)),
+          current.map((song) => {
+            if (song.id !== id || isCancelled(id)) return song;
+            const next = applyScoreToSong(song, score);
+            return {
+              ...next,
+              // A machine answer is a draft until somebody stands behind it.
+              verification: 'draft',
+              provenance: {
+                ...song.provenance,
+                pageHash: found?.pageHash,
+                baseline: song.provenance?.baseline ?? recognitionBaseline(score),
+                source: 'models',
+                confidence: found?.confidence,
+                ...provenance,
+              },
+            };
+          }),
         );
         markDone([id], engine);
       };
@@ -436,15 +570,55 @@ export default function LyricsGenerator({
         enterPhase('web', pending.map(([id]) => id));
         await Promise.all(
           pending.map(async ([id, { score, engine, title }]) => {
-            const web = title ? await fetchWebLyrics(title) : null;
+            // What the models read is sent as matching evidence, so a page
+            // that merely shares this title cannot be mistaken for this song.
+            const lookup = title
+              ? await fetchWebLyrics({ title, sample: lyricSample(score.sections) })
+              : { candidates: [], links: [] };
             if (isCancelled(id)) return;
-            const merged = mergeWebLyrics(score, web);
-            applyRecognizedScore(id, merged.score, engine);
-            if (web && merged.outcome !== 'unused') {
+            const auto = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
+            const review = lookup.candidates.filter((candidate) => candidate.decision === 'review');
+
+            // Several plausible pages: the song stays exactly as the models
+            // read it, editable, and out of auto-save until the user chooses.
+            if (!auto && review.length > 0) {
+              webBaselineRef.current[id] = score;
+              setWebReview((current) => ({
+                ...current,
+                [id]: { candidates: review, decision: 'review', links: lookup.links },
+              }));
+              const normalized = mergeWebLyrics(score, null);
+              setSongs((current) =>
+                current.map((song) =>
+                  song.id === id && !isCancelled(id)
+                    ? {
+                        ...applyScoreToSong(song, normalized.score),
+                        verification: 'draft',
+                        provenance: {
+                          ...song.provenance,
+                          pageHash: evidence.get(id)?.pageHash,
+                          baseline: song.provenance?.baseline ?? recognitionBaseline(score),
+                          source: 'models',
+                          confidence: evidence.get(id)?.confidence,
+                        },
+                      }
+                    : song,
+                ),
+              );
+              markDone([id], engine);
+              return;
+            }
+
+            const merged = mergeRankedWebLyrics(score, auto);
+            applyRecognizedScore(id, merged.score, engine, {
+              source: auto ? 'web' : 'models',
+              webSourceUrl: auto?.sourceUrl,
+            });
+            if (auto && merged.outcome !== 'unused') {
               showToast(
                 merged.outcome === 'filled'
-                  ? `'${title}' 가사를 ${web.sourceHost}에서 가져왔습니다.`
-                  : `'${title}' 가사를 ${web.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
+                  ? `'${title}' 가사를 ${auto.sourceHost}에서 가져왔습니다.`
+                  : `'${title}' 가사를 ${auto.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
               );
             }
           }),
@@ -452,6 +626,9 @@ export default function LyricsGenerator({
       };
 
       enterPhase('render', tracked.ids);
+
+      /** Models whose free daily allowance ran out during this conti. */
+      const exhausted = new Set<string>();
 
       try {
         // Rendering and recognition are both batched: no per-song request loop.
@@ -468,28 +645,73 @@ export default function LyricsGenerator({
         // Shared settings: concurrent model pool and the
         // excluded-title list, synced across every device via the proxy.
         const settings = await getSyncedAiSettings();
-
+        // Measured accuracy decides which models read every page and how much
+        // each answer counts. No proxy, or a failed lookup, just means the
+        // catalog's own roles are used.
+        const reliabilities = await fetchModelReliabilities();
+        // What the app already learned to fix. Aliases redirect a title the
+        // models keep misreading to the saved song; examples warn them off
+        // repeating a correction the user already made.
+        const memory = await fetchLearningMemory();
+        memoryRef.current = memory;
+        // The hand-trained corrector, when this deployment has one. Loading it
+        // is what pulls in the inference runtime, so a deployment without an
+        // artifact never downloads it.
+        const corrector = await loadActiveCorrectionRunner();
+        // Page hashes tie this run's evidence to the page it came from, so a
+        // correction saved next week still knows which reading it corrected.
+        const pageHashes = await Promise.all(
+          images.map((image) => hashPageImage(image).catch(() => undefined)),
+        );
+        active.forEach((song, index) => {
+          evidence.set(song.id, {
+            pageHash: pageHashes[index],
+            // Kept so an explicit save can pair the correction with the page
+            // it corrected. Recognition renders these anyway; storing the
+            // reference costs nothing until somebody verifies the song.
+            image: images[index],
+            observations: [],
+            confidence: 0,
+            needsReview: true,
+          });
+        });
         // Quick title pass. Best-effort: on failure the full pass still runs,
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
         let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
         try {
-          titleScores = (await recognizeScoreBatch(images, settings, 'titles')).scores;
+          const titleResult = await recognizeAdaptiveBatch(
+            images,
+            settings,
+            'titles',
+            undefined,
+            reliabilities,
+            undefined,
+            promptExamplesFor({}, memory),
+          );
+          titleScores = titleResult.scores;
+          for (const modelKey of titleResult.exhaustedModels) exhausted.add(modelKey);
         } catch (error) {
           console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
         }
 
+        // A title the models are known to misread is resolved BEFORE the
+        // library and the web are searched, so a page whose title never comes
+        // back right still finds its saved lyrics.
+        const aliasedTitles = titleScores.map((identity) =>
+          identity.title ? { ...identity, title: resolveTitleAlias(identity.title, memory) } : identity,
+        );
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
         const titlePlan = planScoreBatch(
-          titleScores,
+          aliasedTitles,
           active.map((song) => song.title),
           libraryRef.current,
         );
 
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
-          const identity = titleScores[index] ?? { order: [], sections: [] };
+          const identity = aliasedTitles[index] ?? { order: [], sections: [] };
           if (discardNonScorePage(song, identity)) {
             resolvedIds.add(song.id);
             return;
@@ -543,17 +765,36 @@ export default function LyricsGenerator({
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
-          // Every model reads the conti at once and works on the answer
-          // together: the strongest model that read a page wins it, and the
-          // other models fill in whatever fields it missed.
-          const lyricResult = await recognizeScoreBatchEnsemble(
+          // Three champions read every page; only a page they disagreed on is
+          // escalated to a challenger, one at a time and one page at a time.
+          const lyricResult = await recognizeAdaptiveBatch(
             remaining.map(({ image }) => image),
             settings,
             'full',
             remaining.map(hintFor),
+            reliabilities,
+            undefined,
+            promptExamplesFor(
+              {
+                title: remaining[0] ? hintFor(remaining[0]) : undefined,
+                partLabels: ['V', 'C', 'B', 'PC'],
+              },
+              memory,
+            ),
           );
           lyricScores = lyricResult.scores;
           lyricEngine = lyricResult.engine;
+          for (const modelKey of lyricResult.exhaustedModels) exhausted.add(modelKey);
+          remaining.forEach(({ song }, index) => {
+            const found = evidence.get(song.id);
+            if (!found) return;
+            found.observations = lyricResult.observations[index] ?? [];
+            found.confidence = lyricResult.confidence[index] ?? 0;
+            found.needsReview = lyricResult.needsReview[index] ?? true;
+          });
+          reviewFlags = new Map(
+            remaining.map(({ song }, index) => [song.id, lyricResult.needsReview[index] ?? false]),
+          );
         } catch (error) {
           console.warn('가사 일괄 인식 실패, 곡별 인식으로 전환:', error instanceof Error ? error.message : error);
         }
@@ -562,12 +803,40 @@ export default function LyricsGenerator({
         remaining.forEach(({ song, identity }, index) => {
           if (isCancelled(song.id)) return;
           const full = lyricScores?.[index] ?? { order: [], sections: [] };
-          scoreById.set(song.id, {
-            ...full,
-            title: full.title ?? identity.title,
-            key: full.key ?? identity.key,
-          });
+          scoreById.set(
+            song.id,
+            // Learned corrections land after the models have agreed and before
+            // the web is consulted: a repeat misreading is fixed from our own
+            // verified history, and a high-confidence web line still wins.
+            applySafeCorrections(
+              {
+                ...full,
+                title: full.title ?? identity.title,
+                artist: full.artist ?? identity.artist,
+                key: full.key ?? identity.key,
+              },
+              memory,
+            ),
+          );
         });
+
+        // The hand-trained corrector runs last among the local steps: it has
+        // seen this deployment's own hard pages, so it can propose a fix where
+        // every vision model made the same mistake and consensus had nothing
+        // to choose between. Every failure leaves consensus exactly as it was.
+        if (corrector) {
+          enterPhase('crosscheck', [...scoreById.keys()]);
+          for (const [id, score] of [...scoreById.entries()]) {
+            if (isCancelled(id)) continue;
+            const found = evidence.get(id);
+            scoreById.set(
+              id,
+              await correctConsensus(score, found?.observations ?? [], corrector, {
+                titleConfidence: found?.confidence,
+              }),
+            );
+          }
+        }
 
         // A full response can occasionally identify a title that the quick
         // title pass missed. Apply the exclusion list first, then prefer the
@@ -586,7 +855,8 @@ export default function LyricsGenerator({
             resolvedIds.add(song.id);
             continue;
           }
-          const hit = recognizedTitle ? findEntry(libraryRef.current, recognizedTitle) : undefined;
+          const aliased = recognizedTitle ? resolveTitleAlias(recognizedTitle, memory) : '';
+          const hit = aliased ? findReusableEntry(libraryRef.current, { title: aliased }) : undefined;
           if (hit) {
             scoreById.delete(song.id);
             resolvedIds.add(song.id);
@@ -658,7 +928,10 @@ export default function LyricsGenerator({
                 resolvedIds.add(song.id);
                 return;
               }
-              const hit = mergedTitle ? findEntry(libraryRef.current, mergedTitle) : undefined;
+              const aliasedTitle = mergedTitle ? resolveTitleAlias(mergedTitle, memoryRef.current) : '';
+              const hit = aliasedTitle
+                ? findReusableEntry(libraryRef.current, { title: aliasedTitle })
+                : undefined;
               if (hit) {
                 resolvedIds.add(song.id);
                 fillFromLibrary(song, hit);
@@ -707,6 +980,12 @@ export default function LyricsGenerator({
         });
       } finally {
         window.clearInterval(ticker);
+        if (exhausted.size > 0) {
+          // A spent free allowance is not a recognition failure, and saying so
+          // is the difference between "try again tomorrow" and "something is
+          // broken".
+          showToast(`${ERROR_CATEGORY_LABELS.quota}: ${exhausted.size}개 모델의 오늘 무료 한도가 끝났습니다.`);
+        }
       }
     },
     [fillFromLibrary, excludeRecognizedSong, discardNonScorePage],
@@ -786,13 +1065,220 @@ export default function LyricsGenerator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreVersion]);
 
-  /** Manual "save to library" button press — same as auto-save, but confirms with a toast. */
+  /**
+   * Apply — or decline — a web candidate the user chose.
+   *
+   * The merge runs against the reading recognition produced, not against
+   * whatever is on screen now, so choosing a candidate after editing a line by
+   * hand still lines the published wording up with what the score said.
+   * Declining leaves the models' reading exactly as it is.
+   */
+  const selectWebCandidate = useCallback((songId: string, candidateId: string | null) => {
+    const review = webReviewRef.current[songId];
+    const baseline = webBaselineRef.current[songId];
+    if (!review || !baseline) return;
+    const chosen = candidateId ? review.candidates.find((entry) => entry.id === candidateId) : undefined;
+    const merged = mergeRankedWebLyrics(baseline, chosen ?? null, candidateId ?? undefined);
+
+    setSongs((current) =>
+      current.map((song) => {
+        if (song.id !== songId) return song;
+        return {
+          ...song,
+          // The merge already decided the shape; applyScoreToSong would refuse
+          // to touch a song that has lyrics, which by now it does.
+          sections: merged.score.sections.map((section) => ({ label: section.label, lines: [...section.lines] })),
+          order: [...merged.score.order],
+          verification: 'draft',
+          provenance: {
+            ...song.provenance,
+            source: chosen ? 'web' : 'models',
+            webSourceUrl: chosen?.sourceUrl,
+          },
+        };
+      }),
+    );
+    setEdited(true);
+    setWebReview((current) => ({
+      ...current,
+      [songId]: { ...review, selectedId: candidateId ?? undefined, decision: chosen ? 'auto' : 'none' },
+    }));
+    if (chosen) {
+      showToast(`'${chosen.title || '선택한 곡'}' 가사를 ${chosen.sourceHost}에서 적용했습니다.`);
+    }
+  }, []);
+
+  /**
+   * Pair one verified correction with a shrunken copy of the page it came
+   * from, and store it in the training corpus.
+   */
+  const storeTrainingRecord = useCallback(
+    async (evidence: PageEvidence, finalHash: string, final: ParsedScore, diff: FeedbackDiff) => {
+      const pageHash = evidence.pageHash;
+      if (!pageHash) return;
+      const resized = evidence.image ? await resizeTrainingImage(evidence.image) : null;
+      const bytes = resized ? dataUrlToBytes(resized.dataUrl) : undefined;
+      await uploadTrainingRecord(
+        {
+          // Derived from the page, so re-verifying the same page adds a
+          // version instead of a second record.
+          id: pageHash.slice(0, 32),
+          pageHash,
+          feedbackId: finalHash,
+          createdAt: new Date().toISOString(),
+          imageAvailable: !!bytes,
+          ...(bytes && resized
+            ? {
+                image: {
+                  mimeType: resized.mimeType,
+                  size: bytes.byteLength,
+                  sha256: await hashText(resized.dataUrl),
+                  chunkCount: Math.max(1, Math.ceil(bytes.byteLength / (1024 * 1024))),
+                },
+              }
+            : {}),
+          versions: [final],
+          diff,
+        },
+        bytes,
+      );
+    },
+    [],
+  );
+
+  /**
+   * Turn one explicit save into a training record and queue it.
+   *
+   * Everything here is best-effort and deliberately after the library write:
+   * the user is building a slide deck, and a save must never fail, block, or
+   * wait on the network because a model could be scored from it.
+   */
+  const submitFeedback = useCallback(
+    async (song: Song, final: ParsedScore, diff: FeedbackDiff, verification: 'verified' | 'edited') => {
+      const evidence = evidenceRef.current.get(song.id);
+      const baseline = song.provenance?.baseline;
+      if (!evidence?.pageHash || !baseline) return;
+
+      const review = webReviewRef.current[song.id];
+      const finalHash = await hashText(canonicalScore(final));
+      // What this one correction teaches: a title alias, the exact text pairs
+      // that changed, and short before/after examples for future prompts.
+      const learned = buildLearningMemory([
+        {
+          id: 'pending',
+          pageHash: evidence.pageHash,
+          finalHash,
+          createdAt: new Date().toISOString(),
+          observations: [],
+          baseline: {
+            title: baseline.title,
+            artist: baseline.artist,
+            key: baseline.key,
+            order: baseline.order,
+            sections: baseline.sections,
+          },
+          final,
+          webCandidates: [],
+          diff,
+          verification,
+          evaluations: [],
+        },
+      ]);
+      const memoryContribution = {
+        aliases: learned.titleAliases.map((alias) => ({ from: alias.from, to: alias.to })),
+        corrections: learned.corrections.map(({ before, after, contextBefore, contextAfter }) => ({
+          before,
+          after,
+          contextBefore,
+          contextAfter,
+        })),
+        examples: learned.examples,
+      };
+      queueFeedback({
+        id: crypto.randomUUID(),
+        pageHash: evidence.pageHash,
+        finalHash,
+        createdAt: new Date().toISOString(),
+        observations: evidence.observations,
+        baseline: {
+          title: baseline.title,
+          artist: baseline.artist,
+          key: baseline.key,
+          order: baseline.order,
+          sections: baseline.sections,
+        },
+        final,
+        webCandidates: (review?.candidates ?? []).map(feedbackCandidate),
+        selectedWebCandidateId: review?.selectedId,
+        diff,
+        verification,
+        // Scored here, against the answer the user stood behind. The proxy
+        // stores numbers, not judgements, so the comparison has to happen on
+        // the side that has both readings.
+        evaluations: evidence.observations.map((observation) => scoreObservation(observation, final)),
+        memory: memoryContribution,
+      });
+
+      // The training copy is stored after the record is safely queued and is
+      // never allowed to hold up a save: a page whose image cannot be captured
+      // still contributes its correction as metadata.
+      void storeTrainingRecord(evidence, finalHash, final, diff).catch(() => undefined);
+    },
+    [storeTrainingRecord],
+  );
+
+  /**
+   * The user pressing "save to library" — the only thing in the app that
+   * creates ground truth.
+   *
+   * Confirming the machine's answer unchanged is as informative as correcting
+   * it: it is the only evidence a model read a page RIGHT. So both outcomes
+   * are recorded, distinguished by the diff against what recognition produced.
+   * Everything after the library write is best-effort and never blocks it.
+   */
   const handleSaveToLibrary = useCallback(
     (song: Song) => {
-      const entry = saveToLibrary(song);
-      if (entry) showToast(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
+      const baseline = song.provenance?.baseline;
+      const final: ParsedScore = {
+        title: song.title.trim() || undefined,
+        artist: song.artist,
+        key: song.key,
+        order: [...song.order],
+        sections: structuredClone(song.sections),
+      };
+      const diff = baseline
+        ? diffFeedback(
+            { title: baseline.title, artist: baseline.artist, key: baseline.key, order: baseline.order, sections: baseline.sections },
+            final,
+          )
+        : undefined;
+      // With no recorded baseline this song never went through recognition
+      // (typed by hand, or pulled from the library), so there is nothing to
+      // have corrected — the user's copy is simply verified.
+      const verification = diff ? verificationFor(diff) : 'verified';
+
+      const entry = saveToLibrary(song, verification);
+      if (!entry) return;
+      setSongs((current) =>
+        current.map((candidate) =>
+          candidate.id === song.id
+            ? { ...candidate, verification, version: entry.version }
+            : candidate,
+        ),
+      );
+      showToast(
+        verification === 'verified'
+          ? `'${entry.title}' 을(를) 검증된 가사로 저장했습니다.`
+          : `'${entry.title}' 수정본을 학습 자료로 저장했습니다.`,
+      );
+
+      if (!diff || !song.provenance?.pageHash) return;
+      void submitFeedback(song, final, diff, verification).catch(() => {
+        // Learning is best-effort: a save is never allowed to fail because a
+        // training record could not be built or sent.
+      });
     },
-    [saveToLibrary],
+    [saveToLibrary, submitFeedback],
   );
 
   const removeFromUserLibrary = useCallback((title: string) => {
@@ -1083,6 +1569,8 @@ export default function LyricsGenerator({
               onMove={moveSong}
               onRemove={removeSong}
               onSaveToLibrary={handleSaveToLibrary}
+              webReview={webReview[song.id]}
+              onSelectWebCandidate={(candidateId) => selectWebCandidate(song.id, candidateId)}
               onZoom={() => setZoomSongId(song.id)}
               onTitleBlur={(title) => {
                 const hit = findEntry(library, title);
@@ -1185,6 +1673,8 @@ export default function LyricsGenerator({
                 onMove={moveSong}
                 onRemove={removeSong}
                 onSaveToLibrary={handleSaveToLibrary}
+                webReview={webReview[zoomSong.id]}
+                onSelectWebCandidate={(candidateId) => selectWebCandidate(zoomSong.id, candidateId)}
                 onZoom={() => {}}
                 onTitleBlur={(title) => {
                   const hit = findEntry(library, title);

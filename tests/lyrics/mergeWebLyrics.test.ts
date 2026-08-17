@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { crossReferenceLines, mergeWebLyrics } from '../../src/lib/lyrics/mergeWebLyrics';
-import type { WebLyrics } from '../../src/lib/lyrics/webLyrics';
+import {
+  crossReferenceLines,
+  mergeRankedWebLyrics,
+  mergeWebLyrics,
+} from '../../src/lib/lyrics/mergeWebLyrics';
+import type { ScoredLyricsCandidate } from '../../src/lib/lyrics/webLyrics';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
 // Placeholder text. The "recognized" copies carry the kind of single-syllable
@@ -11,12 +15,24 @@ const C_TRUE = ['높이 높이 노래해', '영원토록 노래해'];
 const C_OCR = ['높이 높이 노래해', '영원토록 노래혜'];
 const B_TRUE = ['잔잔한 강물처럼', '흘러가는 노래로'];
 
-function web(sections: { label: string; lines: string[] }[]): WebLyrics {
+function web(
+  sections: { label: string; lines: string[] }[],
+  overrides: Partial<ScoredLyricsCandidate> = {},
+): ScoredLyricsCandidate {
   return {
+    id: 'ccm:ccm.co.kr/song/1',
+    title: '가나다라 마바사',
     sections,
     order: ['I', ...sections.map((s) => s.label)],
     sourceUrl: 'https://ccm.co.kr/song/1',
     sourceHost: 'ccm.co.kr',
+    source: 'ccm',
+    score: 0.95,
+    titleScore: 1,
+    artistScore: 0,
+    lyricsScore: 0.9,
+    decision: 'auto',
+    ...overrides,
   };
 }
 
@@ -185,5 +201,56 @@ describe('mergeWebLyrics', () => {
     const merged = mergeWebLyrics(score, web([{ label: 'V', lines: V_TRUE }]));
     const fromWeb = merged.score.sections.filter((s) => s.lines.join() === V_TRUE.join());
     expect(fromWeb).toHaveLength(1);
+  });
+});
+
+describe('mergeRankedWebLyrics', () => {
+  const score: ParsedScore = {
+    order: ['I', 'V', 'C'],
+    sections: [
+      { label: 'V', lines: V_OCR },
+      { label: 'C', lines: C_OCR },
+    ],
+  };
+  const reviewCandidate = web(
+    [
+      { label: 'V', lines: V_TRUE },
+      { label: 'C', lines: C_TRUE },
+    ],
+    { id: 'ccm:review', decision: 'review', score: 0.72 },
+  );
+
+  it('does not merge a review candidate until the user selects it', () => {
+    expect(mergeRankedWebLyrics(score, reviewCandidate, undefined).outcome).toBe('unused');
+  });
+
+  it('keeps printed order after an explicitly selected candidate fills a missing part', () => {
+    const merged = mergeRankedWebLyrics(score, reviewCandidate, reviewCandidate.id);
+    expect(merged.score.order).toEqual(score.order);
+    expect(merged.outcome).toBe('corrected');
+  });
+
+  it('applies an auto candidate without being asked', () => {
+    const auto = web(
+      [
+        { label: 'V', lines: V_TRUE },
+        { label: 'C', lines: C_TRUE },
+      ],
+      { id: 'ccm:auto', decision: 'auto', score: 0.95 },
+    );
+    expect(mergeRankedWebLyrics(score, auto).outcome).toBe('corrected');
+  });
+
+  it('leaves the score alone when there is no candidate at all', () => {
+    const merged = mergeRankedWebLyrics(score, null);
+    expect(merged.outcome).toBe('unused');
+    expect(merged.score.sections.map((section) => section.label)).toEqual(['V', 'C']);
+  });
+
+  it('never lets a declined candidate change the recognized reading', () => {
+    // Selecting a different candidate's ID must not apply this one.
+    const merged = mergeRankedWebLyrics(score, reviewCandidate, 'some-other-candidate');
+    expect(merged.outcome).toBe('unused');
+    expect(merged.score.sections[0].lines).toEqual(V_OCR.map((line) => line));
   });
 });

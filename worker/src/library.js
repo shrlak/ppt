@@ -13,12 +13,46 @@ const MAX_LYRICS_ENTRIES = 2000;
 const MAX_LYRIC_SECTIONS = 50;
 const MAX_LYRIC_LINES = 500;
 
+/** Trust levels a stored lyrics entry may carry (mirrors VerificationState). */
+export const VERIFICATION_STATES = ['draft', 'verified', 'edited'];
+const PROVENANCE_SOURCES = ['library', 'models', 'web', 'manual'];
+
 function trimmed(value, maxLength) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
 export function normalizeLibraryTitle(value) {
   return trimmed(value, 200).toLowerCase().replace(/[^0-9a-zㄱ-ㆎ가-힣]+/g, '');
+}
+
+/**
+ * Keep only provenance fields whose shape can be verified. Anything else an
+ * older or newer client sent is dropped rather than stored unchecked.
+ */
+export function sanitizeStoredProvenance(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const provenance = {};
+  const pageHash = trimmed(raw.pageHash, 128);
+  if (pageHash) provenance.pageHash = pageHash;
+  const source = trimmed(raw.source, 20);
+  if (PROVENANCE_SOURCES.includes(source)) provenance.source = source;
+  const webSourceUrl = trimmed(raw.webSourceUrl, 500);
+  if (/^https?:\/\//.test(webSourceUrl)) provenance.webSourceUrl = webSourceUrl;
+  const confidence = Number(raw.confidence);
+  if (Number.isFinite(confidence) && confidence >= 0 && confidence <= 1) provenance.confidence = confidence;
+  const correctionModelVersion = trimmed(raw.correctionModelVersion, 64);
+  if (correctionModelVersion) provenance.correctionModelVersion = correctionModelVersion;
+  return Object.keys(provenance).length > 0 ? provenance : null;
+}
+
+/** Trust level of an entry that may predate the verification field. */
+export function entryVerification(entry) {
+  return VERIFICATION_STATES.includes(entry?.verification) ? entry.verification : 'verified';
+}
+
+/** True when an entry is ground truth a user stood behind. */
+export function isGroundTruth(entry) {
+  return entryVerification(entry) !== 'draft';
 }
 
 export function sanitizeLyricsEntry(raw) {
@@ -46,12 +80,25 @@ export function sanitizeLyricsEntry(raw) {
   const order = Array.isArray(raw.order)
     ? raw.order.map((value) => trimmed(value, 30)).filter(Boolean).slice(0, 500)
     : [];
+  const artist = trimmed(raw.artist, 200);
   const key = trimmed(raw.key, 20);
+  // Pre-feature entries were all put here by an explicit user save, so
+  // 'verified' is both the accurate and the safest migration target.
+  const verification = VERIFICATION_STATES.includes(raw.verification) ? raw.verification : 'verified';
+  const rawVersion = Number(raw.version);
+  const version = Number.isSafeInteger(rawVersion) && rawVersion >= 1 ? rawVersion : 1;
+  const updatedAt = trimmed(raw.updatedAt, 40);
+  const provenance = sanitizeStoredProvenance(raw.provenance);
   return {
     title,
+    ...(artist ? { artist } : {}),
     ...(key ? { key } : {}),
     sections,
     order,
+    verification,
+    version,
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(provenance ? { provenance } : {}),
   };
 }
 

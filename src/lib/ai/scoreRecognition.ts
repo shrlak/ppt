@@ -2,12 +2,24 @@
 // image into a draft song and merge it onto an existing Song without clobbering
 // anything the user has already typed.
 import type { Section, Song } from '../utils/types';
-import { partFamily, type BatchRecognitionMode, type ParsedScore } from './scoreParser';
+import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionAttempt, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
-import { recognizeBatchWithNvidia, recognizeWithNvidia } from './scoreNvidia';
-import { isTransientRecognitionError } from './recognitionError';
-import { bagSimilarity, lineKey, lineSimilarity, wordCounts } from '../lyrics/textSimilarity';
+import {
+  recognizeBatchWithOpenRouter,
+  recognizeWithOpenRouter,
+  type PromptExample,
+} from './scoreNvidia';
+import { RecognitionError, isTransientRecognitionError } from './recognitionError';
+import { classifyRecognitionError, type RecognitionObservation } from './recognitionObservation';
+import {
+  SAME_LINE_THRESHOLD,
+  adoptSplitVerses,
+  adoptTruncatedTails,
+  buildWeightedConsensus,
+} from './weightedConsensus';
+import { modelKeyFor, type ModelReliability } from './modelReliability';
+import { lineKey, lineSimilarity } from '../lyrics/textSimilarity';
 import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
 
 /**
@@ -19,6 +31,17 @@ const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefine
 
 /** Wait before the single transient-failure retry (rate limit bursts, 5xx). */
 const TRANSIENT_RETRY_DELAY_MS = 1500;
+
+/**
+ * Hard cap on one model's batch call.
+ *
+ * Consensus needs every model's answer, so the batch waits for all of them
+ * rather than finishing on the first. That makes a provider that accepts a
+ * request and never answers able to hang the whole job, which the cap
+ * prevents: a model past the cap is recorded as a timeout observation and the
+ * remaining models decide the page.
+ */
+const ATTEMPT_TIMEOUT_MS = 120_000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,10 +81,10 @@ async function recognizeWithEngine(
     if (!key && !PROXY_URL) throw new Error('Gemini API 키가 설정되지 않았습니다.');
     return recognizeWithGemini(dataUrl, key, attempt.model, settings.geminiUseSearch, PROXY_URL);
   }
-  if (attempt.engine === 'nvidia') {
+  if (attempt.engine === 'openrouter') {
     const key = settings.openrouterApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
-    return recognizeWithNvidia(dataUrl, key, attempt.model, PROXY_URL);
+    return recognizeWithOpenRouter(dataUrl, key, attempt.model, PROXY_URL);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -76,6 +99,12 @@ export interface BatchRecognitionResult {
   /** Results remain aligned with the input image order. */
   scores: ParsedScore[];
   engine: RecognitionEngine;
+  /** Every model's settled answer for each page, in the same page order. */
+  observations: RecognitionObservation[][];
+  /** Weighted consensus confidence per page (0–1). */
+  confidence: number[];
+  /** Pages whose answer is not settled enough to save without a look. */
+  needsReview: boolean[];
 }
 
 async function recognizeBatchWithEngine(
@@ -84,6 +113,7 @@ async function recognizeBatchWithEngine(
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (attempt.engine === 'gemini') {
     const key = settings.geminiApiKey.trim();
@@ -96,12 +126,13 @@ async function recognizeBatchWithEngine(
       mode === 'full' && settings.geminiUseSearch,
       PROXY_URL,
       hints,
+      examples,
     );
   }
-  if (attempt.engine === 'nvidia') {
+  if (attempt.engine === 'openrouter') {
     const key = settings.openrouterApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
-    return recognizeBatchWithNvidia(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
+    return recognizeBatchWithOpenRouter(dataUrls, key, mode, attempt.model, PROXY_URL, hints, examples);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -132,8 +163,9 @@ export async function recognizeScoreBatch(
   mode: BatchRecognitionMode,
   /** Optional per-image title hints (e.g. from the conti cover), advisory only. */
   hints?: (string | undefined)[],
+  reliabilities: ModelReliability[] = [],
 ): Promise<BatchRecognitionResult> {
-  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints);
+  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints, reliabilities);
 }
 
 /**
@@ -214,55 +246,17 @@ function fillScoreGaps(winner: ParsedScore, candidates: ParsedScore[]): ParsedSc
 }
 
 /**
- * Put back lines the winning model stopped short of.
+ * Let the models outvote each other line by line, one vote each.
  *
- * Several songs lose their last line or two rather than misreading them: on
- * 그리스도의 계절 the winner ended V at 「그리스도의 계절이」 and dropped
- * 「오게 하소서 오게 하소서」, and on 주만 바라볼찌라 it ended the 후렴 at
- * 「주를 향하고」. The asymmetry that makes this safe is the same one behind
- * verse splitting: a model that stops early is common, a model that invents an
- * extra printed line is not.
- *
- * Only a candidate whose reading *starts with* the winner's — same lines, in
- * the same order — may extend it, and only the extra tail is taken. The
- * winner's own wording is never replaced, so a fuller but sloppier reading
- * contributes its missing lines without importing its misreadings.
- */
-function adoptTruncatedTails(score: ParsedScore, candidates: ParsedScore[]): ParsedScore {
-  if (candidates.length === 0) return score;
-  let touched = false;
-  const sections = score.sections.map((section) => {
-    let best: string[] | undefined;
-    for (const candidate of candidates) {
-      const other = findSection(candidate.sections, section.label);
-      if (!other || other.lines.length <= section.lines.length) continue;
-      const continues = section.lines.every(
-        (line, index) => lineSimilarity(line, other.lines[index] ?? '') >= SAME_LINE_THRESHOLD,
-      );
-      if (!continues) continue;
-      if (!best || other.lines.length > best.length) best = other.lines;
-    }
-    if (!best) return section;
-    touched = true;
-    return { label: section.label, lines: [...section.lines, ...best.slice(section.lines.length)] };
-  });
-  return touched ? { ...score, sections } : score;
-}
-
-/** Two readings must look like the same line before one replaces the other. */
-const SAME_LINE_THRESHOLD = 0.6;
-
-/**
- * Let the models outvote each other line by line.
+ * This is the unweighted fallback used where no reliability data is available
+ * — the per-page rescue path and any pool with no measurements yet. Once a
+ * model has verified evaluations behind it, buildWeightedConsensus supersedes
+ * this by weighting each vote by that model's measured lyric accuracy.
  *
  * Most of what recognition still gets wrong is not structural — it is a
- * syllable or two inside an otherwise correct line (실력 read as 능력, 이야기 as
- * 이끄심). Those slips are independent per model, so when two other models read
- * a line the same way and the winner reads it differently, the agreement is
- * more likely to be the page. Priority still decides everything else; this only
- * replaces individual lines, and only when the outvoting readings look like the
- * same line rather than a different one.
- *
+ * syllable or two inside an otherwise correct line. Those slips are
+ * independent per model, so when two other models read a line the same way and
+ * the winner reads it differently, the agreement is more likely to be the page.
  * A vote needs at least two other readings to beat the winner's one, so this is
  * inert for a single-model pool and for a pool of two.
  */
@@ -305,155 +299,126 @@ function adoptLineConsensus(score: ParsedScore, candidates: ParsedScore[]): Pars
   return touched ? { ...score, sections } : score;
 }
 
-/** The winner and a candidate must be reading the same lyrics for a structural
- * correction to be safe — anything less is two models reading different pages. */
-const SAME_LYRICS_THRESHOLD = 0.75;
-
 /**
- * Put stacked verses back when the winning model merged them.
+ * Start every model together and reconcile their answers page by page.
  *
- * A page that prints 1절 above 2절 under shared staves is the one structure
- * models reliably get wrong: the merged reading is a single V holding both
- * verses. It is never wrong in the other direction — no model invents a 2절
- * that isn't printed — so when another model split the same part family into
- * numbered sections covering the same words, that split is the true reading.
- * Adopting it also has to teach 진행 순서 about the new labels, otherwise the
- * slide planner would never reach the recovered verse.
+ * Nothing is thrown away any more: every model's settled answer becomes an
+ * observation, and buildWeightedConsensus decides each field by weighted vote
+ * among them. Keeping the losing answers is what lets a later verified
+ * correction score each model, and what lets two models outvote a third.
+ *
+ * The call waits for every model rather than finishing on the first usable
+ * answer, because a vote needs the votes.
  */
-function adoptSplitVerses(winner: ParsedScore, candidates: ParsedScore[]): ParsedScore {
-  const families = new Map<string, Section[]>();
-  for (const section of winner.sections) {
-    const family = partFamily(section.label);
-    families.set(family, [...(families.get(family) ?? []), section]);
-  }
-
-  let result = winner;
-  for (const [family, own] of families) {
-    if (own.length !== 1) continue; // already split, or absent
-    const better = candidates
-      .map((candidate) => candidate.sections.filter((section) => partFamily(section.label) === family))
-      .filter((split) => split.length > own.length)
-      .filter((split) => bagSimilarity(wordCounts(split), wordCounts(own)) >= SAME_LYRICS_THRESHOLD)
-      // Prefer the finest split that still reads as the same lyrics.
-      .sort((a, b) => b.length - a.length)[0];
-    if (!better) continue;
-    result = replaceFamily(result, family, better);
-  }
-  return result;
-}
-
-/** Swap a family's single merged section for the split one, in place, and make
- * sure every recovered label is reachable from 진행 순서. */
-function replaceFamily(score: ParsedScore, family: string, split: Section[]): ParsedScore {
-  const sections: Section[] = [];
-  for (const section of score.sections) {
-    if (partFamily(section.label) !== family) {
-      sections.push(section);
-      continue;
-    }
-    sections.push(...split.map((s) => ({ label: s.label, lines: [...s.lines] })));
-  }
-
-  // Only add an order token for a label the printed 진행 순서 cannot already
-  // reach. Resolution goes through the slide planner's own V↔V1 aliasing, so a
-  // page that printed "V1" already reaches a bare "V" — re-inserting it would
-  // put a token in 진행 순서 that the score never had.
-  const order = [...score.order];
-  const reached = new Set(
-    order.map((token) => findSection(sections, token)?.label).filter((label): label is string => !!label),
-  );
-  const missing = split.map((s) => s.label).filter((label) => !reached.has(label));
-  if (missing.length > 0) {
-    const anchor = order.findIndex((token) => partFamily(token) === family);
-    if (anchor === -1) order.push(...missing);
-    else order.splice(anchor + 1, 0, ...missing);
-  }
-  return { ...score, sections, order };
-}
-
-/**
- * Start every model together and make them WORK TOGETHER on the answer:
- *
- * - Each page's final result comes from the highest-priority (pool-order)
- *   model that actually read it — a fast-but-weak model can no longer
- *   displace a stronger model's answer just by finishing first. A page
- *   finalizes as soon as every higher-priority model has settled, so a
- *   failed or rate-limited top model never blocks the rest.
- * - The winning answer is then completed from the other models: a missing
- *   key, 진행 순서, lyric sections, or sermon field is filled from the next
- *   model that read it, so one page can be assembled from several models.
- *
- * The call resolves once every page is final (or every model has settled);
- * provider calls still in flight keep running in the background and remain
- * accounted for by the Worker.
- */
-function recognizeBatchWithAllModels(
+async function recognizeBatchWithAllModels(
   dataUrls: string[],
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  reliabilities: ModelReliability[] = [],
 ): Promise<BatchRecognitionResult> {
   if (dataUrls.length === 0) {
-    return Promise.resolve({ scores: [], engine: settings.attempts[0]?.engine ?? 'off' });
+    return {
+      scores: [],
+      engine: settings.attempts[0]?.engine ?? 'off',
+      observations: [],
+      confidence: [],
+      needsReview: [],
+    };
   }
   const attempts = planAttempts(settings);
-  if (attempts.length === 0) return Promise.reject(new Error('자동 인식이 꺼져 있습니다.'));
+  if (attempts.length === 0) throw new Error('자동 인식이 꺼져 있습니다.');
 
-  return new Promise((resolve, reject) => {
-    // undefined = still running, null = failed, array = that model's answers.
-    const answers: (ParsedScore[] | null | undefined)[] = new Array(attempts.length).fill(undefined);
-    let finished = false;
-    let lastError: Error | null = null;
+  const perModel = await Promise.all(
+    attempts.map((attempt) => runBatchAttempt(attempt, dataUrls, settings, mode, hints)),
+  );
 
-    /** The page's final answer, or undefined while a higher-priority model
-     * that could still claim the page is running (also undefined when every
-     * model settled without reading the page — the caller resolves that). */
-    const finalWinner = (page: number): { score: ParsedScore; attemptIndex: number } | undefined => {
-      for (let index = 0; index < attempts.length; index += 1) {
-        const answer = answers[index];
-        if (answer === undefined) return undefined;
-        if (answer && !isEmptyScore(answer[page])) return { score: answer[page], attemptIndex: index };
-      }
-      return undefined;
-    };
+  const assembled = assembleBatchConsensus(attempts, perModel, dataUrls.length, reliabilities);
+  // An answer for no page at all is a failed job, not a job with empty pages:
+  // the caller falls back to the per-page rescue pass rather than showing the
+  // user a conti of blank songs.
+  if (assembled.observations.every((page) => page.every((observation) => !observation.score))) {
+    throw new Error('모든 인식 엔진이 실패했습니다.');
+  }
+  return assembled;
+}
 
-    const tryFinish = () => {
-      if (finished) return;
-      const allSettled = answers.every((answer) => answer !== undefined);
-      const winners = dataUrls.map((_, page) => finalWinner(page));
-      if (!allSettled && winners.some((winner) => winner === undefined)) return;
-      if (winners.every((winner) => winner === undefined)) {
-        finished = true;
-        reject(lastError || new Error('모든 인식 엔진이 실패했습니다.'));
-        return;
-      }
-      const contributions = new Map<number, number>();
-      const scores = winners.map((winner, page) => {
-        if (!winner) return { order: [], sections: [] } as ParsedScore;
-        contributions.set(winner.attemptIndex, (contributions.get(winner.attemptIndex) ?? 0) + 1);
-        const others = answers
-          .map((answer, index) => (index === winner.attemptIndex ? undefined : answer?.[page]))
-          .filter((score): score is ParsedScore => score !== undefined && !isEmptyScore(score));
-        return fillScoreGaps(winner.score, others);
-      });
-      const primary = [...contributions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
-      finished = true;
-      resolve({ scores, engine: attempts[primary].engine });
-    };
+/** One model's whole batch: its answers, or the category of its failure. */
+export interface BatchAttemptResult {
+  attempt: RecognitionAttempt;
+  scores?: ParsedScore[];
+  error?: ReturnType<typeof classifyRecognitionError>;
+  latencyMs: number;
+}
 
-    attempts.forEach((attempt, index) => {
-      void withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints))
-        .then((scores) => {
-          answers[index] = scores;
-        })
-        .catch((error) => {
-          answers[index] = null;
-          lastError = error instanceof Error ? error : new Error(String(error));
-          console.warn(`${attempt.engine} (${attempt.model}) 동시 일괄 인식 실패:`, lastError.message);
-        })
-        .finally(tryFinish);
+export async function runBatchAttempt(
+  attempt: RecognitionAttempt,
+  dataUrls: string[],
+  settings: AiSettings,
+  mode: BatchRecognitionMode,
+  hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
+): Promise<BatchAttemptResult> {
+  const startedAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const scores = await Promise.race([
+      withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints, examples)),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new RecognitionError('인식 응답 시간 초과', 408)), ATTEMPT_TIMEOUT_MS);
+      }),
+    ]);
+    return { attempt, scores, latencyMs: Date.now() - startedAt };
+  } catch (error) {
+    const category = classifyRecognitionError(error);
+    // Only the CATEGORY is kept. A provider body can echo the prompt back, and
+    // the prompt carries lyrics.
+    console.warn(`${attempt.engine} (${attempt.model}) 동시 일괄 인식 실패: ${category}`);
+    return { attempt, error: category, latencyMs: Date.now() - startedAt };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Turn per-model batch answers into per-page observations and consensus. */
+export function assembleBatchConsensus(
+  attempts: RecognitionAttempt[],
+  perModel: BatchAttemptResult[],
+  pageCount: number,
+  reliabilities: ModelReliability[] = [],
+): BatchRecognitionResult {
+  const observations: RecognitionObservation[][] = [];
+  const scores: ParsedScore[] = [];
+  const confidence: number[] = [];
+  const needsReview: boolean[] = [];
+  const contributions = new Map<string, number>();
+
+  for (let page = 0; page < pageCount; page += 1) {
+    const pageObservations: RecognitionObservation[] = perModel.map((result) => {
+      const score = result.scores?.[page];
+      return {
+        attempt: result.attempt,
+        score: score && !isEmptyScore(score) ? score : undefined,
+        error: result.scores ? (score && !isEmptyScore(score) ? undefined : 'format') : result.error,
+        latencyMs: result.latencyMs,
+      };
     });
-  });
+    observations.push(pageObservations);
+
+    const consensus = buildWeightedConsensus(pageObservations, reliabilities);
+    scores.push(consensus.score);
+    confidence.push(consensus.confidence);
+    needsReview.push(consensus.needsReview);
+    for (const modelKey of consensus.usedModels) {
+      contributions.set(modelKey, (contributions.get(modelKey) ?? 0) + 1);
+    }
+  }
+
+  const leadKey = [...contributions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const engine =
+    attempts.find((attempt) => modelKeyFor(attempt) === leadKey)?.engine ?? attempts[0]?.engine ?? 'off';
+
+  return { scores, engine, observations, confidence, needsReview };
 }
 
 /**
@@ -465,8 +430,9 @@ export async function recognizeScoreBatchEnsemble(
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  reliabilities: ModelReliability[] = [],
 ): Promise<BatchRecognitionResult> {
-  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints);
+  return recognizeBatchWithAllModels(dataUrls, settings, mode, hints, reliabilities);
 }
 
 /**

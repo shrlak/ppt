@@ -10,13 +10,19 @@
 // Routes:
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
-//   GET  /lyrics          -> published lyrics for a recognized 찬양 제목
+//   GET  /lyrics          -> scored lyric candidates for a recognized 찬양
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
 //   GET/PUT/DELETE /libraries/lyrics -> shared lyrics library
 //   GET/POST/DELETE /libraries/ppt   -> shared PPT library and chunk transfer
 //   GET/POST /libraries/ppt/purge    -> weekly purge status / run it now
+//   GET  /learning/models            -> measured per-model recognition accuracy
+//   POST /learning/models/evaluations-> record accuracy from verified corrections
+//   POST /learning/feedback          -> store one verified user correction
+//   GET  /learning/memory            -> title aliases, safe corrections, examples
+//   GET/PUT/DELETE /learning/corpus  -> verified training corpus (관리자 전용)
+//   /learning/correction-model/*     -> hand-trained correction model artifacts
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -37,6 +43,8 @@ import {
   PPT_FILE_KINDS,
   matchDeckChunkRoute,
   matchUploadChunkRoute,
+  isGroundTruth,
+  entryVerification,
   normalizeLibraryTitle,
   samePptFiles,
   sanitizeLyricsEntries,
@@ -45,8 +53,55 @@ import {
   sanitizePptUpload,
   validLibraryId,
 } from './library.js';
+import { normalizeSample } from './lyricsCandidates.js';
+import {
+  MAX_ALIASES,
+  MAX_CORRECTIONS,
+  MAX_EXAMPLES,
+  MAX_FEEDBACK_RECORDS,
+  MAX_TRACKED_MODELS,
+  aliasStorageKey,
+  correctionStorageKey,
+  feedbackKey,
+  sanitizeMemoryContribution,
+  mergeModelEvaluation,
+  modelStatsKey,
+  publicModelStats,
+  sanitizeFeedbackExample,
+  sanitizeModelEvaluation,
+} from './modelStats.js';
+import {
+  CORRECTION_CHUNK_BYTES,
+  MAX_CORRECTION_VERSIONS,
+  acceptCorrectionManifest,
+  expectedFileChunkBytes,
+  fileKey,
+  isAllowedModelOrigin,
+  manifestKey,
+  matchCorrectionReadRoute,
+  matchCorrectionUploadRoute,
+  publicCorrectionManifest,
+  sanitizeCorrectionManifest,
+  validVersion,
+} from './correctionModel.js';
+import {
+  CORPUS_CHUNK_PREFIX,
+  CORPUS_META_PREFIX,
+  MAX_TRAINING_IMAGES,
+  corpusChunkKey,
+  corpusMetaKey,
+  corpusStatus,
+  evictableCorpusIds,
+  expectedChunkBytes,
+  matchCorpusChunkRoute,
+  matchCorpusRecordRoute,
+  sanitizeCorpusManifest,
+  TRAINING_CHUNK_BYTES,
+  validCorpusId,
+} from './trainingCorpus.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
-import { fetchWebLyrics } from './lyrics.js';
+import { fetchLyricsCandidates } from './lyrics.js';
+import { bugsScrapingAllowed } from './lyricsSources.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -145,11 +200,24 @@ export class UsageTracker extends DurableObject {
     return this.lyricsLibrary();
   }
 
+  /**
+   * Store a lyrics entry, refusing to let a draft replace ground truth.
+   *
+   * Recognition runs on every conti, so the same song is offered again and
+   * again as a fresh draft. Without this guard a weak reading would overwrite
+   * the wording a user already confirmed. An explicit verified/edited save
+   * still replaces whatever is stored.
+   */
   async upsertLyricsEntry(rawEntry) {
     const entry = sanitizeLyricsEntry(rawEntry);
     if (!entry) throw new Error('invalid lyrics entry');
     const normalized = normalizeLibraryTitle(entry.title);
-    await this.ctx.storage.put(`library:lyrics:entry:${normalized}`, {
+    const entryKey = `library:lyrics:entry:${normalized}`;
+    const existing = await this.ctx.storage.get(entryKey);
+    if (existing?.entry && entryVerification(entry) === 'draft' && isGroundTruth(existing.entry)) {
+      return existing.entry;
+    }
+    await this.ctx.storage.put(entryKey, {
       entry,
       updatedAt: new Date().toISOString(),
     });
@@ -165,6 +233,374 @@ export class UsageTracker extends DurableObject {
       normalizedTitle: normalized,
       deletedAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Per-model accuracy measured against verified user corrections.
+   *
+   * Only NUMBERS live here. The client compares each model's answer to the
+   * lyrics the user confirmed and posts the resulting field scores, so no
+   * lyric text or score image is ever stored under these keys.
+   */
+  async modelStats() {
+    const stored = await this.ctx.storage.list({ prefix: 'learning:model:' });
+    return [...stored.values()].filter(Boolean).map(publicModelStats);
+  }
+
+  async recordModelEvaluation(rawEvaluations, at = new Date().toISOString()) {
+    const evaluations = (Array.isArray(rawEvaluations) ? rawEvaluations : [rawEvaluations])
+      .map(sanitizeModelEvaluation)
+      .filter(Boolean);
+    if (evaluations.length === 0) throw new Error('no valid model evaluations');
+    const now = new Date(at);
+    const timestamp = Number.isFinite(now.getTime()) ? now : new Date();
+
+    for (const evaluation of evaluations) {
+      const key = modelStatsKey(evaluation.modelKey);
+      if (!key) continue;
+      const current = (await this.ctx.storage.get(key)) ?? null;
+      if (!current) {
+        const tracked = await this.ctx.storage.list({ prefix: 'learning:model:' });
+        // A bounded set of models can be tracked, so a client sending made-up
+        // keys cannot grow this storage without limit.
+        if (tracked.size >= MAX_TRACKED_MODELS) continue;
+      }
+      await this.ctx.storage.put(key, mergeModelEvaluation(current, evaluation, timestamp));
+    }
+    return this.modelStats();
+  }
+
+  /**
+   * Store one verified correction, exactly once.
+   *
+   * The page hash plus the hash of the saved answer IS the idempotency key: a
+   * deck is re-saved constantly while it is edited, and every duplicate would
+   * otherwise count as another vote for the models that read that page.
+   */
+  async recordFeedback(rawExample) {
+    const example = sanitizeFeedbackExample(rawExample);
+    if (!example) throw new Error('invalid feedback example');
+    const key = feedbackKey(example);
+    const existing = await this.ctx.storage.get(key);
+    if (existing) return { stored: false, duplicate: true, modelStats: await this.modelStats() };
+
+    const stored = await this.ctx.storage.list({ prefix: 'learning:feedback:' });
+    if (stored.size >= MAX_FEEDBACK_RECORDS) {
+      // Oldest first: the corpus is a rolling window, not an archive.
+      const oldest = [...stored.entries()]
+        .sort((a, b) => String(a[1]?.createdAt ?? '').localeCompare(String(b[1]?.createdAt ?? '')))
+        .slice(0, stored.size - MAX_FEEDBACK_RECORDS + 1)
+        .map(([staleKey]) => staleKey);
+      await this.ctx.storage.delete(oldest);
+    }
+    await this.ctx.storage.put(key, example);
+    // Model accuracy is only ever updated alongside a record that was newly
+    // stored, so re-sending the same correction cannot count a model twice.
+    if (example.evaluations.length > 0) {
+      await this.recordModelEvaluation(example.evaluations, example.createdAt);
+    }
+    if (example.memory) await this.recordMemoryContribution(example.memory);
+    return { stored: true, duplicate: false, modelStats: await this.modelStats() };
+  }
+
+  /**
+   * Fold one correction's memory contributions into the running counters.
+   *
+   * `seen` counts every time a misreading turned up; `support` counts how
+   * often the same fix was the outcome. Their ratio is the precision gate that
+   * stops a coincidence from becoming an automatic rewrite.
+   */
+  async recordMemoryContribution(raw) {
+    const contribution = sanitizeMemoryContribution(raw);
+
+    for (const alias of contribution.aliases) {
+      const key = aliasStorageKey(alias.from);
+      const current = await this.ctx.storage.get(key);
+      if (!current) {
+        const stored = await this.ctx.storage.list({ prefix: 'learning:alias:' });
+        if (stored.size >= MAX_ALIASES) continue;
+        await this.ctx.storage.put(key, { from: alias.from, to: alias.to, support: 1 });
+        continue;
+      }
+      // A different correction of the same misreading resets the count: two
+      // users disagreeing is not two votes for either answer.
+      if (current.to !== alias.to) {
+        await this.ctx.storage.put(key, { from: alias.from, to: alias.to, support: 1 });
+        continue;
+      }
+      await this.ctx.storage.put(key, { ...current, support: current.support + 1 });
+    }
+
+    for (const correction of contribution.corrections) {
+      const key = correctionStorageKey(correction);
+      const current = await this.ctx.storage.get(key);
+      if (!current) {
+        const stored = await this.ctx.storage.list({ prefix: 'learning:correction:' });
+        if (stored.size >= MAX_CORRECTIONS) continue;
+        await this.ctx.storage.put(key, { ...correction, support: 1, seen: 1 });
+        continue;
+      }
+      await this.ctx.storage.put(key, { ...current, support: current.support + 1, seen: current.seen + 1 });
+    }
+
+    for (const example of contribution.examples) {
+      const stored = await this.ctx.storage.list({ prefix: 'learning:example:' });
+      if (stored.size >= MAX_EXAMPLES) break;
+      await this.ctx.storage.put(
+        `learning:example:${encodeURIComponent(`${example.before}|${example.after}`).slice(0, 400)}`,
+        example,
+      );
+    }
+  }
+
+  /**
+   * The compact memory the recognition pipeline reads before a run.
+   *
+   * Aliases and corrections come back with their counts so the client applies
+   * its own activation bars; examples are capped hard, and only ones related
+   * to the title asked about are preferred. No stored song is ever returned
+   * whole.
+   */
+  async learningMemory(title = '') {
+    const [aliases, corrections, examples] = await Promise.all([
+      this.ctx.storage.list({ prefix: 'learning:alias:' }),
+      this.ctx.storage.list({ prefix: 'learning:correction:' }),
+      this.ctx.storage.list({ prefix: 'learning:example:' }),
+    ]);
+    const wanted = String(title || '')
+      .toLowerCase()
+      .replace(/[^0-9a-z\u3131-\u318e\uac00-\ud7a3]+/g, '');
+    const related = (example) =>
+      wanted &&
+      String(example.title || '')
+        .toLowerCase()
+        .replace(/[^0-9a-z\u3131-\u318e\uac00-\ud7a3]+/g, '') === wanted;
+
+    return {
+      titleAliases: [...aliases.values()].filter(Boolean),
+      corrections: [...corrections.values()].filter(Boolean),
+      examples: [...examples.values()]
+        .filter(Boolean)
+        .sort((a, b) => Number(related(b)) - Number(related(a)))
+        .slice(0, 3),
+    };
+  }
+
+  // ---- Training corpus -------------------------------------------------
+  //
+  // The only place the proxy keeps score IMAGES. Everything here is
+  // administrator-only, capped, and deliberately outside the weekly PPT purge:
+  // a corpus wiped every Sunday could never train anything.
+
+  async corpusManifests() {
+    const stored = await this.ctx.storage.list({ prefix: CORPUS_META_PREFIX });
+    return [...stored.values()].filter(Boolean);
+  }
+
+  async corpusStatus() {
+    return corpusStatus(await this.corpusManifests());
+  }
+
+  async putCorpusManifest(rawManifest) {
+    const manifest = sanitizeCorpusManifest(rawManifest);
+    if (!manifest) throw new Error('invalid corpus manifest');
+
+    const existing = await this.ctx.storage.get(corpusMetaKey(manifest.id));
+    if (existing?.image && existing.image.sha256 !== manifest.image?.sha256) {
+      await this.deleteCorpusChunks(manifest.id, existing.image.chunkCount);
+    }
+    // A page verified again is a better answer for the SAME page, so the
+    // record keeps its identity and gains a version. That is what bounds the
+    // corpus while preserving how the answer converged.
+    const merged = existing
+      ? {
+          ...manifest,
+          createdAt: existing.createdAt,
+          versions: dedupeVersions([...(existing.versions ?? []), ...manifest.versions]),
+          // A newer version has not been exported, whatever the old one had.
+          exportedAt: undefined,
+        }
+      : manifest;
+    await this.ctx.storage.put(corpusMetaKey(manifest.id), merged);
+
+    // Evict only what has already been exported; anything else has not made
+    // it into a training artifact yet.
+    for (const id of evictableCorpusIds(await this.corpusManifests(), MAX_TRAINING_IMAGES)) {
+      if (id !== manifest.id) await this.deleteCorpusRecord(id);
+    }
+    return merged;
+  }
+
+  async putCorpusChunk(id, index, data) {
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (!manifest?.image) throw new Error('unknown corpus record');
+    if (!Number.isSafeInteger(index) || index < 0 || index >= manifest.image.chunkCount) {
+      throw new Error('invalid chunk index');
+    }
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0 || data.byteLength > TRAINING_CHUNK_BYTES) {
+      throw new Error('invalid chunk body');
+    }
+    if (data.byteLength !== expectedChunkBytes(manifest.image, index)) {
+      throw new Error('chunk size does not match manifest');
+    }
+    await this.ctx.storage.put(corpusChunkKey(id, index), data);
+  }
+
+  async getCorpusChunk(id, index) {
+    if (!validCorpusId(id)) return null;
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (!manifest?.image || !Number.isSafeInteger(index) || index < 0 || index >= manifest.image.chunkCount) {
+      return null;
+    }
+    return (await this.ctx.storage.get(corpusChunkKey(id, index))) ?? null;
+  }
+
+  async deleteCorpusChunks(id, chunkCount) {
+    const keys = [];
+    for (let index = 0; index < chunkCount; index += 1) keys.push(corpusChunkKey(id, index));
+    for (let index = 0; index < keys.length; index += 128) {
+      await this.ctx.storage.delete(keys.slice(index, index + 128));
+    }
+  }
+
+  async deleteCorpusRecord(id) {
+    if (!validCorpusId(id)) throw new Error('invalid corpus id');
+    const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+    if (manifest?.image) await this.deleteCorpusChunks(id, manifest.image.chunkCount);
+    await this.ctx.storage.delete(corpusMetaKey(id));
+  }
+
+  /** Mark records as having reached a downloaded training artifact. */
+  async markCorpusExported(ids, at = new Date().toISOString()) {
+    let marked = 0;
+    for (const id of Array.isArray(ids) ? ids.slice(0, MAX_TRAINING_IMAGES) : []) {
+      if (!validCorpusId(id)) continue;
+      const manifest = await this.ctx.storage.get(corpusMetaKey(id));
+      if (!manifest) continue;
+      await this.ctx.storage.put(corpusMetaKey(id), { ...manifest, exportedAt: at });
+      marked += 1;
+    }
+    return { marked, status: await this.corpusStatus() };
+  }
+
+  // ---- Hand-trained correction model -----------------------------------
+
+  async correctionModelSlots() {
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    return {
+      active: publicCorrectionManifest(active ?? null),
+      previous: publicCorrectionManifest(previous ?? null),
+    };
+  }
+
+  async stageCorrectionModel(rawManifest) {
+    const manifest = sanitizeCorrectionManifest(rawManifest);
+    if (!manifest) throw new Error('invalid correction model manifest');
+    // The score gate lives here as well as in the browser: the proxy decides
+    // what may become active, so a client that skipped its own check cannot
+    // activate a model that made things worse.
+    if (!acceptCorrectionManifest(manifest)) throw new Error('correction model does not improve on the baseline');
+    await this.ctx.storage.put(manifestKey(`staged:${manifest.version}`), manifest);
+    return manifest;
+  }
+
+  async putCorrectionChunk(version, path, index, data) {
+    const staged = await this.ctx.storage.get(manifestKey(`staged:${version}`));
+    const file = staged?.files?.find((candidate) => candidate.path === path);
+    if (!file) throw new Error('unknown correction model file');
+    if (!Number.isSafeInteger(index) || index < 0 || index >= file.chunkCount) {
+      throw new Error('invalid chunk index');
+    }
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0 || data.byteLength > CORRECTION_CHUNK_BYTES) {
+      throw new Error('invalid chunk body');
+    }
+    if (data.byteLength !== expectedFileChunkBytes(file, index)) {
+      throw new Error('chunk size does not match manifest');
+    }
+    await this.ctx.storage.put(fileKey(version, path, index), data);
+  }
+
+  /**
+   * Promote a fully uploaded version to active.
+   *
+   * Every declared chunk has to be present first: a half-uploaded model would
+   * fail at generation time, inside a page the user is waiting on, rather than
+   * here where it can simply be refused.
+   */
+  async activateCorrectionModel(version) {
+    if (!validVersion(version)) throw new Error('invalid correction model version');
+    const staged = await this.ctx.storage.get(manifestKey(`staged:${version}`));
+    if (!staged) throw new Error('correction model was not uploaded');
+    for (const file of staged.files) {
+      for (let index = 0; index < file.chunkCount; index += 1) {
+        const chunk = await this.ctx.storage.get(fileKey(version, file.path, index));
+        if (!(chunk instanceof ArrayBuffer)) throw new Error(`missing ${file.path} chunk ${index}`);
+      }
+    }
+
+    const active = await this.ctx.storage.get(manifestKey('active'));
+    const previous = await this.ctx.storage.get(manifestKey('previous'));
+    if (previous && previous.version !== version && previous.version !== active?.version) {
+      await this.deleteCorrectionVersion(previous);
+    }
+    if (active) await this.ctx.storage.put(manifestKey('previous'), active);
+    await this.ctx.storage.put(manifestKey('active'), staged);
+    await this.ctx.storage.delete(manifestKey(`staged:${version}`));
+    return this.correctionModelSlots();
+  }
+
+  /** Swap active and previous, for when a new model turns out to be worse. */
+  async rollbackCorrectionModel() {
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    if (!previous) throw new Error('no previous correction model to roll back to');
+    await this.ctx.storage.put(manifestKey('active'), previous);
+    if (active) await this.ctx.storage.put(manifestKey('previous'), active);
+    else await this.ctx.storage.delete(manifestKey('previous'));
+    return this.correctionModelSlots();
+  }
+
+  async deleteCorrectionVersion(manifest) {
+    const keys = [];
+    for (const file of manifest.files ?? []) {
+      for (let index = 0; index < file.chunkCount; index += 1) keys.push(fileKey(manifest.version, file.path, index));
+    }
+    for (let index = 0; index < keys.length; index += 128) {
+      await this.ctx.storage.delete(keys.slice(index, index + 128));
+    }
+    void MAX_CORRECTION_VERSIONS;
+  }
+
+  async readCorrectionFile(version, path) {
+    if (!validVersion(version)) return null;
+    const [active, previous] = await Promise.all([
+      this.ctx.storage.get(manifestKey('active')),
+      this.ctx.storage.get(manifestKey('previous')),
+    ]);
+    // Only a version that is (or was) live is readable; a staged upload is not
+    // servable until it has been activated.
+    const manifest = [active, previous].find((candidate) => candidate?.version === version);
+    const file = manifest?.files?.find((candidate) => candidate.path === path);
+    if (!file) return null;
+
+    const parts = [];
+    for (let index = 0; index < file.chunkCount; index += 1) {
+      const chunk = await this.ctx.storage.get(fileKey(version, path, index));
+      if (!(chunk instanceof ArrayBuffer)) return null;
+      parts.push(new Uint8Array(chunk));
+    }
+    const bytes = new Uint8Array(file.size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return bytes.buffer;
   }
 
   async cleanupPptUpload(uploadId, files) {
@@ -352,6 +788,19 @@ export class UsageTracker extends DurableObject {
   }
 }
 
+/** Keep each distinct verified answer once, oldest first. */
+function dedupeVersions(versions) {
+  const seen = new Set();
+  const unique = [];
+  for (const version of versions.slice(-20)) {
+    const key = JSON.stringify(version);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(version);
+  }
+  return unique;
+}
+
 function usageTracker(env) {
   if (!env.USAGE_TRACKER) return null;
   const id = env.USAGE_TRACKER.idFromName('shared-recognition-api-usage');
@@ -504,6 +953,202 @@ export default {
       return libraryError('not found', headers, 404);
     }
 
+    // Measured model accuracy. Reads are open (the numbers carry no lyrics);
+    // writes take the administrator password, like every other shared write.
+    if (url.pathname === '/learning/models') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (request.method !== 'GET') return libraryError('not found', headers, 404);
+      try {
+        return jsonResponse({ models: await tracker.modelStats() }, 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers, 500);
+      }
+    }
+
+    // One verified correction. Same administrator gate as every other shared
+    // write; the record carries the lyrics the user stood behind, so it is
+    // never readable through a public route.
+    if (url.pathname === '/learning/feedback') {
+      if (request.method !== 'POST') return libraryError('not found', headers, 404);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      try {
+        const body = JSON.parse(await request.text());
+        return jsonResponse(await tracker.recordFeedback(body.example), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+    }
+
+    // What the app has already learned to fix. Read-only and open: aliases,
+    // correction pairs and a few short before/after snippets carry no stored
+    // song, so recognition can fetch them before every run.
+    // The hand-trained correction model. Writes are administrator-only; the
+    // model FILES are read by the browser runtime itself, so they are served
+    // from stable versioned URLs to the app's own origins with immutable
+    // caching. No training record is reachable through them.
+    if (url.pathname.startsWith('/learning/correction-model')) {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+
+      const read = matchCorrectionReadRoute(url.pathname);
+      if (read && request.method === 'GET') {
+        if (!isAllowedModelOrigin(request, allowedOrigins(env))) {
+          return libraryError('origin not allowed', headers, 403);
+        }
+        const file = await tracker.readCorrectionFile(read.version, read.path);
+        if (!(file instanceof ArrayBuffer)) return libraryError('model file not found', headers, 404);
+        return new Response(file, {
+          status: 200,
+          headers: {
+            ...headers,
+            'Content-Type': 'application/octet-stream',
+            // Versioned URL, so the bytes at it never change.
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        });
+      }
+
+      if (url.pathname === '/learning/correction-model' && request.method === 'GET') {
+        return jsonResponse(await tracker.correctionModelSlots(), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      }
+
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      try {
+        if (url.pathname === '/learning/correction-model' && request.method === 'PUT') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse({ manifest: await tracker.stageCorrectionModel(body.manifest) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (url.pathname === '/learning/correction-model/activate' && request.method === 'POST') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse(await tracker.activateCorrectionModel(body.version), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (url.pathname === '/learning/correction-model/rollback' && request.method === 'POST') {
+          return jsonResponse(await tracker.rollbackCorrectionModel(), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        const upload = matchCorrectionUploadRoute(url.pathname);
+        if (upload && request.method === 'PUT') {
+          await tracker.putCorrectionChunk(upload.version, upload.path, upload.index, await request.arrayBuffer());
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
+    // Training corpus. Administrator-only in both directions: the records
+    // carry score images and the lyrics a user verified.
+    if (url.pathname.startsWith('/learning/corpus')) {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      try {
+        if (url.pathname === '/learning/corpus') {
+          if (request.method === 'GET') {
+            return jsonResponse(await tracker.corpusStatus(), 200, { ...headers, 'Cache-Control': 'no-store' });
+          }
+          if (request.method === 'PUT') {
+            const body = JSON.parse(await request.text());
+            return jsonResponse({ manifest: await tracker.putCorpusManifest(body.manifest) }, 200, {
+              ...headers,
+              'Cache-Control': 'no-store',
+            });
+          }
+          return libraryError('not found', headers, 404);
+        }
+
+        if (url.pathname === '/learning/corpus/manifests' && request.method === 'GET') {
+          return jsonResponse({ manifests: await tracker.corpusManifests() }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+
+        if (url.pathname === '/learning/corpus/exported' && request.method === 'POST') {
+          const body = JSON.parse(await request.text());
+          return jsonResponse(await tracker.markCorpusExported(body.ids), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+
+        const chunk = matchCorpusChunkRoute(url.pathname);
+        if (chunk && request.method === 'PUT') {
+          await tracker.putCorpusChunk(chunk.id, chunk.index, await request.arrayBuffer());
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+        if (chunk && request.method === 'GET') {
+          const data = await tracker.getCorpusChunk(chunk.id, chunk.index);
+          if (!(data instanceof ArrayBuffer)) return libraryError('corpus chunk not found', headers, 404);
+          return new Response(data, {
+            status: 200,
+            headers: { ...headers, 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' },
+          });
+        }
+
+        const record = matchCorpusRecordRoute(url.pathname);
+        if (record && request.method === 'DELETE') {
+          await tracker.deleteCorpusRecord(record.id);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
+    if (url.pathname === '/learning/memory') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (request.method !== 'GET') return libraryError('not found', headers, 404);
+      try {
+        const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+        return jsonResponse(await tracker.learningMemory(title), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers, 500);
+      }
+    }
+
+    if (url.pathname === '/learning/models/evaluations') {
+      if (request.method !== 'POST') return libraryError('not found', headers, 404);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      try {
+        const body = JSON.parse(await request.text());
+        return jsonResponse({ models: await tracker.recordModelEvaluation(body.evaluations) }, 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+    }
+
     if (url.pathname === '/libraries/ppt') {
       const tracker = usageTracker(env);
       if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
@@ -620,12 +1265,19 @@ export default {
     if (request.method === 'GET' && url.pathname === '/lyrics') {
       const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
       if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+      const artist = (url.searchParams.get('artist') || '').trim().slice(0, 100);
+      // The sample is a slice of what the models read off the 악보. It is what
+      // separates "the right song" from "a different song with this title", so
+      // it has to be part of the cache key as well as the query.
+      const sample = normalizeSample(url.searchParams.get('sample') || '');
 
       // Published lyrics do not change, and a conti is opened repeatedly while
       // a deck is built — serve repeats from the edge instead of re-scraping.
-      const cacheKey = new Request(`${url.origin}/lyrics?title=${encodeURIComponent(title)}`, {
-        method: 'GET',
-      });
+      const cacheKey = new Request(
+        `${url.origin}/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}` +
+          `&sample=${encodeURIComponent(sample)}`,
+        { method: 'GET' },
+      );
       const cache = caches.default;
       const cached = await cache.match(cacheKey);
       if (cached) {
@@ -633,17 +1285,25 @@ export default {
         return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
       }
 
-      let found = null;
+      let found = { candidates: [], links: [] };
       try {
-        found = await fetchWebLyrics(title);
+        found = await fetchLyricsCandidates({ title, artist, sample }, env);
       } catch (error) {
         console.warn('lyrics lookup failed:', error instanceof Error ? error.message : error);
       }
-      const payload = found
-        ? { title, lines: found.lines, url: found.url, host: found.host }
-        : { title, lines: [] };
+      const best = found.candidates.find((candidate) => candidate.decision === 'auto');
+      const payload = {
+        title,
+        candidates: found.candidates,
+        links: found.links,
+        // Legacy shape, so a browser still running the previous bundle keeps
+        // working until it reloads. Only an auto candidate fills it.
+        lines: best?.lines ?? [],
+        url: best?.url,
+        host: best?.host,
+      };
       const body = JSON.stringify(payload);
-      if (found) {
+      if (found.candidates.length > 0) {
         await cache.put(
           cacheKey,
           new Response(body, {
@@ -677,10 +1337,17 @@ export default {
         } catch {
           // Fall through to defaults — reads must never fail the client.
         }
-        return jsonResponse(sanitizeSharedSettings(stored), 200, {
-          ...headers,
-          'Cache-Control': 'no-store',
-        });
+        return jsonResponse(
+          {
+            ...sanitizeSharedSettings(stored),
+            // Deployment state, not a setting: whether this Worker has
+            // permission to read Bugs pages is decided in the environment, so
+            // the admin panel can show it but never toggle it.
+            bugsScrapingAllowed: bugsScrapingAllowed(env),
+          },
+          200,
+          { ...headers, 'Cache-Control': 'no-store' },
+        );
       }
       if (request.method === 'POST') {
         if (!tracker) {
@@ -745,6 +1412,11 @@ export default {
       }
       const requested = typeof body?.model === 'string' ? body.model : '';
       const route = resolveOpenRouterRoute(requested);
+      // No silent substitution: a model outside the free catalog is refused
+      // rather than swapped for another one the caller never asked for.
+      if (!route) {
+        return jsonResponse({ error: `model not allowed: ${requested.slice(0, 100)}` }, 400, headers);
+      }
       if (!env.OPENROUTER_API_KEY) {
         return jsonResponse({ error: 'OPENROUTER_API_KEY not configured on the proxy' }, 500, headers);
       }

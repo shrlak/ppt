@@ -23,10 +23,19 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Serves the production build; run `npm run build` first (CI does this before playwright).
-    command: 'npm run preview -- --port 4173 --strictPort',
+    // Builds and serves in one step so the bundle always carries the settings
+    // below, whatever the caller built beforehand.
+    command: 'npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173/ppt/',
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 180_000,
+    env: {
+      // The proxy URL is baked in at build time, so the only way to exercise
+      // the recognition / web-lyrics / learning paths end to end is to build
+      // with one. It points back at the preview server: every test intercepts
+      // the routes it cares about, and anything left unintercepted gets the
+      // SPA's HTML, which every caller already treats as "no proxy answer".
+      VITE_RECOGNITION_PROXY_URL: 'http://localhost:4173/ppt/__proxy',
+    },
   },
 });
