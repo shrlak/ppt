@@ -19,6 +19,7 @@ import {
   type RankedModel,
 } from './modelReliability';
 import { isExhaustedForToday, type RecognitionObservation } from './recognitionObservation';
+import type { PromptExample } from './scoreNvidia';
 import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
 import {
   runBatchAttempt,
@@ -34,6 +35,7 @@ export type BatchProvider = (
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  examples?: PromptExample[],
 ) => Promise<BatchAttemptResult>;
 
 export interface AdaptivePlan {
@@ -139,6 +141,8 @@ export async function recognizeAdaptiveBatch(
   hints?: (string | undefined)[],
   reliabilities: ModelReliability[] = [],
   provider: BatchProvider = runBatchAttempt,
+  /** Past corrections shown to every model, so it can avoid repeating them. */
+  examples: PromptExample[] = [],
 ): Promise<AdaptiveRecognitionResult> {
   if (dataUrls.length === 0) {
     return {
@@ -164,7 +168,7 @@ export async function recognizeAdaptiveBatch(
     const images = pages.map((page) => dataUrls[page]);
     const pageHints = hints ? pages.map((page) => hints[page]) : undefined;
     const results = await Promise.all(
-      attempts.map((attempt) => provider(attempt, images, settings, mode, pageHints)),
+      attempts.map((attempt) => provider(attempt, images, settings, mode, pageHints, examples)),
     );
     for (const result of results) {
       // A spent daily allowance does not recover within this job, so the model

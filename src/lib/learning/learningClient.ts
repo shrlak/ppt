@@ -4,6 +4,7 @@
 // at all, and learning must not change that: a failed fetch means the pipeline
 // runs on catalog defaults instead of measured accuracy, never that it stops.
 import type { ModelReliability } from '../ai/modelReliability';
+import { EMPTY_MEMORY, type LearningMemory } from './onlineLearning';
 
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
 
@@ -84,5 +85,75 @@ export async function fetchModelReliabilities(): Promise<ModelReliability[]> {
       .filter((value): value is ModelReliability => value !== null);
   } catch {
     return [];
+  }
+}
+
+function trimmedText(value: unknown, maxLength: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function positiveInteger(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+/**
+ * What the app has already learned to fix, or an empty memory.
+ *
+ * Empty is always a valid answer: with no proxy, or a proxy that is down,
+ * recognition simply runs without the shortcuts it would otherwise have.
+ */
+export async function fetchLearningMemory(title = ''): Promise<LearningMemory> {
+  const query = title.trim() ? `?title=${encodeURIComponent(title.trim().slice(0, 100))}` : '';
+  const response = await learningFetch(`/learning/memory${query}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response?.ok) return EMPTY_MEMORY;
+  try {
+    const payload = (await response.json()) as Record<string, unknown>;
+    return {
+      titleAliases: (Array.isArray(payload.titleAliases) ? payload.titleAliases : [])
+        .map((raw) => {
+          const value = (raw ?? {}) as Record<string, unknown>;
+          const from = trimmedText(value.from, 200);
+          const to = trimmedText(value.to, 200);
+          return from && to ? { from, to, support: positiveInteger(value.support) } : null;
+        })
+        .filter((alias): alias is LearningMemory['titleAliases'][number] => alias !== null),
+      corrections: (Array.isArray(payload.corrections) ? payload.corrections : [])
+        .map((raw) => {
+          const value = (raw ?? {}) as Record<string, unknown>;
+          const before = trimmedText(value.before, 120);
+          const after = trimmedText(value.after, 120);
+          if (!before || !after) return null;
+          return {
+            before,
+            after,
+            contextBefore: trimmedText(value.contextBefore, 40),
+            contextAfter: trimmedText(value.contextAfter, 40),
+            support: positiveInteger(value.support),
+            seen: positiveInteger(value.seen),
+          };
+        })
+        .filter((correction): correction is LearningMemory['corrections'][number] => correction !== null),
+      examples: (Array.isArray(payload.examples) ? payload.examples : [])
+        .map((raw) => {
+          const value = (raw ?? {}) as Record<string, unknown>;
+          const before = trimmedText(value.before, 120);
+          const after = trimmedText(value.after, 120);
+          if (!before || !after) return null;
+          const example: LearningMemory['examples'][number] = { before, after };
+          const exampleTitle = trimmedText(value.title, 200);
+          if (exampleTitle) example.title = exampleTitle;
+          const label = trimmedText(value.label, 30);
+          if (label) example.label = label;
+          return example;
+        })
+        .filter((example): example is LearningMemory['examples'][number] => example !== null)
+        .slice(0, 3),
+    };
+  } catch {
+    return EMPTY_MEMORY;
   }
 }

@@ -156,6 +156,63 @@ describe('the proxy side of a verified correction', () => {
     expect((await post({ example: { ...example('page-hash', 1), verification: 'draft' } })).status).toBe(400);
   });
 
+  it('counts memory contributions and serves them back for the next run', async () => {
+    const harness = createWorkerHarness();
+    const withMemory = (revision: number) => ({
+      ...example('page-hash', revision),
+      memory: {
+        aliases: [{ from: '은해의노래', to: '은혜의 노래' }],
+        corrections: [{ before: '실력이', after: '능력이', contextBefore: '살아내는', contextAfter: '' }],
+        examples: [{ before: '살아내는 실력이', after: '살아내는 능력이', title: '은혜의 노래', label: 'V' }],
+      },
+    });
+
+    await harness.fetch('/learning/feedback', {
+      method: 'POST',
+      admin: true,
+      body: JSON.stringify({ example: withMemory(1) }),
+    });
+    await harness.fetch('/learning/feedback', {
+      method: 'POST',
+      admin: true,
+      body: JSON.stringify({ example: withMemory(2) }),
+    });
+
+    const memory = (await (await harness.fetch('/learning/memory?title=은혜의 노래')).json()) as {
+      titleAliases: { support: number }[];
+      corrections: { support: number; seen: number }[];
+      examples: unknown[];
+    };
+    expect(memory.titleAliases[0]).toMatchObject({ to: '은혜의 노래', support: 2 });
+    expect(memory.corrections[0]).toMatchObject({ support: 2, seen: 2 });
+    // Examples are capped hard: the prompt is a nudge, not a lyric store.
+    expect(memory.examples.length).toBeLessThanOrEqual(3);
+  });
+
+  it('resets an alias count when a later correction disagrees with it', async () => {
+    const harness = createWorkerHarness();
+    const withAlias = (revision: number, to: string) => ({
+      ...example('page-hash', revision),
+      memory: { aliases: [{ from: '은해의노래', to }], corrections: [], examples: [] },
+    });
+    for (const [revision, to] of [
+      [1, '은혜의 노래'],
+      [2, '은혜의 노래'],
+      [3, '전혀 다른 제목'],
+    ] as const) {
+      await harness.fetch('/learning/feedback', {
+        method: 'POST',
+        admin: true,
+        body: JSON.stringify({ example: withAlias(revision, to) }),
+      });
+    }
+    const memory = (await (await harness.fetch('/learning/memory')).json()) as {
+      titleAliases: { to: string; support: number }[];
+    };
+    // Two users disagreeing is not two votes for either answer.
+    expect(memory.titleAliases[0]).toMatchObject({ to: '전혀 다른 제목', support: 1 });
+  });
+
   it('keeps a stored correction out of the public model dashboard', async () => {
     const harness = createWorkerHarness();
     await harness.fetch('/learning/feedback', {

@@ -300,10 +300,83 @@ export function sanitizeFeedbackExample(raw) {
     evaluations: Array.isArray(raw.evaluations)
       ? raw.evaluations.slice(0, 12).map(sanitizeModelEvaluation).filter(Boolean)
       : [],
+    ...(raw.memory ? { memory: sanitizeMemoryContribution(raw.memory) } : {}),
   };
 }
 
 /** `learning:feedback:<pageHash>:<finalHash>` — the idempotency key itself. */
 export function feedbackKey(example) {
   return `learning:feedback:${example.pageHash}:${example.finalHash}`;
+}
+
+/** Bound on each learning-memory family, so storage cannot grow without end. */
+export const MAX_ALIASES = 500;
+export const MAX_CORRECTIONS = 1000;
+export const MAX_EXAMPLES = 500;
+
+/** Longest example text stored; a prompt is not a lyric store. */
+const MAX_EXAMPLE_CHARS = 120;
+
+/** Stable, filesystem-safe key for one learned correction. */
+export function correctionStorageKey(correction) {
+  const parts = [correction.contextBefore, correction.before, correction.after, correction.contextAfter];
+  return `learning:correction:${encodeURIComponent(parts.join('\u0000')).slice(0, 400)}`;
+}
+
+export function aliasStorageKey(from) {
+  return `learning:alias:${encodeURIComponent(from).slice(0, 300)}`;
+}
+
+/**
+ * Validate the memory contributions one verified correction supports.
+ *
+ * The linguistic work — deciding what counts as a correction, and what context
+ * makes it safe to reapply — happens in the browser, where both readings are
+ * in hand. The proxy only counts, exactly as it does for model accuracy.
+ */
+export function sanitizeMemoryContribution(raw) {
+  if (!raw || typeof raw !== 'object') return { aliases: [], corrections: [], examples: [] };
+  const aliases = Array.isArray(raw.aliases)
+    ? raw.aliases
+        .slice(0, 4)
+        .map((alias) => {
+          const from = trimmed(alias?.from, 200);
+          const to = trimmed(alias?.to, 200);
+          return from && to ? { from, to } : null;
+        })
+        .filter(Boolean)
+    : [];
+  const corrections = Array.isArray(raw.corrections)
+    ? raw.corrections
+        .slice(0, 20)
+        .map((correction) => {
+          const before = trimmed(correction?.before, MAX_EXAMPLE_CHARS);
+          const after = trimmed(correction?.after, MAX_EXAMPLE_CHARS);
+          if (!before || !after || before === after) return null;
+          return {
+            before,
+            after,
+            contextBefore: trimmed(correction?.contextBefore, 40),
+            contextAfter: trimmed(correction?.contextAfter, 40),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  const examples = Array.isArray(raw.examples)
+    ? raw.examples
+        .slice(0, 20)
+        .map((example) => {
+          const before = trimmed(example?.before, MAX_EXAMPLE_CHARS);
+          const after = trimmed(example?.after, MAX_EXAMPLE_CHARS);
+          if (!before || !after) return null;
+          return {
+            before,
+            after,
+            ...(trimmed(example?.title, 200) ? { title: trimmed(example.title, 200) } : {}),
+            ...(trimmed(example?.label, 30) ? { label: trimmed(example.label, 30) } : {}),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  return { aliases, corrections, examples };
 }

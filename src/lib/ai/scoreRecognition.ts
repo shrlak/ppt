@@ -5,7 +5,11 @@ import type { Section, Song } from '../utils/types';
 import type { BatchRecognitionMode, ParsedScore } from './scoreParser';
 import type { AiSettings, RecognitionAttempt, RecognitionEngine } from './aiSettings';
 import { recognizeBatchWithGemini, recognizeWithGemini } from './scoreAi';
-import { recognizeBatchWithOpenRouter, recognizeWithOpenRouter } from './scoreNvidia';
+import {
+  recognizeBatchWithOpenRouter,
+  recognizeWithOpenRouter,
+  type PromptExample,
+} from './scoreNvidia';
 import { RecognitionError, isTransientRecognitionError } from './recognitionError';
 import { classifyRecognitionError, type RecognitionObservation } from './recognitionObservation';
 import {
@@ -109,6 +113,7 @@ async function recognizeBatchWithEngine(
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (attempt.engine === 'gemini') {
     const key = settings.geminiApiKey.trim();
@@ -121,12 +126,13 @@ async function recognizeBatchWithEngine(
       mode === 'full' && settings.geminiUseSearch,
       PROXY_URL,
       hints,
+      examples,
     );
   }
   if (attempt.engine === 'openrouter') {
     const key = settings.openrouterApiKey.trim();
     if (!key && !PROXY_URL) throw new Error('OpenRouter API 키가 설정되지 않았습니다.');
-    return recognizeBatchWithOpenRouter(dataUrls, key, mode, attempt.model, PROXY_URL, hints);
+    return recognizeBatchWithOpenRouter(dataUrls, key, mode, attempt.model, PROXY_URL, hints, examples);
   }
   throw new Error('자동 인식이 꺼져 있습니다.');
 }
@@ -351,12 +357,13 @@ export async function runBatchAttempt(
   settings: AiSettings,
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<BatchAttemptResult> {
   const startedAt = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const scores = await Promise.race([
-      withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints)),
+      withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints, examples)),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new RecognitionError('인식 응답 시간 초과', 408)), ATTEMPT_TIMEOUT_MS);
       }),

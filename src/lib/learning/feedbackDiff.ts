@@ -75,6 +75,18 @@ export interface FeedbackExample {
    * record, so a re-sent duplicate cannot count a model twice.
    */
   evaluations: ModelEvaluation[];
+  /**
+   * The alias / correction / example contributions this one record supports.
+   *
+   * Derived here rather than on the proxy because deciding what counts as a
+   * correction needs both readings and the language rules; the proxy only
+   * counts, exactly as it does for model accuracy.
+   */
+  memory?: {
+    aliases: { from: string; to: string }[];
+    corrections: { before: string; after: string; contextBefore: string; contextAfter: string }[];
+    examples: { before: string; after: string; title?: string; label?: string }[];
+  };
 }
 
 function same(a: string | undefined, b: string | undefined): boolean {

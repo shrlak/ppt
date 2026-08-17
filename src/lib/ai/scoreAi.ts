@@ -3,7 +3,8 @@
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
 import { RecognitionError } from './recognitionError';
-import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES } from './scorePrompt';
+import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES, correctionExampleLines } from './scorePrompt';
+import type { PromptExample } from './scoreNvidia';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -137,6 +138,7 @@ export function buildGeminiBatchBody(
   mode: BatchRecognitionMode,
   useSearch = false,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): unknown {
   const task =
     mode === 'titles'
@@ -162,6 +164,7 @@ export function buildGeminiBatchBody(
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']
       : []),
     ...task,
+    ...correctionExampleLines(examples),
     ...(mode === 'full' && useSearch ? SEARCH_PROMPT_LINES : ['반드시 유효한 JSON 객체 하나만 출력하세요.']),
   ].join('\n');
 
@@ -270,6 +273,7 @@ export async function recognizeBatchWithGemini(
   useSearch = false,
   proxyUrl?: string,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
   const useProxy = !apiKey.trim() && !!proxyUrl;
@@ -279,7 +283,7 @@ export async function recognizeBatchWithGemini(
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch, hints)),
+    body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch, hints, examples)),
   });
 
   if (!res.ok) {

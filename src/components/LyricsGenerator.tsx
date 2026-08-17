@@ -5,6 +5,7 @@ import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib
 import {
   fetchBundledLibrary,
   findEntry,
+  findReusableEntry,
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
@@ -22,7 +23,15 @@ import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
 import { applyScoreToSong, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
 import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
-import { fetchModelReliabilities } from '../lib/learning/learningClient';
+import { fetchLearningMemory, fetchModelReliabilities } from '../lib/learning/learningClient';
+import {
+  applySafeCorrections,
+  buildLearningMemory,
+  promptExamplesFor,
+  resolveTitleAlias,
+  EMPTY_MEMORY,
+  type LearningMemory,
+} from '../lib/learning/onlineLearning';
 import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
 import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
 import { hashPageImage, hashText } from '../lib/ai/pageHash';
@@ -180,6 +189,8 @@ export default function LyricsGenerator({
    * stands behind the result.
    */
   const evidenceRef = useRef<Map<string, PageEvidence>>(new Map());
+  // Latest learning memory, for the rescue path that runs after the main flow.
+  const memoryRef = useRef<LearningMemory>(EMPTY_MEMORY);
   // Song being edited in the split-screen conti view (null = closed).
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
@@ -633,6 +644,11 @@ export default function LyricsGenerator({
         // each answer counts. No proxy, or a failed lookup, just means the
         // catalog's own roles are used.
         const reliabilities = await fetchModelReliabilities();
+        // What the app already learned to fix. Aliases redirect a title the
+        // models keep misreading to the saved song; examples warn them off
+        // repeating a correction the user already made.
+        const memory = await fetchLearningMemory();
+        memoryRef.current = memory;
         // Page hashes tie this run's evidence to the page it came from, so a
         // correction saved next week still knows which reading it corrected.
         const pageHashes = await Promise.all(
@@ -651,24 +667,38 @@ export default function LyricsGenerator({
         enterPhase('titles', tracked.ids);
         let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
         try {
-          const titleResult = await recognizeAdaptiveBatch(images, settings, 'titles', undefined, reliabilities);
+          const titleResult = await recognizeAdaptiveBatch(
+            images,
+            settings,
+            'titles',
+            undefined,
+            reliabilities,
+            undefined,
+            promptExamplesFor({}, memory),
+          );
           titleScores = titleResult.scores;
           for (const modelKey of titleResult.exhaustedModels) exhausted.add(modelKey);
         } catch (error) {
           console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
         }
 
+        // A title the models are known to misread is resolved BEFORE the
+        // library and the web are searched, so a page whose title never comes
+        // back right still finds its saved lyrics.
+        const aliasedTitles = titleScores.map((identity) =>
+          identity.title ? { ...identity, title: resolveTitleAlias(identity.title, memory) } : identity,
+        );
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
         const titlePlan = planScoreBatch(
-          titleScores,
+          aliasedTitles,
           active.map((song) => song.title),
           libraryRef.current,
         );
 
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
-          const identity = titleScores[index] ?? { order: [], sections: [] };
+          const identity = aliasedTitles[index] ?? { order: [], sections: [] };
           if (discardNonScorePage(song, identity)) {
             resolvedIds.add(song.id);
             return;
@@ -730,6 +760,14 @@ export default function LyricsGenerator({
             'full',
             remaining.map(hintFor),
             reliabilities,
+            undefined,
+            promptExamplesFor(
+              {
+                title: remaining[0] ? hintFor(remaining[0]) : undefined,
+                partLabels: ['V', 'C', 'B', 'PC'],
+              },
+              memory,
+            ),
           );
           lyricScores = lyricResult.scores;
           lyricEngine = lyricResult.engine;
@@ -752,11 +790,21 @@ export default function LyricsGenerator({
         remaining.forEach(({ song, identity }, index) => {
           if (isCancelled(song.id)) return;
           const full = lyricScores?.[index] ?? { order: [], sections: [] };
-          scoreById.set(song.id, {
-            ...full,
-            title: full.title ?? identity.title,
-            key: full.key ?? identity.key,
-          });
+          scoreById.set(
+            song.id,
+            // Learned corrections land after the models have agreed and before
+            // the web is consulted: a repeat misreading is fixed from our own
+            // verified history, and a high-confidence web line still wins.
+            applySafeCorrections(
+              {
+                ...full,
+                title: full.title ?? identity.title,
+                artist: full.artist ?? identity.artist,
+                key: full.key ?? identity.key,
+              },
+              memory,
+            ),
+          );
         });
 
         // A full response can occasionally identify a title that the quick
@@ -776,7 +824,8 @@ export default function LyricsGenerator({
             resolvedIds.add(song.id);
             continue;
           }
-          const hit = recognizedTitle ? findEntry(libraryRef.current, recognizedTitle) : undefined;
+          const aliased = recognizedTitle ? resolveTitleAlias(recognizedTitle, memory) : '';
+          const hit = aliased ? findReusableEntry(libraryRef.current, { title: aliased }) : undefined;
           if (hit) {
             scoreById.delete(song.id);
             resolvedIds.add(song.id);
@@ -848,7 +897,10 @@ export default function LyricsGenerator({
                 resolvedIds.add(song.id);
                 return;
               }
-              const hit = mergedTitle ? findEntry(libraryRef.current, mergedTitle) : undefined;
+              const aliasedTitle = mergedTitle ? resolveTitleAlias(mergedTitle, memoryRef.current) : '';
+              const hit = aliasedTitle
+                ? findReusableEntry(libraryRef.current, { title: aliasedTitle })
+                : undefined;
               if (hit) {
                 resolvedIds.add(song.id);
                 fillFromLibrary(song, hit);
@@ -1040,6 +1092,39 @@ export default function LyricsGenerator({
 
       const review = webReviewRef.current[song.id];
       const finalHash = await hashText(canonicalScore(final));
+      // What this one correction teaches: a title alias, the exact text pairs
+      // that changed, and short before/after examples for future prompts.
+      const learned = buildLearningMemory([
+        {
+          id: 'pending',
+          pageHash: evidence.pageHash,
+          finalHash,
+          createdAt: new Date().toISOString(),
+          observations: [],
+          baseline: {
+            title: baseline.title,
+            artist: baseline.artist,
+            key: baseline.key,
+            order: baseline.order,
+            sections: baseline.sections,
+          },
+          final,
+          webCandidates: [],
+          diff,
+          verification,
+          evaluations: [],
+        },
+      ]);
+      const memoryContribution = {
+        aliases: learned.titleAliases.map((alias) => ({ from: alias.from, to: alias.to })),
+        corrections: learned.corrections.map(({ before, after, contextBefore, contextAfter }) => ({
+          before,
+          after,
+          contextBefore,
+          contextAfter,
+        })),
+        examples: learned.examples,
+      };
       queueFeedback({
         id: crypto.randomUUID(),
         pageHash: evidence.pageHash,
@@ -1062,6 +1147,7 @@ export default function LyricsGenerator({
         // stores numbers, not judgements, so the comparison has to happen on
         // the side that has both readings.
         evaluations: evidence.observations.map((observation) => scoreObservation(observation, final)),
+        memory: memoryContribution,
       });
     },
     [],

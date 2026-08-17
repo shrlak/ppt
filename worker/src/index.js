@@ -20,6 +20,7 @@
 //   GET  /learning/models            -> measured per-model recognition accuracy
 //   POST /learning/models/evaluations-> record accuracy from verified corrections
 //   POST /learning/feedback          -> store one verified user correction
+//   GET  /learning/memory            -> title aliases, safe corrections, examples
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -52,9 +53,15 @@ import {
 } from './library.js';
 import { normalizeSample } from './lyricsCandidates.js';
 import {
+  MAX_ALIASES,
+  MAX_CORRECTIONS,
+  MAX_EXAMPLES,
   MAX_FEEDBACK_RECORDS,
   MAX_TRACKED_MODELS,
+  aliasStorageKey,
+  correctionStorageKey,
   feedbackKey,
+  sanitizeMemoryContribution,
   mergeModelEvaluation,
   modelStatsKey,
   publicModelStats,
@@ -260,7 +267,91 @@ export class UsageTracker extends DurableObject {
     if (example.evaluations.length > 0) {
       await this.recordModelEvaluation(example.evaluations, example.createdAt);
     }
+    if (example.memory) await this.recordMemoryContribution(example.memory);
     return { stored: true, duplicate: false, modelStats: await this.modelStats() };
+  }
+
+  /**
+   * Fold one correction's memory contributions into the running counters.
+   *
+   * `seen` counts every time a misreading turned up; `support` counts how
+   * often the same fix was the outcome. Their ratio is the precision gate that
+   * stops a coincidence from becoming an automatic rewrite.
+   */
+  async recordMemoryContribution(raw) {
+    const contribution = sanitizeMemoryContribution(raw);
+
+    for (const alias of contribution.aliases) {
+      const key = aliasStorageKey(alias.from);
+      const current = await this.ctx.storage.get(key);
+      if (!current) {
+        const stored = await this.ctx.storage.list({ prefix: 'learning:alias:' });
+        if (stored.size >= MAX_ALIASES) continue;
+        await this.ctx.storage.put(key, { from: alias.from, to: alias.to, support: 1 });
+        continue;
+      }
+      // A different correction of the same misreading resets the count: two
+      // users disagreeing is not two votes for either answer.
+      if (current.to !== alias.to) {
+        await this.ctx.storage.put(key, { from: alias.from, to: alias.to, support: 1 });
+        continue;
+      }
+      await this.ctx.storage.put(key, { ...current, support: current.support + 1 });
+    }
+
+    for (const correction of contribution.corrections) {
+      const key = correctionStorageKey(correction);
+      const current = await this.ctx.storage.get(key);
+      if (!current) {
+        const stored = await this.ctx.storage.list({ prefix: 'learning:correction:' });
+        if (stored.size >= MAX_CORRECTIONS) continue;
+        await this.ctx.storage.put(key, { ...correction, support: 1, seen: 1 });
+        continue;
+      }
+      await this.ctx.storage.put(key, { ...current, support: current.support + 1, seen: current.seen + 1 });
+    }
+
+    for (const example of contribution.examples) {
+      const stored = await this.ctx.storage.list({ prefix: 'learning:example:' });
+      if (stored.size >= MAX_EXAMPLES) break;
+      await this.ctx.storage.put(
+        `learning:example:${encodeURIComponent(`${example.before}|${example.after}`).slice(0, 400)}`,
+        example,
+      );
+    }
+  }
+
+  /**
+   * The compact memory the recognition pipeline reads before a run.
+   *
+   * Aliases and corrections come back with their counts so the client applies
+   * its own activation bars; examples are capped hard, and only ones related
+   * to the title asked about are preferred. No stored song is ever returned
+   * whole.
+   */
+  async learningMemory(title = '') {
+    const [aliases, corrections, examples] = await Promise.all([
+      this.ctx.storage.list({ prefix: 'learning:alias:' }),
+      this.ctx.storage.list({ prefix: 'learning:correction:' }),
+      this.ctx.storage.list({ prefix: 'learning:example:' }),
+    ]);
+    const wanted = String(title || '')
+      .toLowerCase()
+      .replace(/[^0-9a-z\u3131-\u318e\uac00-\ud7a3]+/g, '');
+    const related = (example) =>
+      wanted &&
+      String(example.title || '')
+        .toLowerCase()
+        .replace(/[^0-9a-z\u3131-\u318e\uac00-\ud7a3]+/g, '') === wanted;
+
+    return {
+      titleAliases: [...aliases.values()].filter(Boolean),
+      corrections: [...corrections.values()].filter(Boolean),
+      examples: [...examples.values()]
+        .filter(Boolean)
+        .sort((a, b) => Number(related(b)) - Number(related(a)))
+        .slice(0, 3),
+    };
   }
 
   async cleanupPptUpload(uploadId, files) {
@@ -632,6 +723,24 @@ export default {
         });
       } catch (error) {
         return libraryError(error, headers);
+      }
+    }
+
+    // What the app has already learned to fix. Read-only and open: aliases,
+    // correction pairs and a few short before/after snippets carry no stored
+    // song, so recognition can fetch them before every run.
+    if (url.pathname === '/learning/memory') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      if (request.method !== 'GET') return libraryError('not found', headers, 404);
+      try {
+        const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+        return jsonResponse(await tracker.learningMemory(title), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers, 500);
       }
     }
 

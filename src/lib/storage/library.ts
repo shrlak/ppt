@@ -358,6 +358,33 @@ export function findEntry(library: LibraryEntry[], title: string): LibraryEntry 
 }
 
 /**
+ * The saved entry that may stand in for recognizing a page, including a
+ * near-miss title.
+ *
+ * Same fuzzy allowance as findEntry — a stray numbering prefix or a dropped
+ * word should still find the song — but restricted to entries somebody
+ * confirmed. A draft matched this way would let one bad reading of a title
+ * pull in one bad reading of the lyrics, permanently.
+ */
+export function findReusableEntry(
+  library: LibraryEntry[],
+  identity: SongIdentity,
+): LibraryEntry | undefined {
+  const exact = selectReusableEntry(library, identity);
+  if (exact) return exact;
+  const want = normalizeTitle(identity.title ?? '');
+  if (want.length < 2) return undefined;
+  const wantedArtist = identity.artist ? normalizeTitle(identity.artist) : '';
+  return library
+    .filter(isGroundTruth)
+    .filter((entry) => !wantedArtist || !entry.artist || normalizeTitle(entry.artist) === wantedArtist)
+    .find((entry) => {
+      const title = normalizeTitle(entry.title);
+      return title.length >= 2 && (want.includes(title) || title.includes(want));
+    });
+}
+
+/**
  * Replace the entry with the same normalized title, or append. Returns a new
  * array.
  *

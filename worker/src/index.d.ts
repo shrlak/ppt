@@ -23,6 +23,12 @@ export declare class UsageTracker {
   upsertLyricsEntry(rawEntry: unknown): Promise<LyricsLibraryEntry>;
   deleteLyricsEntry(title: unknown): Promise<void>;
   modelStats(): Promise<Record<string, unknown>[]>;
+  recordMemoryContribution(raw: unknown): Promise<void>;
+  learningMemory(title?: string): Promise<{
+    titleAliases: unknown[];
+    corrections: unknown[];
+    examples: unknown[];
+  }>;
   recordFeedback(
     rawExample: unknown,
   ): Promise<{ stored: boolean; duplicate: boolean; modelStats: Record<string, unknown>[] }>;

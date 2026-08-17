@@ -64,3 +64,22 @@ export const MAX_FEEDBACK_RECORDS: number;
 
 export function sanitizeFeedbackExample(raw: unknown): FeedbackExampleRecord | null;
 export function feedbackKey(example: { pageHash: string; finalHash: string }): string;
+
+export interface MemoryContribution {
+  aliases: { from: string; to: string }[];
+  corrections: { before: string; after: string; contextBefore: string; contextAfter: string }[];
+  examples: { before: string; after: string; title?: string; label?: string }[];
+}
+
+export const MAX_ALIASES: number;
+export const MAX_CORRECTIONS: number;
+export const MAX_EXAMPLES: number;
+
+export function correctionStorageKey(correction: {
+  before: string;
+  after: string;
+  contextBefore: string;
+  contextAfter: string;
+}): string;
+export function aliasStorageKey(from: string): string;
+export function sanitizeMemoryContribution(raw: unknown): MemoryContribution;

@@ -3,7 +3,7 @@
 // here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
 // travel as data: URLs in an OpenAI-compatible chat-completions request.
 import { RecognitionError } from './recognitionError';
-import { basePrompt } from './scorePrompt';
+import { basePrompt, correctionExampleLines } from './scorePrompt';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -52,7 +52,18 @@ export function buildOpenRouterBody(dataUrl: string, model: string = DEFAULT_NVI
   };
 }
 
-function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: boolean): string {
+/** Past corrections the caller wants the model warned about. */
+export interface PromptExample {
+  before: string;
+  after: string;
+}
+
+function batchPrompt(
+  imageCount: number,
+  mode: BatchRecognitionMode,
+  hasHints: boolean,
+  examples: PromptExample[] = [],
+): string {
   const task =
     mode === 'titles'
       ? [
@@ -76,6 +87,7 @@ function batchPrompt(imageCount: number, mode: BatchRecognitionMode, hasHints: b
       ? ['일부 이미지 앞에는 콘티 표지에서 읽은 제목 힌트가 있습니다. 힌트는 참고만 하고, 악보와 다르면 악보를 따르세요.']
       : []),
     ...task,
+    ...correctionExampleLines(examples),
     '반드시 {"results":[...]} 형태의 JSON 객체 하나만 출력하세요.',
   ].join('\n');
 }
@@ -86,10 +98,11 @@ export function buildOpenRouterBatchBody(
   mode: BatchRecognitionMode,
   model: string = DEFAULT_NVIDIA_MODEL,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): unknown {
   const hasHints = (hints ?? []).some((hint) => hint && hint.trim());
   const content: Record<string, unknown>[] = [
-    { type: 'text', text: batchPrompt(dataUrls.length, mode, hasHints) },
+    { type: 'text', text: batchPrompt(dataUrls.length, mode, hasHints, examples) },
   ];
   dataUrls.forEach((dataUrl, imageIndex) => {
     const hint = hints?.[imageIndex]?.trim();
@@ -181,9 +194,14 @@ export async function recognizeBatchWithOpenRouter(
   model: string = DEFAULT_NVIDIA_MODEL,
   proxyUrl?: string,
   hints?: (string | undefined)[],
+  examples: PromptExample[] = [],
 ): Promise<ParsedScore[]> {
   if (dataUrls.length === 0) return [];
-  const text = await callOpenRouter(buildOpenRouterBatchBody(dataUrls, mode, model, hints), apiKey, proxyUrl);
+  const text = await callOpenRouter(
+    buildOpenRouterBatchBody(dataUrls, mode, model, hints, examples),
+    apiKey,
+    proxyUrl,
+  );
   const payload = parseModelJson(
     text,
     'OpenRouter 일괄 응답이 비어 있습니다.',

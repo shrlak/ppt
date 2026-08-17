@@ -136,3 +136,27 @@ export const SEARCH_PROMPT_LINES: string[] = [
 export function basePrompt(...extraLines: string[]): string {
   return [...BASE_PROMPT_LINES, ...extraLines].join('\n');
 }
+
+/**
+ * Past corrections, shown to the model so it makes the fix itself.
+ *
+ * These are the app's own verified corrections for this song or this kind of
+ * part, not general advice: a model that is told how this exact line was
+ * corrected last week usually reads it right this week. Framed as examples of
+ * previous MISREADINGS so the model treats them as a warning about its own
+ * failure modes rather than as text to copy — the score is still the only
+ * source of the words.
+ */
+export function correctionExampleLines(
+  examples: { before: string; after: string }[],
+): string[] {
+  if (examples.length === 0) return [];
+  return [
+    '',
+    '【검증된 과거 교정 예시】',
+    '아래는 같은 종류의 악보에서 이 앱이 실제로 잘못 읽었다가 사람이 바로잡은 사례입니다.',
+    '같은 실수를 반복하지 마세요. 다만 가사는 반드시 이 악보에 인쇄된 대로 읽고,',
+    '아래 문장을 그대로 베껴 넣지 마세요.',
+    ...examples.map((example) => `  잘못 읽음: ${example.before}  →  실제: ${example.after}`),
+  ];
+}
