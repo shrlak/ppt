@@ -18,7 +18,7 @@ import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from '../utils/types';
 import { normalizeKoreanLyricLines } from './koreanSpelling';
 import { lineSimilarity, sectionSimilarity } from './textSimilarity';
-import type { ScoredLyricsCandidate } from './webLyrics';
+import type { LyricsSourceLink, ScoredLyricsCandidate } from './webLyrics';
 
 /**
  * How alike a recognized part and a published part must read before the
@@ -38,6 +38,24 @@ const SAME_LINE_THRESHOLD = 0.6;
  * later (a repeated hook) must not drag the cursor past everything between.
  */
 const ALIGN_LOOKAHEAD = 3;
+
+/**
+ * What the editor is showing the user about the web lookup for one song.
+ *
+ * 'auto'   — a candidate was strong and clearly ahead; it has been applied.
+ * 'review' — several plausible pages; the user picks, or picks none.
+ * 'none'   — nothing on the web was usable; the score's reading stands.
+ */
+export type WebReviewDecision = 'auto' | 'review' | 'none';
+
+export interface WebReviewState {
+  candidates: ScoredLyricsCandidate[];
+  /** The candidate the user chose, if any. */
+  selectedId?: string;
+  decision: WebReviewDecision;
+  /** Search hits this deployment may not read, offered as plain links. */
+  links?: LyricsSourceLink[];
+}
 
 export interface WebLyricsMerge {
   score: ParsedScore;
@@ -195,4 +213,23 @@ export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | 
     outcome: correctedParts > 0 ? 'corrected' : 'unused',
     correctedParts,
   };
+}
+
+/**
+ * Apply a candidate only when it has earned the right to be applied.
+ *
+ * An 'auto' candidate is one the scorer found both strong and clearly ahead of
+ * the alternatives, so it fills in on its own. Anything else waits for the
+ * user to pick it by ID: a candidate that merely looks plausible must never
+ * rewrite a conti's lyrics behind the user's back, because the failure mode is
+ * silently substituting a different song with the same title.
+ */
+export function mergeRankedWebLyrics(
+  score: ParsedScore,
+  candidate: ScoredLyricsCandidate | null | undefined,
+  selectedId?: string,
+): WebLyricsMerge {
+  if (!candidate) return mergeWebLyrics(score, null);
+  const applied = candidate.decision === 'auto' || selectedId === candidate.id;
+  return mergeWebLyrics(score, applied ? candidate : null);
 }

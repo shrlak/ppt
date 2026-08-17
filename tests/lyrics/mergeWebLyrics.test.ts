@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { crossReferenceLines, mergeWebLyrics } from '../../src/lib/lyrics/mergeWebLyrics';
+import {
+  crossReferenceLines,
+  mergeRankedWebLyrics,
+  mergeWebLyrics,
+} from '../../src/lib/lyrics/mergeWebLyrics';
 import type { ScoredLyricsCandidate } from '../../src/lib/lyrics/webLyrics';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
@@ -197,5 +201,56 @@ describe('mergeWebLyrics', () => {
     const merged = mergeWebLyrics(score, web([{ label: 'V', lines: V_TRUE }]));
     const fromWeb = merged.score.sections.filter((s) => s.lines.join() === V_TRUE.join());
     expect(fromWeb).toHaveLength(1);
+  });
+});
+
+describe('mergeRankedWebLyrics', () => {
+  const score: ParsedScore = {
+    order: ['I', 'V', 'C'],
+    sections: [
+      { label: 'V', lines: V_OCR },
+      { label: 'C', lines: C_OCR },
+    ],
+  };
+  const reviewCandidate = web(
+    [
+      { label: 'V', lines: V_TRUE },
+      { label: 'C', lines: C_TRUE },
+    ],
+    { id: 'ccm:review', decision: 'review', score: 0.72 },
+  );
+
+  it('does not merge a review candidate until the user selects it', () => {
+    expect(mergeRankedWebLyrics(score, reviewCandidate, undefined).outcome).toBe('unused');
+  });
+
+  it('keeps printed order after an explicitly selected candidate fills a missing part', () => {
+    const merged = mergeRankedWebLyrics(score, reviewCandidate, reviewCandidate.id);
+    expect(merged.score.order).toEqual(score.order);
+    expect(merged.outcome).toBe('corrected');
+  });
+
+  it('applies an auto candidate without being asked', () => {
+    const auto = web(
+      [
+        { label: 'V', lines: V_TRUE },
+        { label: 'C', lines: C_TRUE },
+      ],
+      { id: 'ccm:auto', decision: 'auto', score: 0.95 },
+    );
+    expect(mergeRankedWebLyrics(score, auto).outcome).toBe('corrected');
+  });
+
+  it('leaves the score alone when there is no candidate at all', () => {
+    const merged = mergeRankedWebLyrics(score, null);
+    expect(merged.outcome).toBe('unused');
+    expect(merged.score.sections.map((section) => section.label)).toEqual(['V', 'C']);
+  });
+
+  it('never lets a declined candidate change the recognized reading', () => {
+    // Selecting a different candidate's ID must not apply this one.
+    const merged = mergeRankedWebLyrics(score, reviewCandidate, 'some-other-candidate');
+    expect(merged.outcome).toBe('unused');
+    expect(merged.score.sections[0].lines).toEqual(V_OCR.map((line) => line));
   });
 });

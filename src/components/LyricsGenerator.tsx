@@ -28,7 +28,7 @@ import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
 import { hashPageImage } from '../lib/ai/pageHash';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
-import { mergeWebLyrics } from '../lib/lyrics/mergeWebLyrics';
+import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
@@ -143,6 +143,17 @@ export default function LyricsGenerator({
   const [parsing, setParsing] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recog, setRecog] = useState<Record<string, RecogState>>({});
+  /**
+   * Web candidates a song is still waiting on a decision about.
+   *
+   * Held apart from the song itself: nothing here has been applied, and the
+   * song must stay exactly as the models read it until the user picks.
+   */
+  const [webReview, setWebReview] = useState<Record<string, WebReviewState>>({});
+  // The consensus reading each pending review would be merged into.
+  const webBaselineRef = useRef<Record<string, ParsedScore>>({});
+  // Latest review state, for callbacks that must stay referentially stable.
+  const webReviewRef = useRef<Record<string, WebReviewState>>({});
   // Song being edited in the split-screen conti view (null = closed).
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
@@ -159,6 +170,9 @@ export default function LyricsGenerator({
   useEffect(() => {
     libraryRef.current = library;
   }, [library]);
+  useEffect(() => {
+    webReviewRef.current = webReview;
+  }, [webReview]);
   // Mirror of pageImages for async loops that must see the latest cache.
   const pageImagesRef = useRef<Record<number, string>>({});
   useEffect(() => {
@@ -403,12 +417,16 @@ export default function LyricsGenerator({
       const ticker = window.setInterval(applyProgress, PROGRESS_TICK_MS);
 
       const resolvedIds = new Set<string>();
+      /** Pages the models did not settle on, so the card can say so. */
+      let reviewFlags = new Map<string, boolean>();
       const markDone = (ids: string[], engine: string) => {
         for (const id of ids) resolvedIds.add(id);
         setRecog((current) => {
           const next = { ...current };
           for (const id of ids) {
-            if (!isCancelled(id)) next[id] = { status: 'done', engine };
+            if (!isCancelled(id)) {
+              next[id] = { status: 'done', engine, needsReview: reviewFlags.get(id) || undefined };
+            }
           }
           return next;
         });
@@ -492,17 +510,49 @@ export default function LyricsGenerator({
               ? await fetchWebLyrics({ title, sample: lyricSample(score.sections) })
               : { candidates: [], links: [] };
             if (isCancelled(id)) return;
-            const web = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
-            const merged = mergeWebLyrics(score, web);
+            const auto = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
+            const review = lookup.candidates.filter((candidate) => candidate.decision === 'review');
+
+            // Several plausible pages: the song stays exactly as the models
+            // read it, editable, and out of auto-save until the user chooses.
+            if (!auto && review.length > 0) {
+              webBaselineRef.current[id] = score;
+              setWebReview((current) => ({
+                ...current,
+                [id]: { candidates: review, decision: 'review', links: lookup.links },
+              }));
+              const normalized = mergeWebLyrics(score, null);
+              setSongs((current) =>
+                current.map((song) =>
+                  song.id === id && !isCancelled(id)
+                    ? {
+                        ...applyScoreToSong(song, normalized.score),
+                        verification: 'draft',
+                        provenance: {
+                          ...song.provenance,
+                          pageHash: evidence.get(id)?.pageHash,
+                          baseline: song.provenance?.baseline ?? recognitionBaseline(score),
+                          source: 'models',
+                          confidence: evidence.get(id)?.confidence,
+                        },
+                      }
+                    : song,
+                ),
+              );
+              markDone([id], engine);
+              return;
+            }
+
+            const merged = mergeRankedWebLyrics(score, auto);
             applyRecognizedScore(id, merged.score, engine, {
-              source: web ? 'web' : 'models',
-              webSourceUrl: web?.sourceUrl,
+              source: auto ? 'web' : 'models',
+              webSourceUrl: auto?.sourceUrl,
             });
-            if (web && merged.outcome !== 'unused') {
+            if (auto && merged.outcome !== 'unused') {
               showToast(
                 merged.outcome === 'filled'
-                  ? `'${title}' 가사를 ${web.sourceHost}에서 가져왔습니다.`
-                  : `'${title}' 가사를 ${web.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
+                  ? `'${title}' 가사를 ${auto.sourceHost}에서 가져왔습니다.`
+                  : `'${title}' 가사를 ${auto.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
               );
             }
           }),
@@ -641,6 +691,9 @@ export default function LyricsGenerator({
             found.confidence = lyricResult.confidence[index] ?? 0;
             found.needsReview = lyricResult.needsReview[index] ?? true;
           });
+          reviewFlags = new Map(
+            remaining.map(({ song }, index) => [song.id, lyricResult.needsReview[index] ?? false]),
+          );
         } catch (error) {
           console.warn('가사 일괄 인식 실패, 곡별 인식으로 전환:', error instanceof Error ? error.message : error);
         }
@@ -878,6 +931,49 @@ export default function LyricsGenerator({
     // Only a version bump restores; the payload props changing identity must not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreVersion]);
+
+  /**
+   * Apply — or decline — a web candidate the user chose.
+   *
+   * The merge runs against the reading recognition produced, not against
+   * whatever is on screen now, so choosing a candidate after editing a line by
+   * hand still lines the published wording up with what the score said.
+   * Declining leaves the models' reading exactly as it is.
+   */
+  const selectWebCandidate = useCallback((songId: string, candidateId: string | null) => {
+    const review = webReviewRef.current[songId];
+    const baseline = webBaselineRef.current[songId];
+    if (!review || !baseline) return;
+    const chosen = candidateId ? review.candidates.find((entry) => entry.id === candidateId) : undefined;
+    const merged = mergeRankedWebLyrics(baseline, chosen ?? null, candidateId ?? undefined);
+
+    setSongs((current) =>
+      current.map((song) => {
+        if (song.id !== songId) return song;
+        return {
+          ...song,
+          // The merge already decided the shape; applyScoreToSong would refuse
+          // to touch a song that has lyrics, which by now it does.
+          sections: merged.score.sections.map((section) => ({ label: section.label, lines: [...section.lines] })),
+          order: [...merged.score.order],
+          verification: 'draft',
+          provenance: {
+            ...song.provenance,
+            source: chosen ? 'web' : 'models',
+            webSourceUrl: chosen?.sourceUrl,
+          },
+        };
+      }),
+    );
+    setEdited(true);
+    setWebReview((current) => ({
+      ...current,
+      [songId]: { ...review, selectedId: candidateId ?? undefined, decision: chosen ? 'auto' : 'none' },
+    }));
+    if (chosen) {
+      showToast(`'${chosen.title || '선택한 곡'}' 가사를 ${chosen.sourceHost}에서 적용했습니다.`);
+    }
+  }, []);
 
   /** Manual "save to library" button press — same as auto-save, but confirms with a toast. */
   const handleSaveToLibrary = useCallback(
@@ -1176,6 +1272,8 @@ export default function LyricsGenerator({
               onMove={moveSong}
               onRemove={removeSong}
               onSaveToLibrary={handleSaveToLibrary}
+              webReview={webReview[song.id]}
+              onSelectWebCandidate={(candidateId) => selectWebCandidate(song.id, candidateId)}
               onZoom={() => setZoomSongId(song.id)}
               onTitleBlur={(title) => {
                 const hit = findEntry(library, title);
@@ -1278,6 +1376,8 @@ export default function LyricsGenerator({
                 onMove={moveSong}
                 onRemove={removeSong}
                 onSaveToLibrary={handleSaveToLibrary}
+                webReview={webReview[zoomSong.id]}
+                onSelectWebCandidate={(candidateId) => selectWebCandidate(zoomSong.id, candidateId)}
                 onZoom={() => {}}
                 onTitleBlur={(title) => {
                   const hit = findEntry(library, title);

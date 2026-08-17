@@ -60,6 +60,8 @@ export interface ConsensusResult {
   /** Overall 0–1 confidence, weighted the same way model accuracy is. */
   confidence: number;
   fieldConfidence: FieldConfidence;
+  /** Per-part lyric confidence, so the editor can highlight only what is unsure. */
+  sectionConfidence: Record<string, number>;
   /** Model keys whose answer contributed. */
   usedModels: string[];
   needsReview: boolean;
@@ -290,6 +292,7 @@ export function buildWeightedConsensus(
       score: EMPTY_SCORE,
       confidence: 0,
       fieldConfidence: { title: 0, artist: 0, order: 0, lyrics: 0, structure: 0 },
+      sectionConfidence: {},
       usedModels: [],
       needsReview: true,
     };
@@ -379,7 +382,7 @@ export function buildWeightedConsensus(
       })),
   );
 
-  const { sections, confidence: lyricsConfidence } = voteOnLines(
+  const { sections, confidence: lyricsConfidence, sectionConfidence } = voteOnLines(
     lyricsLeader,
     compatible.filter((observation) => observation !== lyricsLeader),
     stats,
@@ -427,6 +430,7 @@ export function buildWeightedConsensus(
       lyrics: fieldConfidence.lyrics,
     }),
     fieldConfidence,
+    sectionConfidence,
     usedModels,
     needsReview,
   };
@@ -445,9 +449,10 @@ function voteOnLines(
   leader: RecognitionObservation & { score: ParsedScore },
   others: RecognitionObservation[],
   stats: Map<string, ModelReliability>,
-): { sections: Section[]; confidence: number } {
+): { sections: Section[]; confidence: number; sectionConfidence: Record<string, number> } {
   let weightedConfidence = 0;
   let lineCount = 0;
+  const sectionConfidence: Record<string, number> = {};
 
   const sections = leader.score.sections.map((section) => {
     const aligned = others
@@ -460,6 +465,7 @@ function voteOnLines(
           !!entry.section && entry.section.lines.length === section.lines.length,
       );
 
+    let sectionTotal = 0;
     const lines = section.lines.map((line, index) => {
       const leaderWeight = weightFor(leader, 'lyrics', stats);
       const candidates: { value: string; key: string; weight: number }[] = [
@@ -481,13 +487,20 @@ function voteOnLines(
       // Confidence is measured against every model that had an opinion,
       // including the ones whose reading was rejected as a different line.
       const total = candidates.reduce((sum, candidate) => sum + candidate.weight, 0) + contradicting;
+      const lineConfidence = total > 0 ? (winner?.weight ?? 0) / total : 0;
       lineCount += 1;
-      weightedConfidence += total > 0 ? (winner?.weight ?? 0) / total : 0;
+      weightedConfidence += lineConfidence;
+      sectionTotal += lineConfidence;
       return winner?.value ?? line;
     });
 
+    sectionConfidence[section.label] = lines.length === 0 ? 0 : sectionTotal / lines.length;
     return { label: section.label, lines };
   });
 
-  return { sections, confidence: lineCount === 0 ? 0 : weightedConfidence / lineCount };
+  return {
+    sections,
+    confidence: lineCount === 0 ? 0 : weightedConfidence / lineCount,
+    sectionConfidence,
+  };
 }
