@@ -194,6 +194,13 @@ function webCandidate(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Unlock 관리자 설정 and leave the panel open. */
+async function unlockAdmin(page: Page): Promise<void> {
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+}
+
 /**
  * Let a shared-library delete succeed.
  *
@@ -1087,5 +1094,93 @@ test.describe('web lyrics candidate review', () => {
 
     await expect(card.getByTestId('web-review')).toHaveCount(0);
     await expect(card.getByTestId('section-textarea').first()).toHaveValue(/가나다라 마바사 아자차/);
+  });
+});
+
+test.describe('learning admin dashboard', () => {
+  /** Measured accuracy for every catalog model, best last so ranking shows. */
+  const modelRows = RECOGNITION_MODEL_CATALOG.map((entry, index) => ({
+    modelKey: `${entry.engine}:${entry.model}`,
+    samples: 40,
+    title: 0.9,
+    artist: 0.8,
+    artistSamples: 20,
+    order: 0.9,
+    lyrics: 0.7 + index * 0.02,
+    successRate: 1,
+    latencyMs: 1200,
+    updatedAt: new Date().toISOString(),
+    baseline: 0.8,
+    paused: false,
+  }));
+
+  const corpusManifest = {
+    id: 'a'.repeat(32),
+    pageHash: 'a'.repeat(64),
+    feedbackId: 'b'.repeat(64),
+    createdAt: '2026-08-14T00:00:00.000Z',
+    imageAvailable: false,
+    versions: [{ order: ['I', 'V'], sections: [{ label: 'V', lines: ['가나다라 마바사 아자차'] }] }],
+  };
+
+  test('admin can inspect model roles and export verified training data', async ({ page }) => {
+    await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: { bugsScrapingAllowed: false } }));
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: modelRows } }));
+    await page.route(`${PROXY}/learning/corpus`, (route) =>
+      route.fulfill({
+        json: { total: 140, verified: 120, edited: 20, withImage: 100, exported: 0, bytes: 51_200, limit: 300 },
+      }),
+    );
+    await page.route(`${PROXY}/learning/corpus/manifests`, (route) =>
+      route.fulfill({ json: { manifests: [corpusManifest] } }),
+    );
+    await page.route(`${PROXY}/learning/corpus/exported`, (route) =>
+      route.fulfill({ json: { marked: 1, status: {} } }),
+    );
+
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    // Three models read every page; the rest wait in reserve.
+    await expect(page.getByTestId('learning-model-champion')).toHaveCount(3);
+    await expect(page.getByTestId('training-corpus-count')).toContainText('검증 120');
+    // Enough verified pages, none exported yet: a training run is worth doing.
+    await expect(page.getByTestId('training-recommended')).toBeVisible();
+    // Permission to read Bugs is deployment state, shown but not offered.
+    await expect(page.getByTestId('bugs-permission')).toContainText('비활성');
+
+    const download = page.waitForEvent('download');
+    await page.getByTestId('training-export').click();
+    expect((await download).suggestedFilename()).toMatch(/lyrics-training-.*\.zip/);
+  });
+
+  test('says so plainly when nothing has been measured yet', async ({ page }) => {
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+    await page.route(`${PROXY}/learning/corpus`, (route) =>
+      route.fulfill({
+        json: { total: 0, verified: 0, edited: 0, withImage: 0, exported: 0, bytes: 0, limit: 300 },
+      }),
+    );
+
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    // Catalog roles stand in until measurement takes over.
+    await expect(page.getByTestId('learning-model-champion')).toHaveCount(3);
+    await expect(page.getByTestId('admin-learning-models')).toContainText('아직 측정된 표본이 없습니다');
+    await expect(page.getByTestId('training-recommended')).toHaveCount(0);
+  });
+
+  test('stays readable at 320px without overflowing sideways', async ({ page }) => {
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: modelRows } }));
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto('./');
+    await unlockAdmin(page);
+
+    await expect(page.getByTestId('admin-learning-models')).toBeVisible();
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    );
+    expect(overflows).toBe(false);
   });
 });

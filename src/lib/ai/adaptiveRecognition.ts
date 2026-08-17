@@ -8,7 +8,13 @@
 //
 // The saved quota is what makes cross-checking affordable on the pages that
 // need it.
-import type { AiSettings, RecognitionAttempt, RecognitionEngine, RecognitionModelInfo } from './aiSettings';
+import type {
+  AiSettings,
+  ModelRole,
+  RecognitionAttempt,
+  RecognitionEngine,
+  RecognitionModelInfo,
+} from './aiSettings';
 import { RECOGNITION_MODEL_CATALOG, findModelInfo } from './aiSettings';
 import {
   CHAMPION_SLOTS,
@@ -59,18 +65,28 @@ export function planAdaptiveAttempts(
   rankings: RankedModel[],
   unavailable: ReadonlySet<string> = new Set(),
   pageConfidence: boolean[] = [],
+  /** Roles an administrator pinned by hand; they win over measurement. */
+  roleOverrides: Partial<Record<string, ModelRole>> = {},
 ): AdaptivePlan {
   const available = rankings.filter(
-    (entry) => !entry.paused && !unavailable.has(entry.modelKey) && catalog.some((c) => c.model === entry.model),
+    (entry) =>
+      // A pinned role beats a measured pause: an administrator turning a model
+      // back on has seen something the pause rules cannot.
+      (roleOverrides[entry.modelKey] ? roleOverrides[entry.modelKey] !== 'paused' : !entry.paused) &&
+      !unavailable.has(entry.modelKey) &&
+      catalog.some((c) => c.model === entry.model),
   );
 
-  const measured = available.filter((entry) => entry.samples >= MIN_CHAMPION_SAMPLES);
+  const pinnedChampions = available.filter((entry) => roleOverrides[entry.modelKey] === 'champion');
+  const rest = available.filter((entry) => !roleOverrides[entry.modelKey]);
+  const measured = rest.filter((entry) => entry.samples >= MIN_CHAMPION_SAMPLES);
   // Enough of the pool has been measured to rank it; otherwise fall back to
   // the catalog's own champion/challenger split.
-  const champions =
+  const earned =
     measured.length >= CHAMPION_SLOTS
-      ? measured.slice(0, CHAMPION_SLOTS)
-      : available.filter((entry) => entry.catalogRole === 'champion').slice(0, CHAMPION_SLOTS);
+      ? measured
+      : rest.filter((entry) => entry.catalogRole === 'champion');
+  const champions = [...pinnedChampions, ...earned].slice(0, Math.max(CHAMPION_SLOTS, pinnedChampions.length));
 
   const championKeys = new Set(champions.map((entry) => entry.modelKey));
   const challengers = available.filter((entry) => !championKeys.has(entry.modelKey));
@@ -180,7 +196,7 @@ export async function recognizeAdaptiveBatch(
     }
   };
 
-  const plan = planAdaptiveAttempts(catalog, rankings, unavailable);
+  const plan = planAdaptiveAttempts(catalog, rankings, unavailable, [], settings.roleOverrides);
   if (plan.champions.length === 0) throw new Error('사용할 수 있는 인식 모델이 없습니다.');
   await runRound(plan.champions, allPages);
 
@@ -193,6 +209,7 @@ export async function recognizeAdaptiveBatch(
     rankings,
     unavailable,
     consensus.map((result) => result.needsReview),
+    settings.roleOverrides,
   );
   for (const challenger of escalation.challengers) {
     const uncertain = consensus

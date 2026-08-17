@@ -86,6 +86,7 @@ import {
 } from './trainingCorpus.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 import { fetchLyricsCandidates } from './lyrics.js';
+import { bugsScrapingAllowed } from './lyricsSources.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -1135,10 +1136,17 @@ export default {
         } catch {
           // Fall through to defaults — reads must never fail the client.
         }
-        return jsonResponse(sanitizeSharedSettings(stored), 200, {
-          ...headers,
-          'Cache-Control': 'no-store',
-        });
+        return jsonResponse(
+          {
+            ...sanitizeSharedSettings(stored),
+            // Deployment state, not a setting: whether this Worker has
+            // permission to read Bugs pages is decided in the environment, so
+            // the admin panel can show it but never toggle it.
+            bugsScrapingAllowed: bugsScrapingAllowed(env),
+          },
+          200,
+          { ...headers, 'Cache-Control': 'no-store' },
+        );
       }
       if (request.method === 'POST') {
         if (!tracker) {

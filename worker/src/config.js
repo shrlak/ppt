@@ -132,11 +132,24 @@ export function sanitizeExcludedTitles(raw) {
   return titles;
 }
 
+/** Keep only overrides that name a catalog model and a real role. */
+export function sanitizeRoleOverrides(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const roles = ['champion', 'challenger', 'paused'];
+  const overrides = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!roles.includes(value)) continue;
+    if (RECOGNITION_MODEL_CATALOG.some((entry) => attemptKey(entry) === key)) overrides[key] = value;
+  }
+  return overrides;
+}
+
 export function sanitizeSharedSettings(raw) {
   const obj = raw && typeof raw === 'object' ? raw : {};
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
+    roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }
 

@@ -3139,3 +3139,94 @@ main[data-direction='back'] .wizard-panel.active {
     width: 100%;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Admin: what recognition has learned
+
+   Roles and pause reasons are always spelled out in words; the colour on a
+   role chip repeats the label rather than carrying it.
+   -------------------------------------------------------------------------- */
+
+.learning-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.learning-model {
+  padding: var(--s-3);
+  background: var(--field);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.learning-model-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.learning-model-name {
+  font-weight: 600;
+}
+
+.learning-model-role {
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.learning-model-role-champion {
+  background: var(--accent-soft);
+  border-color: var(--notice-border);
+  color: var(--accent-dark);
+}
+
+.learning-model-role-challenger {
+  background: var(--info-bg);
+  border-color: var(--notice-border);
+  color: var(--info-ink);
+}
+
+.learning-model-role-paused {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
+}
+
+.learning-model-pinned {
+  font-weight: 600;
+}
+
+.learning-model-stats,
+.learning-model-paused,
+.learning-corpus-count {
+  margin: var(--s-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.learning-model-paused {
+  color: var(--warn-ink);
+}
+
+.learning-corpus-count {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  /* At 320px the role-pinning chips stack instead of overflowing the card. */
+  .learning-model .admin-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

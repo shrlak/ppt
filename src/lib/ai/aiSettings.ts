@@ -149,11 +149,21 @@ export const DEFAULT_EXCLUDED_TITLES: string[] = ['공동체 고백송', '예배
 export interface SharedRecognitionSettings {
   attempts: RecognitionAttempt[];
   excludedTitles: string[];
+  /**
+   * Roles the administrator pinned by hand, keyed by `engine:model`.
+   *
+   * Measured accuracy decides roles on its own. This exists for the cases
+   * measurement cannot see yet: a provider announcing a deprecation, or a
+   * model that has started returning something odd in a way the pause rules
+   * have not caught. An override always wins.
+   */
+  roleOverrides: Partial<Record<string, ModelRole>>;
 }
 
 export const DEFAULT_SHARED_SETTINGS: SharedRecognitionSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
+  roleOverrides: {},
 };
 
 export interface AiSettings extends SharedRecognitionSettings {
@@ -170,6 +180,7 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
+  roleOverrides: {},
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
   geminiUseSearch: true,
@@ -253,11 +264,29 @@ export function sanitizeExcludedTitles(raw: unknown): string[] {
   return titles;
 }
 
+/**
+ * Keep only overrides that name a catalog model and a real role. An override
+ * for a model this build no longer ships would otherwise sit in shared
+ * settings forever, invisible and unexplained.
+ */
+export function sanitizeRoleOverrides(raw: unknown): Partial<Record<string, ModelRole>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const roles: ModelRole[] = ['champion', 'challenger', 'paused'];
+  const overrides: Partial<Record<string, ModelRole>> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!roles.includes(value as ModelRole)) continue;
+    const known = RECOGNITION_MODEL_CATALOG.find((entry) => attemptKey(entry) === key);
+    if (known) overrides[key] = value as ModelRole;
+  }
+  return overrides;
+}
+
 export function sanitizeSharedSettings(raw: unknown): SharedRecognitionSettings {
   const obj = (raw ?? {}) as Record<string, unknown>;
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
+    roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }
 
@@ -272,15 +301,9 @@ export function loadLocalSharedSettings(): SharedRecognitionSettings {
     if (raw) return sanitizeSharedSettings(JSON.parse(raw));
     const legacy = localStorage.getItem(LEGACY_ORDER_KEY);
     if (legacy) return sanitizeSharedSettings({ attempts: JSON.parse(legacy) });
-    return {
-      attempts: [...DEFAULT_ATTEMPT_ORDER],
-      excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
-    };
+    return { ...DEFAULT_SHARED_SETTINGS, attempts: [...DEFAULT_ATTEMPT_ORDER] };
   } catch {
-    return {
-      attempts: [...DEFAULT_ATTEMPT_ORDER],
-      excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
-    };
+    return { ...DEFAULT_SHARED_SETTINGS, attempts: [...DEFAULT_ATTEMPT_ORDER] };
   }
 }
 

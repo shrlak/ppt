@@ -121,6 +121,25 @@ describe('planAdaptiveAttempts', () => {
     expect(chosen).not.toContain(CHAMPIONS[1].model);
   });
 
+  it('lets an administrator pin a role over what was measured', () => {
+    const measured: ModelReliability[] = [
+      { ...emptyReliability(modelKeyFor(CHALLENGERS[0]), NOW), samples: 40, paused: true },
+    ];
+    const plan = planAdaptiveAttempts(
+      RECOGNITION_MODEL_CATALOG,
+      rankModels(RECOGNITION_MODEL_CATALOG, measured, NOW),
+      new Set(),
+      [],
+      // Turning a paused model back on is something an administrator can see
+      // and the pause rules cannot.
+      { [modelKeyFor(CHALLENGERS[0])]: 'champion', [modelKeyFor(CHAMPIONS[0])]: 'paused' },
+    );
+    expect(plan.champions.map((attempt) => attempt.model)).toContain(CHALLENGERS[0].model);
+    expect([...plan.champions, ...plan.challengers].map((attempt) => attempt.model)).not.toContain(
+      CHAMPIONS[0].model,
+    );
+  });
+
   it('has nothing to escalate when every page is already settled', () => {
     expect(planAdaptiveAttempts(RECOGNITION_MODEL_CATALOG, rankings, new Set(), [false, false]).challengers).toEqual(
       [],

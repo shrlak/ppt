@@ -10,6 +10,7 @@ export interface CatalogAttempt {
 export interface SharedSettings {
   attempts: { engine: 'gemini' | 'openrouter'; model: string }[];
   excludedTitles: string[];
+  roleOverrides: Partial<Record<string, ModelRole>>;
 }
 
 export const RECOGNITION_MODEL_CATALOG: CatalogAttempt[];
@@ -21,6 +22,7 @@ export function migrateEngineName(value: unknown): 'gemini' | 'openrouter' | und
 export function isFreeVisionCatalogEntry(entry: CatalogAttempt): boolean;
 export function sanitizeAttemptOrder(raw: unknown): { engine: 'gemini' | 'openrouter'; model: string }[];
 export function sanitizeExcludedTitles(raw: unknown): string[];
+export function sanitizeRoleOverrides(raw: unknown): Partial<Record<string, ModelRole>>;
 export function sanitizeSharedSettings(raw: unknown): SharedSettings;
 export function allowedOpenRouterModels(): Set<string>;
 export function usageCatalogModels(): { provider: 'gemini' | 'openrouter'; model: string }[];
