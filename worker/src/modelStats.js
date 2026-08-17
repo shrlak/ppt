@@ -181,3 +181,129 @@ export function publicModelStats(value) {
     recentSamples: value.recent.length,
   };
 }
+
+/** Most feedback records kept, so the learning store stays bounded. */
+export const MAX_FEEDBACK_RECORDS = 2000;
+
+const VERIFICATIONS = new Set(['verified', 'edited']);
+
+function trimmed(value, maxLength) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+/** Hex hash of the shape the client sends; also the storage key suffix. */
+function validHash(value) {
+  return typeof value === 'string' && /^[0-9a-f]{16,128}$/.test(value);
+}
+
+function sanitizeSections(raw) {
+  if (!Array.isArray(raw)) return [];
+  const sections = [];
+  for (const candidate of raw.slice(0, 50)) {
+    if (!candidate || typeof candidate !== 'object' || !Array.isArray(candidate.lines)) continue;
+    const label = trimmed(candidate.label, 30);
+    if (!label) continue;
+    sections.push({
+      label,
+      lines: candidate.lines.filter((line) => typeof line === 'string').map((line) => line.slice(0, 500)).slice(0, 200),
+    });
+  }
+  return sections;
+}
+
+function sanitizeScore(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    ...(trimmed(raw.title, 200) ? { title: trimmed(raw.title, 200) } : {}),
+    ...(trimmed(raw.artist, 200) ? { artist: trimmed(raw.artist, 200) } : {}),
+    ...(trimmed(raw.key, 20) ? { key: trimmed(raw.key, 20) } : {}),
+    order: Array.isArray(raw.order)
+      ? raw.order.map((token) => trimmed(token, 30)).filter(Boolean).slice(0, 200)
+      : [],
+    sections: sanitizeSections(raw.sections),
+  };
+}
+
+/** The provenance of one offered web page — never its lyric text. */
+function sanitizeWebCandidate(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const url = trimmed(raw.url, 500);
+  if (!/^https?:\/\//.test(url)) return null;
+  return {
+    id: trimmed(raw.id, 200),
+    title: trimmed(raw.title, 200),
+    ...(trimmed(raw.artist, 200) ? { artist: trimmed(raw.artist, 200) } : {}),
+    url,
+    host: trimmed(raw.host, 200),
+    source: trimmed(raw.source, 40),
+    score: unitNumber(raw.score) ?? 0,
+    titleScore: unitNumber(raw.titleScore) ?? 0,
+    artistScore: unitNumber(raw.artistScore) ?? 0,
+    lyricsScore: unitNumber(raw.lyricsScore) ?? 0,
+    decision: ['auto', 'review', 'reject'].includes(raw.decision) ? raw.decision : 'reject',
+  };
+}
+
+/**
+ * Validate one verified correction.
+ *
+ * The page hash and the final hash together are the idempotency key: the same
+ * page saved with the same answer is the same evidence, however many times the
+ * client sends it, and counting it twice would inflate every model's sample
+ * count.
+ */
+export function sanitizeFeedbackExample(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = trimmed(raw.id, 100);
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  if (!validHash(raw.pageHash) || !validHash(raw.finalHash)) return null;
+  if (!VERIFICATIONS.has(raw.verification)) return null;
+  const baseline = sanitizeScore(raw.baseline);
+  const final = sanitizeScore(raw.final);
+  if (!baseline || !final || final.sections.length === 0) return null;
+
+  const createdAt = new Date(raw.createdAt);
+  const observations = Array.isArray(raw.observations)
+    ? raw.observations
+        .slice(0, 12)
+        .map((observation) => {
+          if (!observation || typeof observation !== 'object') return null;
+          const attempt = observation.attempt;
+          if (!attempt || typeof attempt.engine !== 'string' || typeof attempt.model !== 'string') return null;
+          const latency = Number(observation.latencyMs);
+          return {
+            attempt: { engine: trimmed(attempt.engine, 20), model: trimmed(attempt.model, 200) },
+            ...(observation.score ? { score: sanitizeScore(observation.score) } : {}),
+            ...(trimmed(observation.error, 30) ? { error: trimmed(observation.error, 30) } : {}),
+            latencyMs: Number.isFinite(latency) && latency >= 0 ? Math.min(latency, 600_000) : 0,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    id,
+    pageHash: raw.pageHash,
+    finalHash: raw.finalHash,
+    createdAt: Number.isFinite(createdAt.getTime()) ? createdAt.toISOString() : new Date().toISOString(),
+    observations,
+    baseline,
+    final,
+    webCandidates: Array.isArray(raw.webCandidates)
+      ? raw.webCandidates.slice(0, 3).map(sanitizeWebCandidate).filter(Boolean)
+      : [],
+    ...(trimmed(raw.selectedWebCandidateId, 200)
+      ? { selectedWebCandidateId: trimmed(raw.selectedWebCandidateId, 200) }
+      : {}),
+    diff: raw.diff && typeof raw.diff === 'object' ? raw.diff : {},
+    verification: raw.verification,
+    evaluations: Array.isArray(raw.evaluations)
+      ? raw.evaluations.slice(0, 12).map(sanitizeModelEvaluation).filter(Boolean)
+      : [],
+  };
+}
+
+/** `learning:feedback:<pageHash>:<finalHash>` — the idempotency key itself. */
+export function feedbackKey(example) {
+  return `learning:feedback:${example.pageHash}:${example.finalHash}`;
+}

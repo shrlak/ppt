@@ -19,6 +19,7 @@
 //   GET/POST /libraries/ppt/purge    -> weekly purge status / run it now
 //   GET  /learning/models            -> measured per-model recognition accuracy
 //   POST /learning/models/evaluations-> record accuracy from verified corrections
+//   POST /learning/feedback          -> store one verified user correction
 //
 // A cron trigger (see wrangler.toml) wipes the shared PPT library every
 // Sunday at 5 PM local time; src/purge.js owns that schedule.
@@ -51,10 +52,13 @@ import {
 } from './library.js';
 import { normalizeSample } from './lyricsCandidates.js';
 import {
+  MAX_FEEDBACK_RECORDS,
   MAX_TRACKED_MODELS,
+  feedbackKey,
   mergeModelEvaluation,
   modelStatsKey,
   publicModelStats,
+  sanitizeFeedbackExample,
   sanitizeModelEvaluation,
 } from './modelStats.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
@@ -225,6 +229,38 @@ export class UsageTracker extends DurableObject {
       await this.ctx.storage.put(key, mergeModelEvaluation(current, evaluation, timestamp));
     }
     return this.modelStats();
+  }
+
+  /**
+   * Store one verified correction, exactly once.
+   *
+   * The page hash plus the hash of the saved answer IS the idempotency key: a
+   * deck is re-saved constantly while it is edited, and every duplicate would
+   * otherwise count as another vote for the models that read that page.
+   */
+  async recordFeedback(rawExample) {
+    const example = sanitizeFeedbackExample(rawExample);
+    if (!example) throw new Error('invalid feedback example');
+    const key = feedbackKey(example);
+    const existing = await this.ctx.storage.get(key);
+    if (existing) return { stored: false, duplicate: true, modelStats: await this.modelStats() };
+
+    const stored = await this.ctx.storage.list({ prefix: 'learning:feedback:' });
+    if (stored.size >= MAX_FEEDBACK_RECORDS) {
+      // Oldest first: the corpus is a rolling window, not an archive.
+      const oldest = [...stored.entries()]
+        .sort((a, b) => String(a[1]?.createdAt ?? '').localeCompare(String(b[1]?.createdAt ?? '')))
+        .slice(0, stored.size - MAX_FEEDBACK_RECORDS + 1)
+        .map(([staleKey]) => staleKey);
+      await this.ctx.storage.delete(oldest);
+    }
+    await this.ctx.storage.put(key, example);
+    // Model accuracy is only ever updated alongside a record that was newly
+    // stored, so re-sending the same correction cannot count a model twice.
+    if (example.evaluations.length > 0) {
+      await this.recordModelEvaluation(example.evaluations, example.createdAt);
+    }
+    return { stored: true, duplicate: false, modelStats: await this.modelStats() };
   }
 
   async cleanupPptUpload(uploadId, files) {
@@ -577,6 +613,25 @@ export default {
         });
       } catch (error) {
         return libraryError(error, headers, 500);
+      }
+    }
+
+    // One verified correction. Same administrator gate as every other shared
+    // write; the record carries the lyrics the user stood behind, so it is
+    // never readable through a public route.
+    if (url.pathname === '/learning/feedback') {
+      if (request.method !== 'POST') return libraryError('not found', headers, 404);
+      if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared learning storage is not configured', headers, 503);
+      try {
+        const body = JSON.parse(await request.text());
+        return jsonResponse(await tracker.recordFeedback(body.example), 200, {
+          ...headers,
+          'Cache-Control': 'no-store',
+        });
+      } catch (error) {
+        return libraryError(error, headers);
       }
     }
 

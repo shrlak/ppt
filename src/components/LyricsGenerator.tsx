@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
+import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import {
@@ -25,7 +25,16 @@ import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
 import { fetchModelReliabilities } from '../lib/learning/learningClient';
 import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
 import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
-import { hashPageImage } from '../lib/ai/pageHash';
+import { hashPageImage, hashText } from '../lib/ai/pageHash';
+import { scoreObservation } from '../lib/ai/modelReliability';
+import {
+  canonicalScore,
+  diffFeedback,
+  feedbackCandidate,
+  verificationFor,
+  type FeedbackDiff,
+} from '../lib/learning/feedbackDiff';
+import { flushFeedbackQueue, queueFeedback } from '../lib/learning/feedbackQueue';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
@@ -64,6 +73,14 @@ function songHasLyrics(song: Song): boolean {
  * machine's own answer: that diff is what tells 'verified' apart from
  * 'edited', and it is what each model's accuracy is measured from.
  */
+/** One page's recognition evidence, held until the user decides about it. */
+interface PageEvidence {
+  pageHash?: string;
+  observations: RecognitionObservation[];
+  confidence: number;
+  needsReview: boolean;
+}
+
 function recognitionBaseline(score: ParsedScore): NonNullable<Song['provenance']>['baseline'] {
   return {
     title: score.title,
@@ -154,6 +171,15 @@ export default function LyricsGenerator({
   const webBaselineRef = useRef<Record<string, ParsedScore>>({});
   // Latest review state, for callbacks that must stay referentially stable.
   const webReviewRef = useRef<Record<string, WebReviewState>>({});
+  /**
+   * What recognition learned about each song: the page it read, every model's
+   * answer, and how settled the consensus was.
+   *
+   * Kept until the user explicitly saves. An automatic save is a draft and
+   * proves nothing, so evidence only becomes training data when somebody
+   * stands behind the result.
+   */
+  const evidenceRef = useRef<Map<string, PageEvidence>>(new Map());
   // Song being edited in the split-screen conti view (null = closed).
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
@@ -256,6 +282,9 @@ export default function LyricsGenerator({
     const refreshOnFocus = () => {
       if (document.visibilityState === 'hidden') return;
       libraryPromiseRef.current = refreshLibrary();
+      // Queued corrections retry on the same signal the library sync uses, so
+      // a save made offline reaches the proxy the next time the tab is used.
+      void flushFeedbackQueue().catch(() => undefined);
     };
     window.addEventListener('focus', refreshOnFocus);
     document.addEventListener('visibilitychange', refreshOnFocus);
@@ -266,13 +295,36 @@ export default function LyricsGenerator({
     };
   }, [refreshLibrary]);
 
-  const saveToLibrary = useCallback((song: Song) => {
+  /**
+   * Write a song to the library at a given trust level.
+   *
+   * A draft is what automatic recognition produces; it is stored so the song
+   * is not lost, but upsertEntry refuses to let it replace an entry somebody
+   * already confirmed. Only an explicit save passes 'verified' or 'edited'.
+   */
+  const saveToLibrary = useCallback((song: Song, verification: VerificationState = 'draft') => {
     if (!song.title.trim()) return;
+    const previous = findEntry(libraryRef.current, song.title);
     const entry: LibraryEntry = {
       title: song.title.trim(),
+      artist: song.artist,
       key: song.key,
       sections: structuredClone(song.sections),
       order: [...song.order],
+      verification,
+      version: (previous?.version ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      ...(song.provenance
+        ? {
+            provenance: {
+              pageHash: song.provenance.pageHash,
+              source: song.provenance.source,
+              webSourceUrl: song.provenance.webSourceUrl,
+              confidence: song.provenance.confidence,
+              correctionModelVersion: song.provenance.correctionModelVersion,
+            },
+          }
+        : {}),
     };
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
@@ -301,8 +353,11 @@ export default function LyricsGenerator({
         songHasLyrics(song) &&
         !findEntry(libraryRef.current, song.title)
       ) {
-        saveToLibrary(song);
-        showToast(`'${song.title}' 을(를) 라이브러리에 자동으로 저장했습니다.`);
+        // Automatic recognition produces a DRAFT. Nobody has looked at it, so
+        // it must not become the ground truth a later conti reuses, nor count
+        // as evidence that any model read the page correctly.
+        saveToLibrary(song, 'draft');
+        showToast(`'${song.title}' 을(를) 초안으로 저장했습니다.`);
       }
       pendingAutoSaveRef.current.delete(id);
     }
@@ -440,16 +495,11 @@ export default function LyricsGenerator({
        */
       const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
 
-      /**
-       * Everything recognition learned about each song this run: the page it
-       * was read from, every model's answer, and how settled the consensus
-       * was. Held here until an explicit library save turns it into training
-       * data — an automatic save is a draft and proves nothing.
-       */
-      const evidence = new Map<
-        string,
-        { pageHash?: string; observations: RecognitionObservation[]; confidence: number; needsReview: boolean }
-      >();
+      // Everything recognition learns about each song is kept on the component
+      // (see evidenceRef): an explicit save happens long after this function
+      // has returned, and that save is the only thing that turns evidence into
+      // training data.
+      const evidence = evidenceRef.current;
 
       /** Commit a finished song: write the lyrics, allow auto-save, mark done. */
       const applyRecognizedScore = (
@@ -975,13 +1025,100 @@ export default function LyricsGenerator({
     }
   }, []);
 
-  /** Manual "save to library" button press — same as auto-save, but confirms with a toast. */
+  /**
+   * Turn one explicit save into a training record and queue it.
+   *
+   * Everything here is best-effort and deliberately after the library write:
+   * the user is building a slide deck, and a save must never fail, block, or
+   * wait on the network because a model could be scored from it.
+   */
+  const submitFeedback = useCallback(
+    async (song: Song, final: ParsedScore, diff: FeedbackDiff, verification: 'verified' | 'edited') => {
+      const evidence = evidenceRef.current.get(song.id);
+      const baseline = song.provenance?.baseline;
+      if (!evidence?.pageHash || !baseline) return;
+
+      const review = webReviewRef.current[song.id];
+      const finalHash = await hashText(canonicalScore(final));
+      queueFeedback({
+        id: crypto.randomUUID(),
+        pageHash: evidence.pageHash,
+        finalHash,
+        createdAt: new Date().toISOString(),
+        observations: evidence.observations,
+        baseline: {
+          title: baseline.title,
+          artist: baseline.artist,
+          key: baseline.key,
+          order: baseline.order,
+          sections: baseline.sections,
+        },
+        final,
+        webCandidates: (review?.candidates ?? []).map(feedbackCandidate),
+        selectedWebCandidateId: review?.selectedId,
+        diff,
+        verification,
+        // Scored here, against the answer the user stood behind. The proxy
+        // stores numbers, not judgements, so the comparison has to happen on
+        // the side that has both readings.
+        evaluations: evidence.observations.map((observation) => scoreObservation(observation, final)),
+      });
+    },
+    [],
+  );
+
+  /**
+   * The user pressing "save to library" — the only thing in the app that
+   * creates ground truth.
+   *
+   * Confirming the machine's answer unchanged is as informative as correcting
+   * it: it is the only evidence a model read a page RIGHT. So both outcomes
+   * are recorded, distinguished by the diff against what recognition produced.
+   * Everything after the library write is best-effort and never blocks it.
+   */
   const handleSaveToLibrary = useCallback(
     (song: Song) => {
-      const entry = saveToLibrary(song);
-      if (entry) showToast(`'${entry.title}' 을(를) 라이브러리에 저장했습니다.`);
+      const baseline = song.provenance?.baseline;
+      const final: ParsedScore = {
+        title: song.title.trim() || undefined,
+        artist: song.artist,
+        key: song.key,
+        order: [...song.order],
+        sections: structuredClone(song.sections),
+      };
+      const diff = baseline
+        ? diffFeedback(
+            { title: baseline.title, artist: baseline.artist, key: baseline.key, order: baseline.order, sections: baseline.sections },
+            final,
+          )
+        : undefined;
+      // With no recorded baseline this song never went through recognition
+      // (typed by hand, or pulled from the library), so there is nothing to
+      // have corrected — the user's copy is simply verified.
+      const verification = diff ? verificationFor(diff) : 'verified';
+
+      const entry = saveToLibrary(song, verification);
+      if (!entry) return;
+      setSongs((current) =>
+        current.map((candidate) =>
+          candidate.id === song.id
+            ? { ...candidate, verification, version: entry.version }
+            : candidate,
+        ),
+      );
+      showToast(
+        verification === 'verified'
+          ? `'${entry.title}' 을(를) 검증된 가사로 저장했습니다.`
+          : `'${entry.title}' 수정본을 학습 자료로 저장했습니다.`,
+      );
+
+      if (!diff || !song.provenance?.pageHash) return;
+      void submitFeedback(song, final, diff, verification).catch(() => {
+        // Learning is best-effort: a save is never allowed to fail because a
+        // training record could not be built or sent.
+      });
     },
-    [saveToLibrary],
+    [saveToLibrary, submitFeedback],
   );
 
   const removeFromUserLibrary = useCallback((title: string) => {

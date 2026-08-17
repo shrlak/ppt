@@ -44,3 +44,23 @@ export function mergeModelEvaluation(
   now?: Date,
 ): ModelReliabilityRecord;
 export function publicModelStats(value: ModelReliabilityRecord): Record<string, unknown>;
+
+export interface FeedbackExampleRecord {
+  id: string;
+  pageHash: string;
+  finalHash: string;
+  createdAt: string;
+  observations: unknown[];
+  baseline: unknown;
+  final: unknown;
+  webCandidates: unknown[];
+  selectedWebCandidateId?: string;
+  diff: unknown;
+  verification: 'verified' | 'edited';
+  evaluations: ModelEvaluation[];
+}
+
+export const MAX_FEEDBACK_RECORDS: number;
+
+export function sanitizeFeedbackExample(raw: unknown): FeedbackExampleRecord | null;
+export function feedbackKey(example: { pageHash: string; finalHash: string }): string;

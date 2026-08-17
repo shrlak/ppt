@@ -23,6 +23,9 @@ export declare class UsageTracker {
   upsertLyricsEntry(rawEntry: unknown): Promise<LyricsLibraryEntry>;
   deleteLyricsEntry(title: unknown): Promise<void>;
   modelStats(): Promise<Record<string, unknown>[]>;
+  recordFeedback(
+    rawExample: unknown,
+  ): Promise<{ stored: boolean; duplicate: boolean; modelStats: Record<string, unknown>[] }>;
   recordModelEvaluation(
     rawEvaluations: ModelEvaluation[] | unknown,
     at?: string,
