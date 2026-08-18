@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   classifyPages,
+  continuesCover,
   findCoverPages,
   looksLikeCoverText,
   deriveSongsFromMusicPages,
@@ -164,6 +165,36 @@ describe('findCoverPages', () => {
   it('has no cover to find in a conti of nothing but scores', () => {
     expect(findCoverPages(['I - V - C', 'I - V - C'])).toEqual([]);
   });
+
+  it('follows a write-up that runs onto a third page', () => {
+    // The tail of the commentary: too little prose to read as an information
+    // page on its own, but its `• 제목 (Key)` bullets are cover marks all the
+    // same. Left out of the cover it would be recognized as a fourth song.
+    const bulletTail = ['\u2022 \uc785\ub840 (F -> G)', 'o \uc785\ub840\uacf1\uc785\ub2c8\ub2e4.'].join('\n');
+    const pages = [coverTableText, continuationText, bulletTail, 'I - V - C - junk OCR'];
+    expect(findCoverPages(pages)).toEqual([1, 2, 3]);
+  });
+
+  it('ends the cover at the first page of sheet music', () => {
+    // A write-up page that turns up AFTER the scores have started is not part
+    // of the cover — the cover is the leading run, not every typed page.
+    expect(findCoverPages([coverTableText, 'I - V - C - junk OCR', continuationText])).toEqual([1]);
+  });
+});
+
+describe('continuesCover', () => {
+  it('stops at a score page', () => {
+    expect(continuesCover('I - V - C - junk OCR')).toBe(false);
+    // A lyric line opening with 말씀 matches the 본문 label; only a real
+    // chapter/verse after it makes the page part of the write-up.
+    expect(continuesCover('\ub9d0\uc500 \uadf8\ub300\ub85c \uc0b4\uc544\uac00\ub9ac\ub77c')).toBe(false);
+    expect(continuesCover('\ubcf8\ubb38 | \uc804\ub3c4\uc11c 12\uc7a5 1-8\uc808')).toBe(true);
+  });
+
+  it('never takes the session-notes page for part of the cover', () => {
+    // It repeats the song list, and parseCoverText refuses any text with it.
+    expect(continuesCover(notesText)).toBe(false);
+  });
 });
 
 describe('classifyPages', () => {
@@ -240,6 +271,19 @@ describe('classifyPages', () => {
     ]);
     expect(coverPages).toEqual([2]);
     expect(musicPages).toEqual([1, 3]);
+  });
+
+  it('starts the music pages at the first score page, however long the cover', () => {
+    const bulletTail = ['\u2022 \uc785\ub840 (F -> G)', 'o \uc785\ub840\uacf1\uc785\ub2c8\ub2e4.'].join('\n');
+    const { coverPages, musicPages } = classifyPages([
+      coverTableText,
+      continuationText,
+      bulletTail,
+      'I - V - C - junk one',
+      'I - V - C - junk two',
+    ]);
+    expect(coverPages).toEqual([1, 2, 3]);
+    expect(musicPages).toEqual([4, 5]);
   });
 
   it('leaves a score page with a lyric text layer alone', () => {

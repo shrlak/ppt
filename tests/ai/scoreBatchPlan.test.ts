@@ -12,34 +12,41 @@ const library: LibraryEntry[] = [
 ];
 
 describe('planScoreBatch', () => {
-  it('stops saved titles after the title pass and sends only unknown songs to lyrics', () => {
+  it('pairs a page with the saved entry it might be, without ending the page there', () => {
     const plan = planScoreBatch(
       [
-        { title: '주님의 사랑', order: [], sections: [] },
-        { title: '처음 보는 노래', order: [], sections: [] },
+        { title: '\uc8fc\ub2d8\uc758 \uc0ac\ub791', order: [], sections: [] },
+        { title: '\ucc98\uc74c \ubcf4\ub294 \ub178\ub798', order: [], sections: [] },
       ],
-      ['새 찬양 (p.2)', '새 찬양 (p.3)'],
+      ['\uc0c8 \ucc2c\uc591 (p.2)', '\uc0c8 \ucc2c\uc591 (p.3)'],
       library,
     );
 
-    expect(plan.libraryMatches[0]).toBe(library[0]);
-    expect(plan.libraryMatches[1]).toBeUndefined();
-    expect(plan.lyricIndexes).toEqual([1]);
+    expect(plan.libraryCandidates[0]).toBe(library[0]);
+    expect(plan.libraryCandidates[1]).toBeUndefined();
   });
 
   it('uses the conti title when title recognition is blank', () => {
-    const plan = planScoreBatch([{ order: [], sections: [] }], ['주님의 사랑'], library);
-    expect(plan.libraryMatches[0]).toBe(library[0]);
-    expect(plan.lyricIndexes).toEqual([]);
+    const plan = planScoreBatch([{ order: [], sections: [] }], ['\uc8fc\ub2d8\uc758 \uc0ac\ub791'], library);
+    expect(plan.libraryCandidates[0]).toBe(library[0]);
   });
 
   it('prefers the newly recognized title over a stale conti title', () => {
     const plan = planScoreBatch(
-      [{ title: '처음 보는 노래', order: [], sections: [] }],
-      ['주님의 사랑'],
+      [{ title: '\ucc98\uc74c \ubcf4\ub294 \ub178\ub798', order: [], sections: [] }],
+      ['\uc8fc\ub2d8\uc758 \uc0ac\ub791'],
       library,
     );
-    expect(plan.libraryMatches[0]).toBeUndefined();
-    expect(plan.lyricIndexes).toEqual([0]);
+    expect(plan.libraryCandidates[0]).toBeUndefined();
+  });
+
+  it('never offers an entry whose title merely resembles the recognized one', () => {
+    // A near miss is a different song, and its lyrics are the wrong lyrics.
+    const plan = planScoreBatch(
+      [{ title: '\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c', order: [], sections: [] }],
+      [''],
+      library,
+    );
+    expect(plan.libraryCandidates[0]).toBeUndefined();
   });
 });

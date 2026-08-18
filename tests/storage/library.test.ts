@@ -38,6 +38,16 @@ describe('mergeLibraries', () => {
 });
 
 describe('findEntry', () => {
+  it('never answers with a title that merely resembles the one asked for', () => {
+    // "\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c" is a different song; loading its
+    // words would put lyrics the page never had on the screen.
+    const shelf = [entry('\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c')];
+    expect(findEntry(shelf, '\uc8fc\ub2d8\uc758 \uc0ac\ub791')).toBeUndefined();
+    expect(findEntry(shelf, '\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c')?.title).toBe(
+      '\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c',
+    );
+  });
+
   it('finds by normalized title', () => {
     expect(findEntry([entry('주님의 사랑')], '주님의사랑')?.title).toBe('주님의 사랑');
     expect(findEntry([entry('주님의 사랑')], '없는 곡')).toBeUndefined();
