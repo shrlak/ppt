@@ -3,20 +3,26 @@ import type { LibraryEntry } from '../utils/types';
 import type { ParsedScore } from './scoreParser';
 
 export interface ScoreBatchPlan {
-  /** Saved entry for each page, aligned to the title-recognition results. */
-  libraryMatches: (LibraryEntry | undefined)[];
-  /** Only these page indexes still need the expensive full-lyrics pass. */
-  lyricIndexes: number[];
+  /**
+   * The saved entry each page MIGHT be, aligned to the title-recognition
+   * results. A candidate only becomes the page's lyrics once the full pass has
+   * read the page and found the same words there.
+   */
+  libraryCandidates: (LibraryEntry | undefined)[];
 }
 
 /**
- * Decide which score pages can stop after title recognition. A recognized
- * title takes priority; the title already parsed from the conti is the
- * fallback.
+ * Pair each score page with the saved entry that could stand in for it. A
+ * recognized title takes priority; the title already parsed from the conti is
+ * the fallback.
  *
- * Only a saved entry somebody confirmed can end a page here. Skipping
- * recognition on a draft would make one unchecked reading permanent, since
- * nothing would ever read that page again.
+ * A candidate never ends a page here. Titles agreeing is not the same as the
+ * page carrying those lyrics — two songs share a name, a title is misread, a
+ * conti lists last week's arrangement — so every page still goes through the
+ * lyrics pass, and the saved copy is used only where the two readings match.
+ *
+ * Only a saved entry somebody confirmed can be a candidate at all: reusing a
+ * draft would make one unchecked reading permanent.
  */
 export function planScoreBatch(
   identities: ParsedScore[],
@@ -24,16 +30,13 @@ export function planScoreBatch(
   library: LibraryEntry[],
 ): ScoreBatchPlan {
   const count = Math.max(identities.length, fallbackTitles.length);
-  const libraryMatches: (LibraryEntry | undefined)[] = [];
-  const lyricIndexes: number[] = [];
+  const libraryCandidates: (LibraryEntry | undefined)[] = [];
 
   for (let index = 0; index < count; index++) {
     const title = identities[index]?.title?.trim() || fallbackTitles[index]?.trim() || '';
     const artist = identities[index]?.artist?.trim();
-    const match = title ? findReusableEntry(library, { title, artist }) : undefined;
-    libraryMatches.push(match);
-    if (!match) lyricIndexes.push(index);
+    libraryCandidates.push(title ? findReusableEntry(library, { title, artist }) : undefined);
   }
 
-  return { libraryMatches, lyricIndexes };
+  return { libraryCandidates };
 }

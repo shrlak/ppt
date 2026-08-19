@@ -340,48 +340,35 @@ export function mergeLibraries(bundled: LibraryEntry[], user: LibraryEntry[]): L
 }
 
 /**
- * Find a library entry by title. Tries an exact normalized match first, then
- * falls back to a substring match (either direction) so small OCR/typing
- * differences — a stray numbering prefix, a dropped word — still find the
- * song, consistent with the fuzzy match already used for un-covered pages.
+ * The saved entry whose title is the one asked for, or none.
+ *
+ * Titles are compared normalized, so spacing, case and punctuation do not
+ * matter — but the words do. A near miss is a different song: "주 은혜임을"
+ * must not answer with "주 은혜임을 아네", because loading that entry puts
+ * lyrics the page never had on the screen. This is also the identity
+ * upsertEntry writes by, so a save replaces exactly what a load finds.
  */
 export function findEntry(library: LibraryEntry[], title: string): LibraryEntry | undefined {
   const want = normalizeTitle(title);
   if (!want) return undefined;
-  const exact = library.find((e) => normalizeTitle(e.title) === want);
-  if (exact) return exact;
-  if (want.length < 2) return undefined;
-  return library.find((e) => {
-    const t = normalizeTitle(e.title);
-    return t.length >= 2 && (want.includes(t) || t.includes(want));
-  });
+  return library.find((e) => normalizeTitle(e.title) === want);
 }
 
 /**
- * The saved entry that may stand in for recognizing a page, including a
- * near-miss title.
+ * The saved entry that may stand in for a page, once the page confirms it.
  *
- * Same fuzzy allowance as findEntry — a stray numbering prefix or a dropped
- * word should still find the song — but restricted to entries somebody
- * confirmed. A draft matched this way would let one bad reading of a title
- * pull in one bad reading of the lyrics, permanently.
+ * Title equality is exact and the entry must be one somebody confirmed: a
+ * draft is a machine's guess, and reusing one would let a single bad reading
+ * become permanent. Even then this is only a CANDIDATE — the caller has to
+ * see the same lyrics on the page before the saved copy replaces what was
+ * read there. Without both checks a conti quietly gets the lyrics of whatever
+ * song the library happened to have under a similar name.
  */
 export function findReusableEntry(
   library: LibraryEntry[],
   identity: SongIdentity,
 ): LibraryEntry | undefined {
-  const exact = selectReusableEntry(library, identity);
-  if (exact) return exact;
-  const want = normalizeTitle(identity.title ?? '');
-  if (want.length < 2) return undefined;
-  const wantedArtist = identity.artist ? normalizeTitle(identity.artist) : '';
-  return library
-    .filter(isGroundTruth)
-    .filter((entry) => !wantedArtist || !entry.artist || normalizeTitle(entry.artist) === wantedArtist)
-    .find((entry) => {
-      const title = normalizeTitle(entry.title);
-      return title.length >= 2 && (want.includes(title) || title.includes(want));
-    });
+  return selectReusableEntry(library, identity);
 }
 
 /**

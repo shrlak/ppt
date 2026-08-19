@@ -87,9 +87,9 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
     }
   }
 
-  const { coverPages, musicPages } = classifyPages(pageTexts);
-  // The cover is read as ONE document even when it spans two pages: a song
-  // table on the first page and its commentary bullets on the second belong
+  const { coverPages, infoPages, musicPages } = classifyPages(pageTexts);
+  // The cover is read as ONE document however many pages it spans: a song
+  // table on the first page and its commentary bullets on the next belong
   // to the same list, and parsing them separately loses the pairing.
   const coverText = coverPages.map((page) => pageTexts[page - 1]).join('\n');
   const info: ContiInfo = (coverPages.length > 0 ? parseCoverText(coverText) : null) ?? { songs: [] };
@@ -99,12 +99,14 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   const fromCover = parseSermonInfoText(coverText);
   info.sermonTitle ??= fromCover.sermonTitle;
   info.scripture ??= fromCover.scripture;
-  // Failing that, a conti may put them on a page of their own. Read any
-  // embedded PDF text now; image-only pages are handled by vision models
-  // during the title/classification pass.
-  for (const pageText of pageTexts) {
+  // Failing that, a conti may put them on a typed page of their own. Only
+  // pages that carry no score are read: a sheet-music text layer can open a
+  // lyric line with 말씀, and reading that as the 본문 puts a lyric into the
+  // Bible step. Image-only pages are handled by vision models during the
+  // title/classification pass.
+  for (const page of infoPages) {
     if (info.sermonTitle && info.scripture) break;
-    const detected = parseSermonInfoText(pageText);
+    const detected = parseSermonInfoText(pageTexts[page - 1]);
     info.sermonTitle ??= detected.sermonTitle;
     info.scripture ??= detected.scripture;
   }

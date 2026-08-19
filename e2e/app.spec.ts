@@ -1186,7 +1186,7 @@ test.describe('learning admin dashboard', () => {
 });
 
 test.describe('adaptive learning loop', () => {
-  test('escalates, reviews, verifies, and then skips recognition entirely', async ({ page }) => {
+  test('escalates, reviews, verifies, and then re-reads the page before reusing the saved copy', async ({ page }) => {
     // Champion 0 reads the page one syllable differently from the other two,
     // which is what sends the page to a challenger.
     const correct = ['가나다라 마바사 아자차', '카타파하 그 이름 높이'];
@@ -1262,17 +1262,25 @@ test.describe('adaptive learning loop', () => {
     await card.getByRole('button', { name: '라이브러리에 저장' }).click();
     await expect(card.getByTestId('song-trust')).toHaveText(/검증됨/);
 
-    // Reload with the same conti: a verified entry is reused as it stands, so
-    // no model and no web lookup are asked about it again.
-    const before = { gemini: counts.gemini, openrouter: counts.openrouter, lyrics: counts.lyrics };
+    // Reload with the same conti: a saved entry no longer stands in for the
+    // page on its title alone. Nothing is loaded before the page has been
+    // read, and the saved copy is used only where it says the same thing —
+    // here the hand-corrected line is one syllable from what the models read,
+    // so the page's own reading is what lands.
+    // `answered` is what says the models were asked: this test's own routes
+    // replace the counting ones, so counts stay flat however often they run.
     answered.length = 0;
     await page.reload();
     await uploadExamplePdf(page);
     const reopened = page.getByTestId('song-card').first();
-    await expect(reopened.getByTestId('section-textarea').first()).toHaveValue(/카타파하 그 이름 높여/);
-    expect(answered).toEqual([]);
-    expect(counts.lyrics).toBe(before.lyrics);
-    expect(counts.gemini).toBe(before.gemini);
-    expect(counts.openrouter).toBe(before.openrouter);
+    await expect(reopened).toBeVisible({ timeout: PARSE_TIMEOUT });
+    await expect(reopened.getByTestId('section-textarea')).toHaveCount(0);
+
+    await recognizeFirstSong(page);
+    expect(answered.length).toBeGreaterThan(0);
+    await reopened.getByTestId('web-candidate').first().click();
+    await expect(reopened.getByTestId('section-textarea').first()).toHaveValue(
+      new RegExp(correct[1]),
+    );
   });
 });

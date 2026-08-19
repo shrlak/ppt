@@ -127,7 +127,15 @@ export default function SongCard({
 
   function addSection(label: string) {
     const finalLabel = label ? nextAvailableLabel(song.sections.map((s) => s.label), label) : '';
-    onChange({ ...song, sections: [...song.sections, { label: finalLabel, lines: [] }] });
+    // A part the user just added belongs in the 순서 too. planSlides plans the
+    // order when there is one, so without this the lyrics typed into the new
+    // part appear on no slide at all — and the only way to find that out is to
+    // notice the preview never changed.
+    const order =
+      finalLabel && !song.order.some((token) => token.trim().toUpperCase() === finalLabel.toUpperCase())
+        ? [...song.order, finalLabel]
+        : song.order;
+    onChange({ ...song, order, sections: [...song.sections, { label: finalLabel, lines: [] }] });
   }
 
   function removeSection(i: number) {

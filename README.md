@@ -84,11 +84,17 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 찬양 콘티 PDF를 업로드하면 파트별 가사 슬라이드를 자동으로 만듭니다.
 
 - **페이지 종류·예배 정보 자동 인식** — 각 PDF 페이지에서 먼저 오선과 음표가 있는지 확인합니다.
-  악보 페이지에서만 찬양 제목·키·가사를 읽고, 악보가 없는 페이지에서는 **설교 제목과 본문**만 읽어
-  성경 말씀 단계에 자동 입력합니다. 날짜와 곡 목록은 텍스트가 있는 표지에서도 즉시 읽어옵니다.
+  **악보가 시작되는 페이지부터** 찬양 제목·키·가사를 읽고, 그 앞의 페이지는 몇 장이든 모두 표지로
+  묶어 **설교 제목과 본문**을 찾아 성경 말씀 단계에 자동 입력합니다. 콘티 설명이 두세 장으로
+  이어져도 한 문서로 읽으므로, 표지 뒷장이 없는 곡으로 잡히지 않습니다. 날짜와 곡 목록은 텍스트가
+  있는 표지에서도 즉시 읽어옵니다.
 - **표지가 없어도 OK** — 표지를 인식하지 못한 콘티는 표지를 건너뛰고 **악보 페이지 순서 그대로** 곡을
-  정리합니다. 각 악보 페이지가 한 곡이 되며(라이브러리에 있으면 제목·가사를 자동으로 채움), 마지막
+  정리합니다. 각 악보 페이지가 한 곡이 되며(라이브러리에 있으면 제목·키를 자동으로 채움), 마지막
   악보는 공동체 고백송으로 제외합니다.
+- **라이브러리 가사는 확인된 뒤에만 불러오기** — 저장된 가사는 **제목이 완전히 같고**(띄어쓰기·대소문자·
+  문장부호만 무시) **악보에서 읽은 가사까지 같을 때만** 불러옵니다. 제목만 비슷한 다른 곡의 가사가
+  슬쩍 들어오지 않도록, 악보 페이지가 있는 곡은 인식을 먼저 거칩니다. 두 가사가 다르면 악보에서
+  읽은 쪽이 남습니다.
 - **파트별 가사 관리** — V/PC/C/B/I 등 파트 이름을 자유롭게 정하고 순서를 지정합니다. 실제
   예배에서는 절·후렴이 여러 번 반복되므로, 슬라이드는 콘티 순서를 그대로 펼치지 않고 **각 파트를
   최소 1장씩만** 생성합니다 (반복은 진행자가 화면에서 되돌아가며 사용). 슬라이드 순서는 콘티에
@@ -238,8 +244,8 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 
 - **구절 입력** — `행1:8-10 요3:16 롬8:28` 처럼 여러 구절을 공백으로 구분해 입력합니다. 입력하는
   즉시 인식된 구절 목록을 미리 보여줍니다.
-- **콘티 자동 입력** — 찬양 콘티를 업로드하면 표지의 본문과 설교 제목이 성경 말씀 1·2단계에
-  자동으로 채워집니다 (`로마서 5장 1-11절` → `롬5:1-11`).
+- **콘티 자동 입력** — 찬양 콘티를 업로드하면 표지(악보 앞의 모든 페이지)의 본문과 설교 제목이
+  성경 말씀 1·2단계에 자동으로 채워집니다 (`로마서 5장 1-11절` → `롬5:1-11`).
 - **번역본** — 한국어(개역개정·개역한글·새번역)와 영어(ESV·NIV·KJV) 중 최대 2개를 함께 표시할 수
   있습니다.
 - **설교 제목** — 선택 입력. 비워두면 해당 자리에 빈칸으로 표시됩니다.
@@ -339,8 +345,9 @@ are mandatory; the prayer and announcement layouts come from `public/service-tem
 download filename is generated automatically from that week's Sunday in `MMDD.pptx` format.
 
 1. **Praise lyrics** — a praise set-list (콘티) PDF becomes per-section lyric slides. Auto-detects
-   date, sermon title, song list, and keys from the cover page, pre-fills lyrics from a bundled
-   song library, excludes the final community-confession song, and supports section tokens
+   date, sermon title, song list, and keys from the cover — every page before the sheet music
+   starts, however many that is — reuses a saved song's lyrics once the page is shown to carry the
+   same ones, excludes the final community-confession song, and supports section tokens
    (V/PC/C/B/I) — each part renders once, in its first-appearance order.
 2. **Scripture** (ported from
    [edcho1012/kccp-bible-slide](https://github.com/edcho1012/kccp-bible-slide)) — free-text verse

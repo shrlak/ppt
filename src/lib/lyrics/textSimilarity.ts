@@ -33,6 +33,26 @@ export function lineSimilarity(a: string, b: string): number {
   return bagSimilarity(bag(a), bag(b));
 }
 
+/**
+ * Are two readings of a song the same lyrics?
+ *
+ * Compared line by line through lineKey, so spacing, punctuation, case and
+ * where the lines were split into parts do not matter — those are the things a
+ * printed score and a saved copy legitimately differ on. A different word, a
+ * missing line or the verses in another order is a different reading.
+ *
+ * This is what lets a saved entry stand in for a page: the saved wording may
+ * only replace what was recognized once the page is shown to say the same
+ * thing. Two empty readings confirm nothing, so they are never equal.
+ */
+export function sameLyrics(a: Section[], b: Section[]): boolean {
+  const flatten = (sections: Section[]) =>
+    sections.flatMap((section) => section.lines.map(lineKey)).filter((line) => line.length > 0);
+  const left = flatten(a);
+  const right = flatten(b);
+  return left.length > 0 && left.length === right.length && left.every((line, i) => line === right[i]);
+}
+
 /** Word bag of a section list, for comparing two readings of the same lyrics. */
 export function wordCounts(sections: Section[]): Map<string, number> {
   const counts = new Map<string, number>();

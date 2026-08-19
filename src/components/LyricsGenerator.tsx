@@ -50,6 +50,7 @@ import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
+import { sameLyrics } from '../lib/lyrics/textSimilarity';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
@@ -703,6 +704,11 @@ export default function LyricsGenerator({
         );
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
+        // The saved entry each page might turn out to be. It is held until the
+        // lyrics pass has read the page: a matching title is not evidence that
+        // the page carries those lyrics, and swapping them in on the title
+        // alone is how a conti ends up with a song it never had.
+        const libraryCandidates = new Map<string, LibraryEntry>();
         const titlePlan = planScoreBatch(
           aliasedTitles,
           active.map((song) => song.title),
@@ -721,14 +727,11 @@ export default function LyricsGenerator({
             resolvedIds.add(song.id);
             return;
           }
-          const hit = titlePlan.libraryMatches[index];
-          if (hit) {
-            resolvedIds.add(song.id);
-            fillFromLibrary(song, hit);
-            return;
-          }
-          // Pages that already came from the library still participate in
-          // classification, but never need the expensive full-lyrics pass.
+          const candidate = titlePlan.libraryCandidates[index];
+          if (candidate) libraryCandidates.set(song.id, candidate);
+          // A song that already has lyrics has them from the user or from a
+          // restored deck — both are authoritative, so the page is classified
+          // but never read again.
           if (songHasLyrics(song)) {
             markDone([song.id], 'library');
             return;
@@ -856,11 +859,18 @@ export default function LyricsGenerator({
             continue;
           }
           const aliased = recognizedTitle ? resolveTitleAlias(recognizedTitle, memory) : '';
-          const hit = aliased ? findReusableEntry(libraryRef.current, { title: aliased }) : undefined;
-          if (hit) {
+          const saved =
+            (aliased
+              ? findReusableEntry(libraryRef.current, { title: aliased, artist: score.artist })
+              : undefined) ?? libraryCandidates.get(song.id);
+          // The saved copy replaces what was read only when the page says the
+          // same thing. Where they differ the page wins: it is this week's
+          // arrangement, and the library may be holding another song that
+          // happens to share the title.
+          if (saved && sameLyrics(saved.sections, score.sections)) {
             scoreById.delete(song.id);
             resolvedIds.add(song.id);
-            fillFromLibrary(song, hit);
+            fillFromLibrary(song, saved);
           }
         }
 
@@ -929,12 +939,15 @@ export default function LyricsGenerator({
                 return;
               }
               const aliasedTitle = mergedTitle ? resolveTitleAlias(mergedTitle, memoryRef.current) : '';
-              const hit = aliasedTitle
-                ? findReusableEntry(libraryRef.current, { title: aliasedTitle })
-                : undefined;
-              if (hit) {
+              const saved =
+                (aliasedTitle
+                  ? findReusableEntry(libraryRef.current, { title: aliasedTitle, artist: merged.artist })
+                  : undefined) ?? libraryCandidates.get(song.id);
+              // Same rule as the batch path: identical title AND identical
+              // lyrics, or the page's own reading stands.
+              if (saved && sameLyrics(saved.sections, merged.sections)) {
                 resolvedIds.add(song.id);
-                fillFromLibrary(song, hit);
+                fillFromLibrary(song, saved);
                 return;
               }
               if (merged.sections.length === 0) {
@@ -994,15 +1007,12 @@ export default function LyricsGenerator({
   const handleRecognizeClick = useCallback(
     (song: Song) => {
       if (song.pageIndex == null) return;
-      const hit = song.title.trim() ? findEntry(libraryRef.current, song.title) : undefined;
-      if (hit) {
-        fillFromLibrary(song, hit);
-        return;
-      }
+      // Read the page even when the library knows this title: the saved lyrics
+      // are loaded only where the page turns out to carry the same ones.
       scanCancelledRef.current.delete(song.id);
       void recognizeSongsBatch([song]);
     },
-    [fillFromLibrary, recognizeSongsBatch],
+    [recognizeSongsBatch],
   );
 
   /** Stop an accidentally started scan: discard its result and reset the card. */
@@ -1343,7 +1353,12 @@ export default function LyricsGenerator({
       if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
       for (const entry of lyricsSongs) {
-        const hit = findEntry(lib, entry.title);
+        // A song with a score page waits for recognition: nothing has read the
+        // page yet, so there is no way to tell whether the saved lyrics are the
+        // ones printed on it. A song the conti lists with no score page will
+        // never be read at all — there the saved copy, under exactly this
+        // title, is all there is.
+        const hit = entry.pageIndex == null ? findEntry(lib, entry.title) : undefined;
         const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
         song.title = entry.title;
         song.key = entry.key ?? song.key;
@@ -1363,7 +1378,12 @@ export default function LyricsGenerator({
         });
         if (hit) {
           if (confessionSong && normalizeTitle(hit.title) === normalizeTitle(confessionSong.title)) continue;
-          next.push(songFromLibrary(hit, page));
+          // The page text names the song; its lyrics still come from reading
+          // the score, and the saved copy only stands in if the two agree.
+          const named = blankSong(hit.title);
+          named.key = hit.key;
+          named.pageIndex = page;
+          next.push(named);
         } else {
           const stub = blankSong(`새 찬양 (p.${page})`);
           stub.pageIndex = page;

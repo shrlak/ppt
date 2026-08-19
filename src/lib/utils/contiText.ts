@@ -283,17 +283,6 @@ export function looksLikeInfoPage(text: string): boolean {
 }
 
 /**
- * How far into a conti the cover can reach.
- *
- * A cover is the first page, or the first two when the write-up runs over.
- * Bounding the search is what stops a later page from being mistaken for one:
- * a score page carrying a stray 본문 line, or the printed-passage section, can
- * otherwise look cover-shaped, and a wrong cover takes the whole song list
- * with it.
- */
-export const MAX_COVER_PAGES = 2;
-
-/**
  * Does this page read as a conti cover?
  *
  * Two independent signals, because covers are laid out differently from week
@@ -318,22 +307,83 @@ export function looksLikeCoverText(text: string): boolean {
 }
 
 /**
- * The one or two leading pages that make up the cover, or an empty list.
+ * How far into a conti the cover can START.
  *
- * A second page joins the cover either on its own merits or as the typed
- * continuation of the first — the write-up commonly spills over, carrying the
- * last song's commentary and the printed 본문. Reading both as one cover is
- * what keeps that commentary attached to its song.
+ * The cover is normally page 1; a conti that opens with a decorative title
+ * page puts it on page 2. Bounding where it may begin is what stops a later
+ * page from being mistaken for one: a score page carrying a stray 본문 line,
+ * or the printed-passage section, can otherwise look cover-shaped, and a
+ * wrong cover takes the whole song list with it.
+ *
+ * How far the cover REACHES is not bounded — see findCoverPages.
+ */
+export const MAX_COVER_START_PAGE = 2;
+
+/**
+ * Does this page carry a mark that only a service write-up has?
+ *
+ * Used to follow a cover onto its later pages, where the page can be too
+ * sparse to read as an information page on its own — the tail of the
+ * commentary bullets, or a lone 본문 section. Every mark here is one a score
+ * page cannot produce: a labeled service field whose value really is a
+ * chapter/verse, the song table's own heading, or a `• 제목 (F -> G)`
+ * commentary bullet whose parenthesis holds a musical key.
+ *
+ * The value checks are what keep it off a score: a lyric line beginning
+ * "말씀 …" matches the 본문 label pattern, and only requiring a chapter/verse
+ * after it tells the two apart.
+ */
+function hasCoverMark(text: string): boolean {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const scripture = line.match(SCRIPTURE_RE);
+    if (scripture && SCRIPTURE_VALUE_RE.test(scripture[1])) return true;
+    if (SERMON_TITLE_RE.test(line) || SERMON_THEME_RE.test(line) || DATE_LABEL_RE.test(line)) return true;
+    if (TABLE_HEADER_RE.test(line) || SONG_SECTION_RE.test(line)) return true;
+    const bullet = line.match(SONG_BULLET_RE);
+    if (bullet && normalizeKeyChain(bullet[2])) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this page continue the cover that started before it?
+ *
+ * Anything typed belongs to the cover: a second cover-shaped page, a page of
+ * write-up prose, or a sparse page that only carries a cover mark. A page
+ * that shows none of those is where the sheet music starts — which is where
+ * the cover ends. The session-notes page is never part of it: it repeats the
+ * song list, and parseCoverText refuses any text containing it.
+ */
+export function continuesCover(text: string): boolean {
+  if (NOTES_RE.test(text)) return false;
+  return looksLikeCoverText(text) || looksLikeInfoPage(text) || hasCoverMark(text);
+}
+
+/**
+ * Every page of the cover: the run of leading pages up to the sheet music.
+ *
+ * The cover is one document however many pages it takes. A conti's write-up
+ * commonly runs past the first page — the last songs' commentary, the printed
+ * 본문 — and each of those pages is read as part of the cover rather than as a
+ * score. That is what keeps the commentary attached to its song, gives the
+ * sermon title and 본문 a chance to be read wherever in the write-up they were
+ * typed, and stops a write-up page from being recognized as an imaginary song.
+ *
+ * Only where the cover BEGINS is bounded (MAX_COVER_START_PAGE); it then
+ * reaches forward until a page reads as neither cover nor write-up, which is
+ * the first page of sheet music.
  */
 export function findCoverPages(pageTexts: string[]): number[] {
-  const limit = Math.min(MAX_COVER_PAGES, pageTexts.length);
-  const pages: number[] = [];
-  for (let page = 1; page <= limit; page++) {
-    if (looksLikeCoverText(pageTexts[page - 1])) pages.push(page);
-  }
-  if (pages.length === 0) return [];
-  if (pages.length === 1 && pages[0] === 1 && limit >= 2 && looksLikeInfoPage(pageTexts[1])) {
-    pages.push(2);
+  const start = pageTexts.findIndex(
+    (text, index) => index < MAX_COVER_START_PAGE && looksLikeCoverText(text),
+  );
+  if (start === -1) return [];
+  const pages = [start + 1];
+  for (let page = start + 2; page <= pageTexts.length; page++) {
+    if (!continuesCover(pageTexts[page - 1])) break;
+    pages.push(page);
   }
   return pages;
 }
