@@ -47,6 +47,7 @@ export default function AdditionalFilesSection({ value, onChange }: Props) {
       <button
         type="button"
         className={`dropzone${dragging ? ' dragover' : ''}`}
+        data-testid="additional-dropzone"
         onClick={() => inputRef.current?.click()}
         onDragEnter={() => setDragging(true)}
         onDragLeave={() => setDragging(false)}

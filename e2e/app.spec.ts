@@ -65,6 +65,40 @@ async function makeImageFixtures(page: Page): Promise<{ png: Buffer; jpeg: Buffe
   };
 }
 
+interface DraggedFile {
+  name: string;
+  mimeType: string;
+  base64: string;
+}
+
+/** Playwright cannot drag a file in from the OS, so the drag events carry a
+    real DataTransfer built inside the page. */
+async function fileDragTransfer(page: Page, files: DraggedFile[]) {
+  return page.evaluateHandle((entries) => {
+    const transfer = new DataTransfer();
+    for (const entry of entries) {
+      const binary = atob(entry.base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      transfer.items.add(new File([bytes], entry.name, { type: entry.mimeType }));
+    }
+    return transfer;
+  }, files);
+}
+
+async function fixtureFile(filePath: string, name: string, mimeType: string): Promise<DraggedFile> {
+  return { name, mimeType, base64: (await fs.readFile(filePath)).toString('base64') };
+}
+
+async function dropFilesOn(page: Page, testId: string, files: DraggedFile[]): Promise<void> {
+  const dataTransfer = await fileDragTransfer(page, files);
+  const target = testId === 'body' ? page.locator('body') : page.getByTestId(testId);
+  await target.dispatchEvent('dragenter', { dataTransfer });
+  await target.dispatchEvent('dragover', { dataTransfer });
+  await target.dispatchEvent('drop', { dataTransfer });
+  await dataTransfer.dispose();
+}
+
 async function moveFromLyricsToDownload(page: Page): Promise<void> {
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('wizard-next-bible').click();
@@ -1282,5 +1316,71 @@ test.describe('adaptive learning loop', () => {
     await expect(reopened.getByTestId('section-textarea').first()).toHaveValue(
       new RegExp(correct[1]),
     );
+  });
+});
+
+test.describe('콘티 dropped anywhere on the page', () => {
+  test('is read as the 콘티 even when another step is open, and shows that step', async ({
+    page,
+  }) => {
+    await page.goto('./');
+    await page.getByTestId('wizard-tab-announcement').click();
+    await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
+
+    await dropFilesOn(page, 'body', [
+      await fixtureFile(SAMPLE_PDF, 'conti-example.pdf', 'application/pdf'),
+    ]);
+
+    // The 찬양 step comes back up: it is where the upload just started.
+    await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+    await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+    await expect(page.getByTestId('conti-info')).toContainText('하나님과 화평을 누리자', {
+      timeout: PARSE_TIMEOUT,
+    });
+  });
+
+  test('says so while the file is over the page, and only while it is', async ({ page }) => {
+    await page.goto('./');
+    await page.getByTestId('wizard-tab-bible').click();
+    const dataTransfer = await fileDragTransfer(page, [
+      { name: 'conti.pdf', mimeType: 'application/pdf', base64: '' },
+    ]);
+    const body = page.locator('body');
+
+    await body.dispatchEvent('dragenter', { dataTransfer });
+    await body.dispatchEvent('dragover', { dataTransfer });
+    await expect(page.getByTestId('drop-anywhere-overlay')).toBeVisible();
+
+    await body.dispatchEvent('dragleave', { dataTransfer });
+    await expect(page.getByTestId('drop-anywhere-overlay')).toBeHidden();
+    await dataTransfer.dispose();
+  });
+
+  test('leaves a file dropped on another step\'s own dropzone to that step', async ({ page }) => {
+    await page.goto('./');
+    await page.getByTestId('wizard-tab-additional').click();
+
+    // A PDF is exactly the overlap: 추가 자료 takes PDFs too, and the zone the
+    // file was aimed at must win over the window-wide 콘티 handler.
+    await dropFilesOn(page, 'additional-dropzone', [
+      await fixtureFile(SAMPLE_PDF, 'handout.pdf', 'application/pdf'),
+    ]);
+
+    await expect(page.getByTestId('additional-file-row')).toHaveCount(1, {
+      timeout: PARSE_TIMEOUT,
+    });
+    await expect(page.getByTestId('additional-file-row').first()).toContainText('handout.pdf');
+    await expect(page.getByTestId('wizard-panel-additional')).toBeVisible();
+    await expect(page.getByTestId('conti-info')).toHaveCount(0);
+  });
+
+  test('says which files it cannot use instead of silently ignoring them', async ({ page }) => {
+    await page.goto('./');
+    await dropFilesOn(page, 'body', [
+      await fixtureFile(SERMON_PPTX, 'sermon.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+    ]);
+
+    await expect(page.getByText('찬양 콘티는 PDF 파일만 올릴 수 있습니다.')).toBeVisible();
+    await expect(page.getByTestId('conti-info')).toHaveCount(0);
   });
 });
