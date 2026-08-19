@@ -61,9 +61,12 @@ describe('structureScrapedLyrics', () => {
     expect(sections.map((s) => s.label)).toEqual(['V', 'C', 'V2']);
   });
 
-  it('normalizes the scraped text to 한국어 맞춤법', () => {
-    const sections = structureScrapedLyrics(['1절', '주님 을 찬-양 합니다', '내가 함께 할께']);
-    expect(sections[0].lines).toEqual(['주님을 찬양 합니다', '내가 함께 할게']);
+  it('takes the page’s text exactly as published', () => {
+    // The page's own 띄어쓰기, hyphens and spelling all survive: a published
+    // page is the authority on the words, so nothing here rewrites them.
+    const published = ['가나다 라 마바사', '아자차-카타-파하', '할께 노래해'];
+    const sections = structureScrapedLyrics(['1절', ...published]);
+    expect(sections[0].lines).toEqual(published);
   });
 
   it('never emits two parts with the same label', () => {

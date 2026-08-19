@@ -5,8 +5,9 @@
 // the scoring (it is the only side that sees the pages). What crosses the wire
 // back is a small ranked list, because several different Korean worship songs
 // share a title and picking the wrong page would replace a conti's lyrics with
-// a different song's. Structuring and 맞춤법 normalization happen here, next to
-// the rest of the editor's parsing rules.
+// a different song's. Structuring happens here, next to the rest of the
+// editor's parsing rules; the words are not touched at all, because a scraped
+// page goes into the editor 그대로 (see koreanSpelling).
 import type { Section } from '../utils/types';
 import { orderForSections, structureScrapedLyrics } from './lyricsStructure';
 
@@ -25,7 +26,7 @@ export interface ScoredLyricsCandidate {
   id: string;
   title: string;
   artist?: string;
-  /** Parts as published, already normalized to 한국어 맞춤법. */
+  /** Parts exactly as the page published them, split up but not rewritten. */
   sections: Section[];
   /** Fallback play order covering each part once. */
   order: string[];

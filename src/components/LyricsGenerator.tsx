@@ -554,8 +554,9 @@ export default function LyricsGenerator({
        * reconcile them with the score (see mergeWebLyrics — the score keeps
        * the part labels and 진행 순서, the web supplies the wording). Songs
        * that came from the library never get here, so a saved song is never
-       * rewritten. Every lookup is best-effort: a failure just leaves the
-       * score's own reading in place, normalized to 한국어 맞춤법.
+       * rewritten. A line taken from the page goes in exactly as published;
+       * only the score's own reading is normalized to 한국어 띄어쓰기·맞춤법,
+       * and a failed lookup simply leaves that normalized reading in place.
        */
       const runWebLyricsPass = async () => {
         const pending = [...webQueue.entries()].filter(([id]) => !isCancelled(id));
