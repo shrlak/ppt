@@ -7,8 +7,11 @@
 // several times. This module recovers that structure and nothing more — the
 // score still decides how many times each part is actually sung, because only
 // the conti knows that.
+//
+// The words themselves are left exactly as the page printed them — its
+// 띄어쓰기, punctuation and spelling all come through untouched.
 import type { Section } from '../utils/types';
-import { normalizeKoreanLyricLines } from './koreanSpelling';
+import { cleanScrapedLyricLines } from './koreanSpelling';
 
 /** A line that is only a part heading, e.g. "1절", "[후렴]", "Verse 2:". */
 const PART_HEADING =
@@ -86,7 +89,9 @@ export function structureScrapedLyrics(rawLines: string[]): Section[] {
   const counts = new Map<string, number>();
   const sections: Section[] = [];
   for (const group of groups) {
-    const body = normalizeKoreanLyricLines(group.lines);
+    // Verbatim: a published page is the authority on the words, so the only
+    // thing removed here is transport noise (see cleanScrapedLyricLines).
+    const body = cleanScrapedLyricLines(group.lines);
     if (body.length === 0) continue;
     if (group.family === 'I') continue; // 간주 has no lyrics to show
 

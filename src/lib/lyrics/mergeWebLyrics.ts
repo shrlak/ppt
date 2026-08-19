@@ -8,7 +8,9 @@
 //     labeled, and the 진행 순서 that repeats them. Only the conti knows that,
 //     and a published lyric page never does.
 //   · The web decides the WORDS — a page of type beats OCR of small lyric
-//     type under a staff, and it comes already spelled correctly.
+//     type under a staff, and it comes already spelled correctly. A published
+//     line therefore goes in exactly as the page printed it; only the
+//     recognized lines that the page has no counterpart for are normalized.
 //
 // So a recognized part keeps its label and its place in the order, and gets
 // the published wording when the two are clearly the same part. A part the
@@ -16,7 +18,7 @@
 // printing extra verses is not a reason to sing them.
 import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from '../utils/types';
-import { normalizeKoreanLyricLines } from './koreanSpelling';
+import { normalizeRecognizedLyricLines } from './koreanSpelling';
 import { lineSimilarity, sectionSimilarity } from './textSimilarity';
 import type { LyricsSourceLink, ScoredLyricsCandidate } from './webLyrics';
 
@@ -152,14 +154,15 @@ function pairParts(recognized: Section[], published: Section[]): Map<number, num
  *
  * Never mutates its inputs. Always safe to call: with no lookup result, or
  * one that matches nothing, the score comes back unchanged apart from having
- * its lyrics normalized to 한국어 맞춤법.
+ * its own reading normalized to 한국어 띄어쓰기·맞춤법.
  */
 export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | null): WebLyricsMerge {
-  // The recognized reading is normalized either way — this whole path only
-  // runs for songs that are new to the library.
+  // The recognized reading gets its 띄어쓰기·맞춤법 pass either way, web hit or
+  // not — a score's spacing follows its noteheads, so it always needs one.
+  // This whole path only runs for songs that are new to the library.
   const normalized: Section[] = score.sections.map((section) => ({
     label: section.label,
-    lines: normalizeKoreanLyricLines(section.lines),
+    lines: normalizeRecognizedLyricLines(section.lines),
   }));
 
   if (!web || web.sections.length === 0) {
