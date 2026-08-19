@@ -1270,6 +1270,61 @@ main[data-direction='back'] .wizard-panel.active {
   font-size: var(--text-sm);
 }
 
+/* Dropping a 콘티 does not need aim: the whole window takes it, and this hint
+   says so while a file is over the page. It never takes pointer events, so the
+   real dropzones underneath still receive the drop they were aimed at. */
+.drop-anywhere {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-5);
+  pointer-events: none;
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: drop-anywhere-in 0.12s var(--ease);
+}
+.drop-anywhere-card {
+  max-width: min(420px, 100%);
+  padding: var(--s-8) var(--s-6);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+  color: var(--accent);
+}
+.drop-anywhere-title {
+  margin: var(--s-3) 0 var(--s-2);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink);
+  /* Korean wraps mid-word by default; break at spaces instead. */
+  word-break: keep-all;
+}
+.drop-anywhere-sub {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  word-break: keep-all;
+}
+@keyframes drop-anywhere-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drop-anywhere {
+    animation: none;
+  }
+}
+
 .visually-hidden-input {
   position: absolute;
   width: 1px;

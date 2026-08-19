@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
@@ -55,6 +56,7 @@ import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
+import { dragCarriesFiles, readContiDrop } from '../lib/utils/fileDrop';
 import Icon from './Icon';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -153,6 +155,11 @@ interface Props {
   restoreSongs?: Song[] | null;
   /** Its archived 콘티 PDF, re-parsed when the entry predates saved songs. */
   restoreConti?: { name: string; data: ArrayBuffer } | null;
+  /**
+   * Fired when a 콘티 was dropped somewhere outside this step, so the parent can
+   * bring the 찬양 step into view — the upload it just started happens here.
+   */
+  onContiDropAnywhere?: () => void;
 }
 
 export default function LyricsGenerator({
@@ -163,6 +170,7 @@ export default function LyricsGenerator({
   restoreVersion = 0,
   restoreSongs = null,
   restoreConti = null,
+  onContiDropAnywhere,
 }: Props) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
@@ -208,6 +216,8 @@ export default function LyricsGenerator({
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  // A file is being dragged over the window, anywhere — not just the dropzone.
+  const [fileDragOverWindow, setFileDragOverWindow] = useState(false);
   // Latest library, for use inside callbacks that must stay referentially stable.
   const libraryRef = useRef<LibraryEntry[]>([]);
   useEffect(() => {
@@ -1457,6 +1467,82 @@ export default function LyricsGenerator({
     }
   }
 
+  // Latest handleFile, for the window-wide listener that must not be torn down
+  // and rebuilt on every render.
+  const handleFileRef = useRef(handleFile);
+  useEffect(() => {
+    handleFileRef.current = handleFile;
+  });
+
+  /**
+   * 콘티는 화면 어디에 놓아도 열린다.
+   *
+   * 업로드 상자를 정확히 겨냥하지 않아도, 다른 단계를 보고 있어도, PDF를 창 안
+   * 아무 곳에나 떨어뜨리면 그대로 콘티로 읽는다. 이미 자기 영역에서 받은
+   * 드롭(콘티 상자·설교 PPT·추가 자료)은 그 핸들러가 preventDefault()를 부른
+   * 뒤에야 이 리스너가 돌기 때문에 여기서 도로 가져가지 않는다.
+   */
+  useEffect(() => {
+    // dragenter/dragleave fire in pairs as the pointer crosses nested elements;
+    // counting them keeps the hint up until the drag really leaves the window.
+    let depth = 0;
+    // dragover repeats every few milliseconds — only tell React on a change.
+    let shown = false;
+    function show() {
+      if (shown) return;
+      shown = true;
+      setFileDragOverWindow(true);
+    }
+    function endDrag() {
+      depth = 0;
+      if (!shown) return;
+      shown = false;
+      setFileDragOverWindow(false);
+    }
+    function onDragEnter(event: DragEvent) {
+      if (!dragCarriesFiles(event.dataTransfer)) return;
+      depth += 1;
+      show();
+    }
+    function onDragOver(event: DragEvent) {
+      if (!dragCarriesFiles(event.dataTransfer)) return;
+      // Without this the browser refuses the drop and opens the file instead.
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      show();
+    }
+    function onDragLeave() {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) endDrag();
+    }
+    function onDrop(event: DragEvent) {
+      endDrag();
+      if (event.defaultPrevented) return;
+      const drop = readContiDrop(event.dataTransfer?.files);
+      if (drop.kind === 'empty') return;
+      // Keep the browser from opening the file and throwing the work away.
+      event.preventDefault();
+      if (drop.kind === 'unsupported') {
+        showToast('찬양 콘티는 PDF 파일만 올릴 수 있습니다.', 'error');
+        return;
+      }
+      onContiDropAnywhere?.();
+      void handleFileRef.current(drop.file);
+    }
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('dragend', endDrag);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragleave', onDragLeave);
+      window.removeEventListener('dragend', endDrag);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [onContiDropAnywhere]);
+
   function updateSong(next: Song) {
     setEdited(true);
     setSongs((list) => list.map((s) => (s.id === next.id ? next : s)));
@@ -1709,6 +1795,23 @@ export default function LyricsGenerator({
           </div>
         </Modal>
       )}
+
+      {/* The window-wide hint lives on <body>: this step is display:none while
+          another wizard step is open, and a drop is welcome there too. It never
+          takes pointer events, so every real dropzone under it still wins. */}
+      {fileDragOverWindow &&
+        createPortal(
+          <div className="drop-anywhere" data-testid="drop-anywhere-overlay" aria-hidden="true">
+            <div className="drop-anywhere-card">
+              <Icon name="file" large />
+              <p className="drop-anywhere-title">찬양 콘티 PDF를 화면 아무 곳에나 놓으세요</p>
+              <p className="drop-anywhere-sub">
+                설교 PPT와 추가 자료는 각 단계의 업로드 상자에 그대로 놓으면 됩니다.
+              </p>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

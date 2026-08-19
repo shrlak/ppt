@@ -706,6 +706,25 @@ export default function App() {
   // data loaded) — shown as a "+" lower bound instead of a false-precise number.
   const totalSlideCount = fixedSlideCount + lyricsSlideCount + announcementItems.length + additionalSlideCount;
 
+  /**
+   * A 콘티 dropped anywhere on the page is still uploaded by the 찬양 step, so
+   * bring that step into view — otherwise the parsing spinner, the worship info
+   * and the songs it just produced all appear on a page nobody is looking at.
+   */
+  const showLyricsStep = useCallback(() => {
+    if (viewMode === 'wizard' && activeStep !== 0) {
+      setDirection('back');
+      setActiveStep(0);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // Already on screen — the 찬양 step, or the 편집기 view that shows every step
+    // at once. Bring the upload box itself up instead of switching anything.
+    document
+      .querySelector('[data-testid="upload-dropzone"]')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [viewMode, activeStep]);
+
   function moveToStep(step: number) {
     setDirection(step >= activeStep ? 'forward' : 'back');
     setActiveStep(step);
@@ -904,6 +923,7 @@ export default function App() {
                 restoreVersion={restore.version}
                 restoreSongs={restore.songs}
                 restoreConti={restore.conti}
+                onContiDropAnywhere={showLyricsStep}
               />
               {viewMode === 'wizard' && <WizardNavigation step={0} onMove={moveToStep} />}
             </section>
