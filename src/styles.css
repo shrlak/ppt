@@ -1,19 +1,23 @@
 /* ==========================================================================
-   KCCP PPT Generator — design system
+   KCCP PPT Generator — "Studio" design system
 
-   Layered the way the TypeUI fundamentals ask for: tokens first, then the
-   principles that decide which token goes where.
+   A structural, high-contrast look: an ink→violet chrome bar over a cool
+   lavender canvas, squared geometry, and a monospaced voice for every
+   number and micro-label. Layered the way the fundamentals ask for: tokens
+   first, then the principles that decide which token goes where.
 
    - Spacing is a 4-point grid (--s-*). No off-grid values.
-   - Type is a 1.2 modular scale snapped to the grid, with the mandated
-     floors: 16px for body/headings/button labels, 14px for section support
-     text, sub-14px only for true micro UI (badges, pills, chips).
+   - Type pairs one sans (IBM Plex Sans KR — Latin and Hangul in one family)
+     with one mono (JetBrains Mono) reserved for counters, step numbers and
+     letterspaced labels. Scale is 1.2, snapped to the grid, with the
+     mandated floors: 16px for body/headings/button labels, 14px for section
+     support text, sub-14px only for true micro UI (badges, pills, chips).
    - Every control shares one base height token so buttons that sit next to
      each other — and inputs paired with them — line up exactly, and every
      touch target clears 44px.
-   - Colour tokens are the app's own green/neutral family, shifted along
-     their own lightness axis until they meet WCAG 2.2 AA. Nothing foreign
-     was introduced to pass a ratio. Measured ratios are noted inline.
+   - Colour is a violet/lavender-neutral family shifted along its own
+     lightness axis until it meets WCAG 2.2 AA. Measured ratios are noted
+     inline.
    ========================================================================== */
 
 *,
@@ -37,7 +41,18 @@
   --s-12: 48px;
   --s-16: 64px;
 
-  /* ---- Type: base 16px, ratio 1.2, snapped to the 4-point grid --------- */
+  /* ---- Type ------------------------------------------------------------
+     Both families ship every weight the UI uses (400/500/600/700), so no
+     weight is ever synthesised. The stacks degrade to the platform faces
+     when the webfont never arrives. */
+  --font-sans:
+    'IBM Plex Sans KR', 'IBM Plex Sans', 'Pretendard', 'Noto Sans KR', 'Apple SD Gothic Neo',
+    'Malgun Gothic', system-ui, sans-serif;
+  --font-mono:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    monospace;
+
+  /* base 16px, ratio 1.2, snapped to the 4-point grid */
   --text-xs: 0.75rem; /* 12px — badges / pills / micro only */
   --text-sm: 0.875rem; /* 14px — section support text floor */
   --text-base: 1rem; /* 16px — body, headings, button labels floor */
@@ -45,20 +60,27 @@
   --text-lg: 1.25rem; /* 20px — card titles cap */
   --text-xl: 1.5rem; /* 24px — widget titles cap */
   --text-2xl: 1.75rem; /* 28px — app page-title cap */
+  --text-3xl: 2.25rem; /* 36px — section opener display line */
 
-  --lh-display: 1;
+  --lh-display: 1.05;
   --lh-tight: 1.2;
   --lh-snug: 1.35;
-  --lh-body: 1.5;
+  --lh-body: 1.6;
+
+  /* The mono voice: never body copy, only counters, step numbers and the
+     letterspaced labels that open a section. */
+  --track-label: 0.12em;
 
   /* Heading → paragraph is a fixed 32px so the heading reads as bound to
      the copy under it, and stays tighter than section-to-section rhythm. */
   --heading-gap: var(--s-8);
 
-  /* ---- Radius --------------------------------------------------------- */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* ---- Radius ----------------------------------------------------------
+     Squared-off: the whole product steps 6 → 10 → 14 so panels read as
+     built rather than blown up. Pill is reserved for status dots. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
   --radius: var(--radius-lg);
 
@@ -77,130 +99,158 @@
   --focus-offset: 2px;
 
   /* ---- Colour --------------------------------------------------------- */
-  --accent: #496554; /* white label on accent = 6.42:1 */
-  --accent-hover: #40594a; /* 7.65:1 */
-  --accent-active: #384d40; /* 9.12:1 */
-  --accent-dark: #344b3c; /* accent-family text tone */
-  --accent-soft: #edf2ee;
-  --accent-glow: rgba(73, 101, 84, 0.28);
+  --accent: #5538d6; /* white label on accent = 7.18:1 */
+  --accent-hover: #4c31c7; /* 8.17:1 */
+  --accent-active: #402ba8; /* 9.86:1 */
+  --accent-dark: #4327b8; /* accent-family text tone — 9.46:1 on surface */
+  --accent-soft: #eeeafd;
+  --accent-glow: rgba(85, 56, 214, 0.3);
   --on-accent: #ffffff;
 
-  --ink: #202522; /* 15.57:1 on surface */
-  --ink-muted: #626a65; /* 5.57:1 on surface */
-  --ink-faint: #6c736f; /* 4.86:1 on surface, 4.53:1 on canvas */
+  /* Second brand hue. Carries emphasis that must not read as "primary
+     action": counters, live badges, the current-step marker. */
+  --spark: #f97316; /* decorative fill only, never a text colour */
+  --spark-ink: #b3400d; /* 5.74:1 on surface, 5.16:1 on canvas */
+  --spark-soft: #fff2ec;
 
-  --hairline: #d9dfdb; /* decorative separators only — never a control edge */
+  --ink: #16151f; /* 18.09:1 on surface */
+  --ink-muted: #5b5870; /* 6.83:1 on surface */
+  --ink-faint: #6a6780; /* 5.43:1 on surface, 4.88:1 on canvas */
+
+  --hairline: #e3e1ec; /* decorative separators only — never a control edge */
   --surface: #ffffff;
-  --surface-hover: #f0f2f0;
-  --canvas: #f6f7f6;
+  --surface-hover: #f4f3f9;
+  --canvas: #f3f2f8;
 
   /* Fields must stay visible against the surface they sit on, so they get
      their own fill and a border that clears 3:1 (SC 1.4.11) rather than
      borrowing the decorative hairline. */
-  --field: #fbfcfb;
-  --field-border: #7b9082; /* 3.41:1 on surface, 3.18:1 on canvas */
-  --field-border-strong: #5f7466;
-  --focus-ring: #496554; /* 6.42:1 on surface */
+  --field: #fafafd;
+  --field-border: #8a86a3; /* 3.49:1 on surface, 3.13:1 on canvas */
+  --field-border-strong: #6f6a8c;
+  --focus-ring: #5538d6; /* 7.18:1 on surface */
 
-  --danger-bg: #fff5f4;
-  --danger-border: #c2564a;
-  --danger-ink: #9b342a; /* 6.72:1 on danger-bg */
-  --warn-bg: #fbf8ed;
-  --warn-border: #b08b2a;
-  --warn-ink: #765d12; /* 5.91:1 on warn-bg */
+  /* App chrome. The bar is a solid ink→violet ramp, so its own text tones
+     are measured against the lightest stop of that ramp. */
+  --chrome: linear-gradient(112deg, #1b1436 0%, #2f2273 46%, #5538d6 100%);
+  --chrome-ink: #ffffff; /* 7.18:1 on the lightest stop */
+  --chrome-ink-muted: #d6d0f5; /* 4.86:1 on the lightest stop */
+  --chrome-line: rgba(255, 255, 255, 0.16);
+  --chrome-fill: rgba(255, 255, 255, 0.1);
+  --chrome-fill-hover: rgba(255, 255, 255, 0.2);
+
+  --danger-bg: #fdf3f4;
+  --danger-border: #d1453b;
+  --danger-ink: #a3261f; /* 6.76:1 on danger-bg */
+  --warn-bg: #fdf9ee;
+  --warn-border: #c48a12;
+  --warn-ink: #7c5c07; /* 5.89:1 on warn-bg */
   --notice-bg: var(--accent-soft);
-  --notice-border: #93a99b;
-  --notice-ink: var(--accent-dark);
-  --ok-ink: #15803d; /* 5.02:1 on surface */
-  --alert-ink: #b45309; /* 4.68:1 on canvas */
-  --alert-bg: rgba(180, 83, 9, 0.08);
-  --alert-border: rgba(180, 83, 9, 0.3);
-  --info-ink: #4338ca;
-  --info-bg: #eef2ff;
-  --leaf-ink: #4d7c0f;
-  --leaf-bg: rgba(118, 185, 0, 0.16);
+  --notice-border: #b9aef6;
+  --notice-ink: var(--accent-dark); /* 8.02:1 on notice-bg */
+  --ok-ink: #0f766e; /* 5.47:1 on surface */
+  --alert-ink: #b3400d; /* 5.16:1 on canvas */
+  --alert-bg: rgba(249, 115, 22, 0.1);
+  --alert-border: rgba(249, 115, 22, 0.34);
+  --info-ink: #3730a3; /* 8.43:1 on info-bg */
+  --info-bg: #eaeafb;
+  --leaf-ink: #0f766e; /* 4.92:1 on its own tint */
+  --leaf-bg: rgba(15, 118, 110, 0.12);
 
-  --dropzone-border: #849388; /* 3.23:1 on surface */
-  --scrollbar-thumb: #a7b1aa;
+  --dropzone-border: #8a86a3; /* 3.49:1 on surface */
+  --scrollbar-thumb: #b9b5cc;
 
-  --shadow-xs: 0 1px 2px rgba(16, 24, 20, 0.05);
-  --shadow-sm: 0 1px 3px rgba(16, 24, 20, 0.07), 0 1px 2px rgba(16, 24, 20, 0.04);
-  --shadow-md: 0 8px 24px rgba(16, 24, 20, 0.09);
-  --shadow-lg: 0 20px 60px rgba(20, 30, 24, 0.16);
+  /* Shadows are tight and violet-cast — the elevation reads as a printed
+     drop rather than a soft glow. */
+  --shadow-xs: 0 1px 0 rgba(22, 21, 31, 0.05);
+  --shadow-sm: 0 1px 2px rgba(28, 22, 61, 0.07), 0 2px 8px -4px rgba(28, 22, 61, 0.1);
+  --shadow-md: 0 12px 28px -12px rgba(28, 22, 61, 0.28);
+  --shadow-lg: 0 32px 64px -24px rgba(28, 22, 61, 0.45);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* Custom chevron for native selects — the OS glyph is stripped so selects
      match every other field's inset, fill and states. */
-  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23626a65' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b5870' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
 
   /* Measured height of the sticky header, written by App on resize. Anchors
      and scrollIntoView() land below the bar instead of under it. */
   --header-h: 96px;
-  --content-max: 880px;
+  --content-max: 920px;
   --content-max-wide: 1400px;
   --page-gutter: clamp(var(--s-4), 2vw, var(--s-6));
 
   /* Fixed regardless of theme: represents the actual (always-white) PPTX
      slide canvas in mini previews, not the surrounding app UI. */
   --slide-canvas: #ffffff;
-  --slide-ink: #202522;
+  --slide-ink: #16151f;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #5fb98a;
-    --accent-hover: #74c29a;
-    --accent-active: #4cad7b;
-    --accent-dark: #8fd4ab;
-    --accent-soft: rgba(95, 185, 138, 0.14);
-    --accent-glow: rgba(95, 185, 138, 0.35);
-    /* White on the dark-mode accent is only 2.39:1. The contrast is flipped
-       instead: dark ink on the light accent reads 6.99:1. */
-    --on-accent: #12211a;
+    --accent: #a78bfa;
+    --accent-hover: #b8a1fc;
+    --accent-active: #9575f8;
+    --accent-dark: #c4b5fd; /* 9.71:1 on surface */
+    --accent-soft: rgba(167, 139, 250, 0.16);
+    --accent-glow: rgba(167, 139, 250, 0.4);
+    /* White on the dark-mode accent is only 1.87:1. The contrast is flipped
+       instead: dark ink on the light accent reads 6.77:1. */
+    --on-accent: #16121f;
 
-    --ink: #e7ece8; /* 13.97:1 on surface */
-    --ink-muted: #9aa39d; /* 6.45:1 on surface */
-    --ink-faint: #8c958f; /* 5.25:1 on surface, 4.53:1 on hover */
+    --spark: #fb923c;
+    --spark-ink: #fdba74; /* 10.55:1 on surface */
+    --spark-soft: rgba(251, 146, 60, 0.14);
 
-    --hairline: #333b36;
-    --surface: #1c221e;
-    --surface-hover: #262e28;
-    --canvas: #0e1110;
+    --ink: #ecebf3; /* 15.15:1 on surface */
+    --ink-muted: #a09cb5; /* 6.76:1 on surface */
+    --ink-faint: #948fab; /* 5.79:1 on surface, 5.29:1 on hover */
 
-    --field: #171c19;
-    --field-border: #69796d; /* 3.51:1 on surface, 4.12:1 on canvas */
-    --field-border-strong: #7d8e82;
-    --focus-ring: #5fb98a; /* 7.00:1 on surface */
+    --hairline: #2c2a38;
+    --surface: #17161f;
+    --surface-hover: #201e2b;
+    --canvas: #0b0a11;
 
-    --danger-bg: rgba(155, 52, 42, 0.18);
-    --danger-border: #8a463c;
-    --danger-ink: #ff9c8c; /* 8.26:1 on surface */
-    --warn-bg: rgba(118, 93, 18, 0.18);
-    --warn-border: #7d6626;
-    --warn-ink: #e8c86b; /* 10.27:1 on surface */
+    --field: #121119;
+    --field-border: #6e6989; /* 3.45:1 on surface, 3.80:1 on canvas */
+    --field-border-strong: #7c7799;
+    --focus-ring: #a78bfa; /* 6.59:1 on surface */
+
+    --chrome: linear-gradient(112deg, #0c0b14 0%, #1d1836 50%, #35276e 100%);
+    --chrome-ink: #f4f2fd; /* 11.38:1 on the lightest stop */
+    --chrome-ink-muted: #c3bce2; /* 6.97:1 on the lightest stop */
+    --chrome-line: rgba(255, 255, 255, 0.12);
+    --chrome-fill: rgba(255, 255, 255, 0.08);
+    --chrome-fill-hover: rgba(255, 255, 255, 0.16);
+
+    --danger-bg: rgba(163, 38, 31, 0.2);
+    --danger-border: #8c4038;
+    --danger-ink: #ff9c8c; /* 8.87:1 on surface */
+    --warn-bg: rgba(124, 92, 7, 0.2);
+    --warn-border: #7a6320;
+    --warn-ink: #e8c86b; /* 11.02:1 on surface */
     --notice-bg: var(--accent-soft);
-    --notice-border: #3d5c49;
+    --notice-border: #4a3d86;
     --notice-ink: var(--accent-dark);
-    --ok-ink: #1caa52; /* 5.34:1 on surface */
-    --alert-ink: #ed6e0c; /* 4.59:1 on its own tint over surface */
-    --alert-bg: rgba(216, 100, 11, 0.12);
-    --alert-border: rgba(216, 100, 11, 0.35);
-    --info-ink: #938ce1; /* 4.57:1 on its own tint */
-    --info-bg: rgba(130, 122, 220, 0.14);
-    --leaf-ink: #6eb015; /* 4.59:1 on its own tint */
-    --leaf-bg: rgba(118, 185, 0, 0.16);
+    --ok-ink: #5eead4; /* 12.12:1 on surface */
+    --alert-ink: #fb923c; /* 7.92:1 on surface */
+    --alert-bg: rgba(251, 146, 60, 0.12);
+    --alert-border: rgba(251, 146, 60, 0.35);
+    --info-ink: #a5b4fc; /* 9.00:1 on surface */
+    --info-bg: rgba(99, 102, 241, 0.16);
+    --leaf-ink: #5eead4;
+    --leaf-bg: rgba(45, 212, 191, 0.14);
 
-    --dropzone-border: #616e65; /* 3.03:1 on surface */
-    --scrollbar-thumb: #414a44;
+    --dropzone-border: #6e6989; /* 3.45:1 on surface */
+    --scrollbar-thumb: #3a3748;
 
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
-    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.55);
+    --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 8px -4px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 12px 28px -12px rgba(0, 0, 0, 0.7);
+    --shadow-lg: 0 32px 64px -24px rgba(0, 0, 0, 0.8);
 
-    --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa39d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+    --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a09cb5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   }
 }
 
@@ -211,17 +261,41 @@ html {
 
 body {
   margin: 0;
-  background: var(--canvas);
+  /* The canvas is not flat: two very wide, very low-opacity washes sit
+     behind the page so the white cards read as lifted off it. They are
+     fixed, so scrolling never drags a gradient seam through the content. */
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(85, 56, 214, 0.07), transparent 60%),
+    radial-gradient(90% 60% at 0% 8%, rgba(249, 115, 22, 0.06), transparent 55%), var(--canvas);
+  background-attachment: fixed;
   color: var(--ink);
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Pretendard',
-    'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--lh-body);
-  letter-spacing: -0.012em;
+  letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+/* The mono voice. Applied by class, never inherited — it marks counters,
+   step numbers and the letterspaced label that opens a section. */
+.mono,
+.wizard-kicker,
+.step,
+.song-number,
+.slide-overview-number,
+.additional-file-position,
+.preview-count,
+.slide-count,
+.deck-editor-count,
+.deck-editor-row-index,
+.mini-slide-label,
+.split-page-number,
+.wizard-step-dot,
+.brand-footer {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 ::selection {
@@ -352,18 +426,29 @@ a.btn {
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
   padding: var(--s-4);
 }
 .slide-overview-header {
   margin: 0 0 var(--s-3);
 }
 .slide-overview-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   margin: 0;
-  font-size: var(--text-base);
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: 700;
   line-height: var(--lh-tight);
+  letter-spacing: var(--track-label);
   white-space: nowrap;
+}
+.slide-overview-title::before {
+  content: '';
+  flex: none;
+  width: var(--s-1);
+  height: 1.1em;
+  border-radius: 1px;
+  background: var(--accent);
 }
 .slide-overview-actions {
   display: flex;
@@ -466,7 +551,7 @@ a.btn {
 }
 .slide-overview-label {
   font-size: var(--text-sm);
-  font-weight: 550;
+  font-weight: 500;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -562,9 +647,11 @@ a.btn {
 }
 
 /* ==========================================================================
-   Header — app chrome, not a marketing hero. Its inner content is capped to
-   the same width as the page content below it, so the logo and the action
-   cluster land on the same two edges as every card.
+   Header — app chrome, not a marketing hero. It is the one solid, dark
+   surface in the product: an ink→violet ramp that anchors the page and
+   makes every white card below it read as paper on a desk. Its inner
+   content is capped to the same width as the page content, so the logo and
+   the action cluster land on the same two edges as every card.
    ========================================================================== */
 
 .header {
@@ -572,27 +659,38 @@ a.btn {
   top: 0;
   z-index: 40;
   overflow: hidden;
-  background: color-mix(in srgb, var(--canvas) 72%, transparent);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  isolation: isolate;
+  background: var(--chrome);
+  color: var(--chrome-ink);
   border-bottom: 1px solid transparent;
-  transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+  transition: box-shadow 0.3s var(--ease), padding 0.3s var(--ease);
 }
+/* A single diagonal light streak across the ramp. Decorative only: it sits
+   behind the content and carries no meaning. */
 .header::before {
   content: '';
   position: absolute;
   z-index: -1;
-  top: -120px;
-  left: -10%;
-  right: -10%;
-  height: 260px;
-  background: radial-gradient(60% 100% at 28% 100%, var(--accent-glow), transparent 70%);
-  filter: blur(20px);
+  inset: 0;
+  background:
+    linear-gradient(74deg, transparent 38%, rgba(255, 255, 255, 0.09) 50%, transparent 62%),
+    radial-gradient(70% 180% at 92% 0%, rgba(249, 115, 22, 0.34), transparent 62%);
+  pointer-events: none;
+}
+/* Hairline rule at the foot of the bar, always on — the scrolled state
+   deepens the shadow instead of introducing a new edge. */
+.header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--chrome-line);
   pointer-events: none;
 }
 .header.header-scrolled {
-  border-bottom-color: var(--hairline);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
 }
 .header-inner {
   display: flex;
@@ -601,7 +699,7 @@ a.btn {
   gap: var(--s-3) var(--s-4);
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--s-5) var(--page-gutter) var(--s-4);
+  padding: var(--s-5) var(--page-gutter) var(--s-5);
   transition: padding 0.3s var(--ease);
 }
 /* 편집기 view widens the content column; the bar follows it so the brand and
@@ -616,12 +714,16 @@ a.btn {
   min-width: 0;
   flex: 1 1 380px;
 }
+/* The mark keeps its own white plate so the church logo never sits directly
+   on the violet ramp. Squared to match the rest of the geometry. */
 .header-logo {
   flex: none;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  box-shadow: var(--shadow-xs);
+  width: 46px;
+  height: 46px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.5);
   transition: width 0.3s var(--ease), height 0.3s var(--ease);
 }
 .header-scrolled .header-logo {
@@ -654,13 +756,13 @@ a.btn {
   font-size: clamp(var(--text-lg), 2.6vw, var(--text-2xl));
   font-weight: 700;
   line-height: var(--lh-display);
-  letter-spacing: -0.03em;
-  color: var(--ink);
+  letter-spacing: -0.02em;
+  color: var(--chrome-ink);
   transition: font-size 0.3s var(--ease);
 }
 .header p {
   margin: 0;
-  color: var(--ink-muted);
+  color: var(--chrome-ink-muted);
   font-size: var(--text-sm);
   transition: opacity 0.3s var(--ease), max-height 0.3s var(--ease);
 }
@@ -669,9 +771,31 @@ a.btn {
   max-height: 0;
   overflow: hidden;
 }
+/* Buttons on the dark bar. Same control contract as everywhere else — only
+   the surface under them changed, so only the fill and edge are restated. */
+.header .btn {
+  border-color: var(--chrome-line);
+  background: var(--chrome-fill);
+  color: var(--chrome-ink);
+  box-shadow: none;
+}
+.header .btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--chrome-fill-hover);
+  color: var(--chrome-ink);
+}
+.header .btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: none;
+}
+.header .btn:focus-visible {
+  outline-color: #ffffff;
+}
 
 /* ==========================================================================
-   Wizard progress
+   Wizard progress — a rail, not a segmented control. The steps sit directly
+   on the canvas, joined by a single track that fills to the step you are
+   on, so progress is legible before any label is read.
    ========================================================================== */
 
 .wizard-progress {
@@ -680,47 +804,56 @@ a.btn {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   list-style: none;
-  margin: var(--s-6) 0 0;
+  margin: var(--s-8) 0 0;
   padding: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-xs);
-  overflow: hidden;
 }
+/* The filled length of the track. Width follows the active index, so the
+   fill lands exactly on the centre of the current step's marker. */
 .wizard-progress::before {
   content: '';
   position: absolute;
   z-index: 0;
-  top: var(--s-1);
-  bottom: var(--s-1);
-  left: var(--s-1);
-  width: calc((100% - var(--s-2)) / 6);
-  /* Nested radius: 16px outer − 4px gap = 12px. */
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--notice-border);
-  transform: translateX(calc(var(--active-index, 0) * 100%));
-  transition: transform 0.45s var(--ease-smooth);
+  /* The track runs marker-centre to marker-centre — half a column in from
+     each end — so it never trails off past the first or last step. */
+  left: calc(100% / 12);
+  right: calc(100% / 12);
+  /* Marker centre: top padding + half the 28px marker. */
+  top: calc(var(--s-2) + 14px);
+  height: 2px;
+  background: var(--hairline);
+}
+.wizard-progress::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: calc(100% / 12);
+  top: calc(var(--s-2) + 14px);
+  height: 2px;
+  /* One column per completed step, so the fill lands on the centre of the
+     marker you are standing on. */
+  width: calc((100% / 6) * var(--active-index, 0));
+  background: linear-gradient(90deg, var(--accent), var(--spark));
+  transition: width 0.45s var(--ease-smooth);
 }
 .wizard-step {
   position: relative;
   z-index: 1;
   display: flex;
   min-width: 0;
-  color: var(--ink-muted);
+  color: var(--ink-faint);
   font-size: var(--text-sm);
   transition: color 0.3s var(--ease);
 }
 .wizard-step-button {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: var(--s-2);
   flex: 1;
   min-width: 0;
   min-height: var(--control-h);
-  padding: var(--s-2);
+  padding: var(--s-2) var(--s-1) var(--s-3);
   border: 0;
   background: none;
   color: inherit;
@@ -732,46 +865,61 @@ a.btn {
 .wizard-step:not(.current) .wizard-step-button:hover {
   color: var(--ink);
 }
+.wizard-step:not(.current) .wizard-step-button:hover .wizard-step-dot {
+  border-color: var(--field-border-strong);
+  color: var(--ink);
+}
 .wizard-step-button:focus-visible {
   outline-offset: calc(-1 * var(--focus-width));
   border-radius: var(--radius-md);
 }
 .wizard-step.current {
   color: var(--accent-dark);
-  font-weight: 650;
+  font-weight: 600;
 }
 .wizard-step.complete {
   color: var(--ink-muted);
 }
+/* Squared marker: the number is the step, so it is set in the mono voice
+   and the shape stays a rectangle like every other container. */
 .wizard-step-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: var(--s-6);
-  height: var(--s-6);
-  border: 1px solid currentColor;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  font-weight: 700;
   transition: transform 0.3s var(--ease-spring), background-color 0.2s var(--ease), border-color 0.2s var(--ease),
-    box-shadow 0.3s var(--ease);
+    color 0.2s var(--ease), box-shadow 0.3s var(--ease);
 }
 .wizard-step-dot .icon {
   width: 0.875rem;
   height: 0.875rem;
   vertical-align: 0;
 }
-.wizard-step.current .wizard-step-dot,
 .wizard-step.complete .wizard-step-dot {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
 }
 .wizard-step.current .wizard-step-dot {
-  transform: scale(1.1);
-  box-shadow: 0 0 0 var(--s-1) var(--accent-soft);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  transform: scale(1.14);
+  box-shadow: 0 0 0 var(--s-1) var(--accent-soft), var(--shadow-sm);
 }
+.wizard-step-label {
+  line-height: var(--lh-tight);
+  text-align: center;
+}
+
 main {
   /* Clips the step-change sweep so it can never open a horizontal
      scrollbar (a translated child still extends the scrollable area even
@@ -813,18 +961,18 @@ main[data-direction='back'] .wizard-panel.active {
   }
 }
 
-/* Section opener. Display-scale heading → line-height 1 and a fixed 32px
+/* Section opener. Display-scale heading → line-height 1.05 and a fixed 32px
    before the lead paragraph; the section rhythm above it stays looser. */
 .wizard-page-header {
-  margin: var(--s-12) 0 var(--s-6);
+  margin: var(--s-12) 0 var(--s-8);
 }
 .wizard-panel:first-child .wizard-page-header,
 .app:not(.app-editor-mode) .wizard-page-header {
   margin-top: var(--s-8);
 }
 .wizard-page-header h2 {
-  margin: var(--s-3) 0 var(--heading-gap);
-  font-size: clamp(var(--text-xl), 3vw, var(--text-2xl));
+  margin: var(--s-4) 0 var(--heading-gap);
+  font-size: clamp(var(--text-xl), 4vw, var(--text-3xl));
   font-weight: 700;
   line-height: var(--lh-display);
   letter-spacing: -0.03em;
@@ -835,58 +983,77 @@ main[data-direction='back'] .wizard-panel.active {
   color: var(--ink-muted);
   font-size: var(--text-base);
 }
+/* Step counter above the page heading: mono, letterspaced, led by a short
+   accent rule so it reads as an index rather than as copy. */
 .wizard-kicker {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   width: fit-content;
   margin: 0;
-  padding: var(--s-1) var(--s-3);
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft);
   color: var(--accent-dark);
   font-size: var(--text-xs);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
+}
+.wizard-kicker::before {
+  content: '';
+  width: var(--s-6);
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--spark));
 }
 .wizard-nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--s-3);
-  margin-top: var(--s-8);
+  margin-top: var(--s-10);
   padding-top: var(--s-5);
   border-top: 1px solid var(--hairline);
 }
 
+/* Tabs are an underline set, not a segmented pill — the active tab is
+   marked by a rule on the content edge it belongs to. */
 .tabbar {
   display: flex;
-  gap: var(--s-1);
-  background: var(--surface-hover);
-  border-radius: var(--radius-md);
-  padding: var(--s-1);
+  gap: var(--s-5);
+  border-bottom: 1px solid var(--hairline);
   margin-bottom: var(--s-8);
 }
 .tab {
-  flex: 1;
+  position: relative;
+  flex: none;
   border: none;
   background: transparent;
-  /* 12px outer − 4px gap = 8px. */
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   min-height: var(--control-h);
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-1);
   font-family: inherit;
   font-size: var(--text-base);
   font-weight: 500;
   color: var(--ink-muted);
   cursor: pointer;
-  transition: color 0.15s var(--ease), background-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  transition: color 0.15s var(--ease);
+}
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+  transition: background-color 0.15s var(--ease);
 }
 .tab:hover {
   color: var(--ink);
 }
 .tab.active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+.tab.active::after {
+  background: var(--accent);
 }
 
 /* Lead paragraph under a section heading. Left-aligned like everything else
@@ -898,25 +1065,36 @@ main[data-direction='back'] .wizard-panel.active {
   margin: 0 0 var(--s-6);
 }
 
+/* Section title: the letterspaced label that opens a block, ruled off to
+   the right so the eye reads it as a divider with a name. */
 .section-title {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--s-3);
   margin: var(--s-12) 0 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   font-weight: 700;
   line-height: var(--lh-tight);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink);
 }
 .section-title:first-of-type {
   margin-top: var(--s-8);
+}
+.section-title::before {
+  content: '';
+  flex: none;
+  width: var(--s-1);
+  height: 1.1em;
+  border-radius: 1px;
+  background: var(--accent);
 }
 .section-title::after {
   content: '';
   flex: 1;
   height: 1px;
   background: var(--hairline);
-  margin-left: var(--s-1);
 }
 
 /* ==========================================================================
@@ -1030,17 +1208,23 @@ main[data-direction='back'] .wizard-panel.active {
 }
 
 /* ==========================================================================
-   Surfaces
+   Surfaces — flat paper with a real edge. Cards carry a 1px border and no
+   resting shadow; elevation is spent on things that actually float
+   (modals, toasts, the chrome bar), so a page of cards stays quiet.
    ========================================================================== */
 
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
   padding: var(--s-6);
   margin-top: var(--s-4);
-  transition: box-shadow 0.2s var(--ease), border-color 0.2s var(--ease);
+  transition: box-shadow 0.2s var(--ease), border-color 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.card:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--hairline));
+  box-shadow: var(--shadow-sm);
 }
 /* Card title: a block label inside a section, never a section opener — held
    at 18px so it cannot compete with the page heading above it. */
@@ -1050,7 +1234,7 @@ main[data-direction='back'] .wizard-panel.active {
   gap: var(--s-3);
   margin: 0 0 var(--s-4);
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
   line-height: var(--lh-tight);
   letter-spacing: -0.015em;
 }
@@ -1058,13 +1242,15 @@ main[data-direction='back'] .wizard-panel.active {
 .card > h3 + p {
   margin-top: calc(-1 * var(--s-1));
 }
+/* Numbered marker in front of a card title. Squared and mono, matching the
+   wizard rail's markers so the two counters read as one system. */
 .step {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: var(--s-6);
   height: var(--s-6);
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--text-xs);
@@ -1231,27 +1417,36 @@ main[data-direction='back'] .wizard-panel.active {
 
 /* The dropzone is a real button: reachable by Tab, operable with Enter and
    Space, and it shows the same focus ring as everything else. */
+/* The one place in the product that gets a drawn-on texture: a faint
+   diagonal hatch behind a 2px dashed edge, so an empty drop target still
+   reads as an active surface rather than as a missing card. */
 .dropzone {
   display: block;
   width: 100%;
-  border: 1px dashed var(--dropzone-border);
-  border-radius: var(--radius-md);
-  padding: var(--s-8) var(--s-5);
-  background: var(--field);
+  border: 2px dashed var(--dropzone-border);
+  border-radius: var(--radius-lg);
+  padding: var(--s-10) var(--s-5);
+  background-color: var(--field);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--accent) 5%, transparent) 0 2px,
+    transparent 2px 12px
+  );
   color: inherit;
   font-family: inherit;
   text-align: center;
   cursor: pointer;
   position: relative;
-  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 .dropzone:hover,
 .dropzone.dragover {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
 .dropzone.dragover {
   border-style: solid;
+  box-shadow: 0 0 0 var(--s-1) var(--accent-soft), var(--shadow-md);
 }
 .dropzone-title {
   display: flex;
@@ -1477,7 +1672,7 @@ main[data-direction='back'] .wizard-panel.active {
   align-items: center;
   width: fit-content;
   gap: var(--s-1);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: var(--s-1) var(--s-3);
   font-size: var(--text-sm);
   background: var(--accent-soft);
@@ -1488,7 +1683,7 @@ main[data-direction='back'] .wizard-panel.active {
   font-style: normal;
   background: var(--surface-hover);
   color: var(--ink-muted);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 0 var(--s-2);
   font-size: var(--text-xs);
 }
@@ -1546,8 +1741,13 @@ main[data-direction='back'] .wizard-panel.active {
   font-size: var(--text-sm);
 }
 
+/* One song = one slab. The left edge is a 3px rule that goes accent the
+   moment anything inside the card holds focus, so the song you are editing
+   is findable from the far side of a long list. */
 .song-card {
+  position: relative;
   border: 1px solid var(--hairline);
+  border-left: 3px solid var(--hairline);
   border-radius: var(--radius-md);
   padding: var(--s-4);
   margin-bottom: var(--s-5);
@@ -1555,8 +1755,12 @@ main[data-direction='back'] .wizard-panel.active {
   transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
   animation: reveal-in 0.3s var(--ease-smooth) both;
 }
+.song-card:hover {
+  border-left-color: color-mix(in srgb, var(--accent) 45%, var(--hairline));
+}
 .song-card:focus-within {
   border-color: var(--accent);
+  border-left-color: var(--accent);
   box-shadow: var(--shadow-sm);
 }
 .song-card-head {
@@ -1569,7 +1773,7 @@ main[data-direction='back'] .wizard-panel.active {
   flex: none;
   width: var(--s-6);
   height: var(--s-6);
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   background: var(--ink);
   color: var(--surface);
   display: inline-flex;
@@ -1996,7 +2200,8 @@ main[data-direction='back'] .wizard-panel.active {
 
    One base size for every action button. Hierarchy is carried by the
    variant, never by resizing the control. Labels never wrap and buttons
-   never shrink — the row reflows instead.
+   never shrink — the row reflows instead. Squared corners throughout: the
+   silhouette matches the cards and fields they sit among.
    ========================================================================== */
 
 .btn {
@@ -2009,10 +2214,10 @@ main[data-direction='back'] .wizard-panel.active {
   padding: var(--s-2) var(--s-5);
   border: 1px solid var(--field-border);
   background: var(--surface);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   font-family: inherit;
   font-size: var(--text-base);
-  font-weight: 550;
+  font-weight: 500;
   line-height: var(--lh-tight);
   white-space: nowrap;
   text-decoration: none;
@@ -2033,23 +2238,23 @@ main[data-direction='back'] .wizard-panel.active {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
-/* Primary recipe: fill deepens and the button lifts (H1 + H2); the press
-   deepens the fill further and drops it back to the surface (A1 + A4). */
+/* Primary recipe: a violet→spark ramp, lifted on its own tinted drop
+   (H1 + H2); the press flattens the ramp and drops the lift (A1 + A4). */
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(120deg, var(--accent) 0%, var(--accent) 55%, var(--accent-hover) 100%);
   border-color: var(--accent);
   color: var(--on-accent);
-  font-weight: 650;
+  font-weight: 600;
   box-shadow: 0 var(--s-1) var(--s-3) -4px var(--accent-glow);
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: linear-gradient(120deg, var(--accent-hover) 0%, var(--accent) 60%, var(--spark) 220%);
   border-color: var(--accent-hover);
   color: var(--on-accent);
-  box-shadow: 0 var(--s-2) var(--s-6) -4px var(--accent-glow);
+  box-shadow: 0 var(--s-2) var(--s-6) -6px var(--accent-glow);
 }
 .btn-primary:active:not(:disabled) {
   background: var(--accent-active);
@@ -2066,7 +2271,7 @@ main[data-direction='back'] .wizard-panel.active {
 .btn-icon {
   width: var(--control-h);
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-md);
 }
 .btn-danger {
   color: var(--danger-ink);
@@ -2082,13 +2287,13 @@ main[data-direction='back'] .wizard-panel.active {
 }
 .btn-chip {
   padding: var(--s-2) var(--s-4);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
 }
 /* Ghost recipe: tint only (H4), deepening on press (A6). */
 .btn-ghost {
   border-color: transparent;
   background: none;
-  color: var(--accent);
+  color: var(--accent-dark);
   box-shadow: none;
 }
 .btn-ghost:hover:not(:disabled) {
@@ -2113,25 +2318,43 @@ main[data-direction='back'] .wizard-panel.active {
   gap: var(--s-3);
 }
 
+/* Colophon line. Mono and letterspaced like every other micro-label, with
+   the rule above it doubled by a short accent tick on the left edge. */
 .brand-footer {
+  position: relative;
   margin-top: var(--s-12);
   padding-top: var(--s-5);
   border-top: 1px solid var(--hairline);
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  letter-spacing: 0.01em;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+.brand-footer::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: var(--s-10);
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--spark));
 }
 
 /* ==========================================================================
    Modals — a temporary surface, so the title is larger than body copy but
-   never as large as the page heading behind it.
+   never as large as the page heading behind it. The dialog header carries a
+   thin accent rule along its top edge: the only chrome that marks a
+   surface as layered over the page.
    ========================================================================== */
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.44);
-  backdrop-filter: blur(2px);
+  /* The scrim is tinted with the brand ink rather than neutral black, so a
+     dialog reads as the same product dimmed, not as a system alert. */
+  background: rgba(15, 11, 40, 0.6);
+  backdrop-filter: blur(3px) saturate(1.1);
+  -webkit-backdrop-filter: blur(3px) saturate(1.1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2259,6 +2482,7 @@ main[data-direction='back'] .wizard-panel.active {
   flex-direction: column;
 }
 .modal-header {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2266,11 +2490,22 @@ main[data-direction='back'] .wizard-panel.active {
   padding: var(--s-4) var(--s-5);
   border-bottom: 1px solid var(--hairline);
 }
+.modal-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(90deg, var(--accent), var(--spark));
+}
 .modal-header h2 {
   margin: 0;
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
   line-height: var(--lh-tight);
+  letter-spacing: -0.015em;
 }
 /* A large, obvious close target — one of several dismissal paths, alongside
    Escape and the backdrop. */
@@ -2345,7 +2580,7 @@ main[data-direction='back'] .wizard-panel.active {
   top: var(--s-2);
   right: var(--s-2);
   padding: 2px var(--s-2);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
   font-size: var(--text-xs);
@@ -2394,7 +2629,7 @@ main[data-direction='back'] .wizard-panel.active {
 .admin-deck-info h4 {
   margin: 0 0 var(--s-1);
   font-size: var(--text-base);
-  font-weight: 650;
+  font-weight: 600;
   line-height: var(--lh-tight);
 }
 .admin-deck-info p {
@@ -2609,7 +2844,7 @@ main[data-direction='back'] .wizard-panel.active {
 .admin-usage-heading h4 {
   margin: 0 0 var(--s-1);
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
   line-height: var(--lh-tight);
 }
 .admin-usage-heading p {
@@ -2643,7 +2878,7 @@ main[data-direction='back'] .wizard-panel.active {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 2px var(--s-2);
   font-size: var(--text-xs);
   font-weight: 700;
@@ -2729,7 +2964,7 @@ main[data-direction='back'] .wizard-panel.active {
   height: var(--s-2);
   margin-top: var(--s-2);
   overflow: hidden;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--surface-hover);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -2919,7 +3154,7 @@ main[data-direction='back'] .wizard-panel.active {
 .recog-progress {
   height: var(--s-2);
   overflow: hidden;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--surface-hover);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -2987,7 +3222,7 @@ main[data-direction='back'] .wizard-panel.active {
     flex: none;
     width: var(--control-h);
     padding: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-md);
   }
   .header-actions .btn-label {
     position: absolute;
@@ -3087,7 +3322,7 @@ main[data-direction='back'] .wizard-panel.active {
   align-self: center;
   padding: 0 var(--s-2);
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   line-height: 22px;
   white-space: nowrap;
@@ -3232,7 +3467,7 @@ main[data-direction='back'] .wizard-panel.active {
 .learning-model-role {
   padding: 0 var(--s-2);
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   line-height: 22px;
   white-space: nowrap;
