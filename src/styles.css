@@ -663,7 +663,7 @@ a.btn {
   background: var(--chrome);
   color: var(--chrome-ink);
   border-bottom: 1px solid transparent;
-  transition: box-shadow 0.3s var(--ease), padding 0.3s var(--ease);
+  transition: box-shadow 0.3s var(--ease);
 }
 /* A single diagonal light streak across the ramp. Decorative only: it sits
    behind the content and carries no meaning. */
@@ -689,6 +689,13 @@ a.btn {
   background: var(--chrome-line);
   pointer-events: none;
 }
+/* Scrolled state is a shadow and nothing else. It deliberately changes no
+   layout: a bar that shrinks on scroll also shrinks the document, and on a
+   page whose scroll range is barely longer than the bar's own compaction
+   that shortens the page out from under the scroll position, which scroll
+   anchoring then restores — a loop that leaves the header pulsing and the
+   page jittering forever. Keeping the height constant removes the loop by
+   construction, and also keeps --header-h exact for anchor offsets. */
 .header.header-scrolled {
   box-shadow: var(--shadow-md);
 }
@@ -699,8 +706,7 @@ a.btn {
   gap: var(--s-3) var(--s-4);
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--s-5) var(--page-gutter) var(--s-5);
-  transition: padding 0.3s var(--ease);
+  padding: var(--s-4) var(--page-gutter);
 }
 /* 편집기 view widens the content column; the bar follows it so the brand and
    the actions keep sitting on the content edges. */
@@ -712,7 +718,10 @@ a.btn {
   align-items: center;
   gap: var(--s-3);
   min-width: 0;
-  flex: 1 1 380px;
+  /* Sized so the brand and the four tools still share one line at the
+     content width — a bar that wraps to two rows reads as a page section
+     rather than as chrome. */
+  flex: 1 1 320px;
 }
 /* The mark keeps its own white plate so the church logo never sits directly
    on the violet ramp. Squared to match the rest of the geometry. */
@@ -724,11 +733,6 @@ a.btn {
   border-radius: var(--radius-md);
   background: #ffffff;
   box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.5);
-  transition: width 0.3s var(--ease), height 0.3s var(--ease);
-}
-.header-scrolled .header-logo {
-  width: var(--s-8);
-  height: var(--s-8);
 }
 .header-text {
   min-width: 0;
@@ -745,10 +749,6 @@ a.btn {
 .admin-open {
   flex: none;
 }
-.header-scrolled .header-inner {
-  padding-top: var(--s-3);
-  padding-bottom: var(--s-3);
-}
 /* App page title: capped at 28px per the dashboard/app heading rule — this
    is product chrome, not a landing hero. */
 .header h1 {
@@ -758,18 +758,11 @@ a.btn {
   line-height: var(--lh-display);
   letter-spacing: -0.02em;
   color: var(--chrome-ink);
-  transition: font-size 0.3s var(--ease);
 }
 .header p {
   margin: 0;
   color: var(--chrome-ink-muted);
   font-size: var(--text-sm);
-  transition: opacity 0.3s var(--ease), max-height 0.3s var(--ease);
-}
-.header-scrolled p {
-  opacity: 0;
-  max-height: 0;
-  overflow: hidden;
 }
 /* Buttons on the dark bar. Same control contract as everywhere else — only
    the surface under them changed, so only the fill and edge are restated. */
