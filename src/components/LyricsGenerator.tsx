@@ -413,7 +413,7 @@ export default function LyricsGenerator({
    * there, and stop any scan that is still running for it — the saved lyrics
    * are authoritative, so scanning the score would be wasted work.
    */
-  const fillFromLibrary = useCallback((song: Song, entry: LibraryEntry) => {
+  const fillFromLibrary = useCallback((song: Song, entry: LibraryEntry, message?: string) => {
     scanCancelledRef.current.add(song.id);
     autoAttemptedRef.current.add(song.id);
     setSongs((list) =>
@@ -432,7 +432,7 @@ export default function LyricsGenerator({
     setRecog((r) =>
       r[song.id] ? { ...r, [song.id]: { status: 'done', engine: 'library' } } : r,
     );
-    showToast(`라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
+    showToast(message ?? `라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
   }, []);
 
   /** Remove an AI-classified non-score page from the song editor and forward
@@ -456,9 +456,11 @@ export default function LyricsGenerator({
   /**
    * Recognize every supplied score as one staged job with a live percentage:
    * 1) render the score pages (real per-page progress);
-   * 2) one title-only request for all pages, then resolve library hits
-   *    (best-effort — a failure here just skips early library matching);
-   * 3) one full-lyrics request containing only the unmatched pages;
+   * 2) one title-only request for all pages; a page whose settled title is
+   *    already in the library ends here with the saved lyrics (best-effort —
+   *    a failure here just skips early library matching);
+   * 3) one full-lyrics request containing only the pages the library could not
+   *    answer;
    * 4) rescue pass — any page the batch answer left without lyrics is retried
    *    individually, so one bad page can't blank out the whole conti.
    */
@@ -691,6 +693,10 @@ export default function LyricsGenerator({
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
         let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
+        // How much of the models' weight agreed on each title. It is what
+        // decides whether the library may answer a page outright, so a title
+        // pass that never ran leaves every page at zero — unsettled.
+        let titleConfidence: number[] = active.map(() => 0);
         try {
           const titleResult = await recognizeAdaptiveBatch(
             images,
@@ -702,6 +708,7 @@ export default function LyricsGenerator({
             promptExamplesFor({}, memory),
           );
           titleScores = titleResult.scores;
+          titleConfidence = titleResult.titleConfidence;
           for (const modelKey of titleResult.exhaustedModels) exhausted.add(modelKey);
         } catch (error) {
           console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
@@ -715,15 +722,17 @@ export default function LyricsGenerator({
         );
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
-        // The saved entry each page might turn out to be. It is held until the
-        // lyrics pass has read the page: a matching title is not evidence that
-        // the page carries those lyrics, and swapping them in on the title
-        // alone is how a conti ends up with a song it never had.
+        // The saved entry a page might turn out to be, where the title behind
+        // the match was NOT settled — models reading different titles, mostly.
+        // Those are held until the lyrics pass has read the page, because on a
+        // shaky title a matching name is not evidence that the page carries
+        // those lyrics.
         const libraryCandidates = new Map<string, LibraryEntry>();
         const titlePlan = planScoreBatch(
           aliasedTitles,
           active.map((song) => song.title),
           libraryRef.current,
+          titleConfidence,
         );
 
         active.forEach((song, index) => {
@@ -745,6 +754,20 @@ export default function LyricsGenerator({
           // but never read again.
           if (songHasLyrics(song)) {
             markDone([song.id], 'library');
+            return;
+          }
+          // The library already holds this exact title and the title is
+          // settled: stop here and load the saved lyrics. Reading the 악보
+          // would spend a request to learn what is already saved, and the
+          // saved copy is the wording somebody confirmed.
+          const match = titlePlan.libraryMatches[index];
+          if (match) {
+            resolvedIds.add(song.id);
+            fillFromLibrary(
+              song,
+              match,
+              `'${match.title}'은(는) 라이브러리에 있어 가사 인식을 건너뛰고 불러왔습니다.`,
+            );
             return;
           }
           identityById.set(song.id, identity);
@@ -1018,8 +1041,9 @@ export default function LyricsGenerator({
   const handleRecognizeClick = useCallback(
     (song: Song) => {
       if (song.pageIndex == null) return;
-      // Read the page even when the library knows this title: the saved lyrics
-      // are loaded only where the page turns out to carry the same ones.
+      // The title pass runs first: if it settles on a title the library
+      // already holds, the saved lyrics are loaded and the page is never read
+      // for lyrics at all.
       scanCancelledRef.current.delete(song.id);
       void recognizeSongsBatch([song]);
     },

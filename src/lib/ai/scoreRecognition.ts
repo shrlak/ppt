@@ -103,6 +103,16 @@ export interface BatchRecognitionResult {
   observations: RecognitionObservation[][];
   /** Weighted consensus confidence per page (0–1). */
   confidence: number[];
+  /**
+   * How much of the models' weight agreed on the TITLE of each page (0–1).
+   *
+   * Kept apart from the overall confidence because the title decides something
+   * the rest of the answer does not: whether the saved library entry under
+   * that name may stand in for the page without reading it. A title-only pass
+   * has no lyrics to be confident about, so the overall number would say the
+   * page is unsettled even when every model read the same title.
+   */
+  titleConfidence: number[];
   /** Pages whose answer is not settled enough to save without a look. */
   needsReview: boolean[];
 }
@@ -323,6 +333,7 @@ async function recognizeBatchWithAllModels(
       engine: settings.attempts[0]?.engine ?? 'off',
       observations: [],
       confidence: [],
+      titleConfidence: [],
       needsReview: [],
     };
   }
@@ -390,6 +401,7 @@ export function assembleBatchConsensus(
   const observations: RecognitionObservation[][] = [];
   const scores: ParsedScore[] = [];
   const confidence: number[] = [];
+  const titleConfidence: number[] = [];
   const needsReview: boolean[] = [];
   const contributions = new Map<string, number>();
 
@@ -408,6 +420,7 @@ export function assembleBatchConsensus(
     const consensus = buildWeightedConsensus(pageObservations, reliabilities);
     scores.push(consensus.score);
     confidence.push(consensus.confidence);
+    titleConfidence.push(consensus.fieldConfidence.title);
     needsReview.push(consensus.needsReview);
     for (const modelKey of consensus.usedModels) {
       contributions.set(modelKey, (contributions.get(modelKey) ?? 0) + 1);
@@ -418,7 +431,7 @@ export function assembleBatchConsensus(
   const engine =
     attempts.find((attempt) => modelKeyFor(attempt) === leadKey)?.engine ?? attempts[0]?.engine ?? 'off';
 
-  return { scores, engine, observations, confidence, needsReview };
+  return { scores, engine, observations, confidence, titleConfidence, needsReview };
 }
 
 /**

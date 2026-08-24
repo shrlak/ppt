@@ -169,6 +169,30 @@ describe('recognizeAdaptiveBatch', () => {
     expect(result.scores[0].sections[0].lines).toEqual(AGREED.sections[0].lines);
   });
 
+  it('reports how much of the pool agreed on each title', async () => {
+    // The title pass reads no lyrics, so the page-level needsReview says
+    // nothing about the title — it is always unsettled there. The title
+    // agreement is the number that decides whether the library may answer the
+    // page without reading it, so it is reported separately.
+    const identity = (title: string): ParsedScore => ({ title, order: [], sections: [] });
+    const fakeProvider = fakeProviderFor((attempt, image) => {
+      if (image === 'page-0') return identity('은혜의 노래');
+      return attempt.model === CHAMPIONS[0].model ? identity('은혜의 노래') : identity('다른 노래');
+    });
+
+    const result = await recognizeAdaptiveBatch(
+      ['page-0', 'page-1'],
+      settings,
+      'titles',
+      undefined,
+      [],
+      fakeProvider.provider,
+    );
+
+    expect(result.titleConfidence[0]).toBe(1);
+    expect(result.titleConfidence[1]).toBeLessThan(1);
+  });
+
   it('sends only the uncertain page to one challenger at a time', async () => {
     // Page 0 is read the same way by every champion. On page 1 one champion is
     // a syllable out, which one more reading is enough to settle.

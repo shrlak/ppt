@@ -11,42 +11,102 @@ const library: LibraryEntry[] = [
   },
 ];
 
+/** Every model read the same title. */
+const AGREED = [1];
+
 describe('planScoreBatch', () => {
-  it('pairs a page with the saved entry it might be, without ending the page there', () => {
+  it('answers a page from the library when the models agree on its title', () => {
     const plan = planScoreBatch(
       [
-        { title: '\uc8fc\ub2d8\uc758 \uc0ac\ub791', order: [], sections: [] },
-        { title: '\ucc98\uc74c \ubcf4\ub294 \ub178\ub798', order: [], sections: [] },
+        { title: '주님의 사랑', order: [], sections: [] },
+        { title: '처음 보는 노래', order: [], sections: [] },
       ],
-      ['\uc0c8 \ucc2c\uc591 (p.2)', '\uc0c8 \ucc2c\uc591 (p.3)'],
+      ['새 찬양 (p.2)', '새 찬양 (p.3)'],
       library,
+      [1, 1],
     );
 
-    expect(plan.libraryCandidates[0]).toBe(library[0]);
+    // The saved lyrics stand in for the page; it never reaches the lyrics pass.
+    expect(plan.libraryMatches[0]).toBe(library[0]);
+    expect(plan.libraryCandidates[0]).toBeUndefined();
+    expect(plan.libraryMatches[1]).toBeUndefined();
     expect(plan.libraryCandidates[1]).toBeUndefined();
   });
 
-  it('uses the conti title when title recognition is blank', () => {
-    const plan = planScoreBatch([{ order: [], sections: [] }], ['\uc8fc\ub2d8\uc758 \uc0ac\ub791'], library);
+  it('holds the entry back as a candidate when the models disagree on the title', () => {
+    // Two of three models read this title. That is exactly when loading the
+    // library copy on the title alone would put another song on the screen, so
+    // the page is still read and the saved copy has to match what it says.
+    const plan = planScoreBatch(
+      [{ title: '주님의 사랑', order: [], sections: [] }],
+      [''],
+      library,
+      [0.66],
+    );
+    expect(plan.libraryMatches[0]).toBeUndefined();
     expect(plan.libraryCandidates[0]).toBe(library[0]);
+  });
+
+  it('treats a title with no measured agreement as unsettled', () => {
+    const plan = planScoreBatch([{ title: '주님의 사랑', order: [], sections: [] }], [''], library);
+    expect(plan.libraryMatches[0]).toBeUndefined();
+    expect(plan.libraryCandidates[0]).toBe(library[0]);
+  });
+
+  it('uses the conti title when title recognition is blank', () => {
+    // A printed conti title is text out of the PDF, not a reading of pixels.
+    const plan = planScoreBatch([{ order: [], sections: [] }], ['주님의 사랑'], library, [0]);
+    expect(plan.libraryMatches[0]).toBe(library[0]);
+  });
+
+  it('never matches on a placeholder title the conti gave an unnamed page', () => {
+    const plan = planScoreBatch([{ order: [], sections: [] }], ['새 찬양 (p.3)'], library, [0]);
+    expect(plan.libraryMatches[0]).toBeUndefined();
+    expect(plan.libraryCandidates[0]).toBeUndefined();
   });
 
   it('prefers the newly recognized title over a stale conti title', () => {
     const plan = planScoreBatch(
-      [{ title: '\ucc98\uc74c \ubcf4\ub294 \ub178\ub798', order: [], sections: [] }],
-      ['\uc8fc\ub2d8\uc758 \uc0ac\ub791'],
+      [{ title: '처음 보는 노래', order: [], sections: [] }],
+      ['주님의 사랑'],
       library,
+      AGREED,
     );
+    expect(plan.libraryMatches[0]).toBeUndefined();
     expect(plan.libraryCandidates[0]).toBeUndefined();
   });
 
   it('never offers an entry whose title merely resembles the recognized one', () => {
     // A near miss is a different song, and its lyrics are the wrong lyrics.
     const plan = planScoreBatch(
-      [{ title: '\uc8fc\ub2d8\uc758 \uc0ac\ub791\uc774 \ub098\ub97c', order: [], sections: [] }],
+      [{ title: '주님의 사랑이 나를', order: [], sections: [] }],
       [''],
       library,
+      AGREED,
     );
+    expect(plan.libraryMatches[0]).toBeUndefined();
     expect(plan.libraryCandidates[0]).toBeUndefined();
+  });
+
+  it('never answers a page from a draft somebody has not confirmed', () => {
+    const drafts: LibraryEntry[] = [{ ...library[0], verification: 'draft' }];
+    const plan = planScoreBatch(
+      [{ title: '주님의 사랑', order: [], sections: [] }],
+      [''],
+      drafts,
+      AGREED,
+    );
+    expect(plan.libraryMatches[0]).toBeUndefined();
+    expect(plan.libraryCandidates[0]).toBeUndefined();
+  });
+
+  it('keeps two songs that share a title apart by artist', () => {
+    const plan = planScoreBatch(
+      [{ title: '주님의 사랑', artist: '다른 아티스트', order: [], sections: [] }],
+      [''],
+      [{ ...library[0], artist: '원래 아티스트' }],
+      AGREED,
+    );
+    expect(plan.libraryMatches[0]).toBeUndefined();
   });
 });

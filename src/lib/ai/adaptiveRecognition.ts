@@ -166,6 +166,7 @@ export async function recognizeAdaptiveBatch(
       engine: settings.attempts[0]?.engine ?? 'off',
       observations: [],
       confidence: [],
+      titleConfidence: [],
       needsReview: [],
       exhaustedModels: [],
     };
@@ -242,6 +243,7 @@ export async function recognizeAdaptiveBatch(
     engine,
     observations,
     confidence: consensus.map((result) => result.confidence),
+    titleConfidence: consensus.map((result) => result.fieldConfidence.title),
     needsReview: consensus.map((result) => result.needsReview),
     exhaustedModels: [...unavailable],
   };
