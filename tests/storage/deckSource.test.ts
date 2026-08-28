@@ -40,6 +40,14 @@ describe('deck source snapshots', () => {
     expect(restored).toEqual(song);
   });
 
+  it('keeps a 설교 후 찬양 in its own place in the service', () => {
+    const postSermon: Song = { ...song, postSermon: true };
+    const restored = decodeDeckSource(encodeDeckSource({ ...source, songs: [postSermon] }))!.songs[0];
+    expect(restored).toEqual(postSermon);
+    // Absent means an ordinary praise song, never an explicit false.
+    expect(decodeDeckSource(encodeDeckSource(source))!.songs[0]).not.toHaveProperty('postSermon');
+  });
+
   it('treats a missing snapshot as "nothing to restore"', () => {
     expect(decodeDeckSource(null)).toBeNull();
     expect(decodeDeckSource(undefined)).toBeNull();

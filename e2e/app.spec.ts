@@ -952,14 +952,18 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
   expect(slideFileNames(zip).length).toBeGreaterThanOrEqual(2);
 });
 
-/** Add a bundled-library song to the 찬양 step by title. */
+/**
+ * Add a bundled-library song to the 찬양 step by title. Typing is what opens
+ * the dropdown here (a second call lands on an input that is already focused),
+ * and the matching option only appears once the library has finished loading.
+ */
 async function addLibrarySong(page: Page, title: string): Promise<void> {
   const librarySearch = page.getByTestId('library-add-search');
   await librarySearch.click();
-  const options = page.getByTestId('library-add-option');
-  await expect(options.first()).toBeAttached({ timeout: PARSE_TIMEOUT });
   await librarySearch.fill(title);
-  await options.filter({ hasText: title }).first().click();
+  const option = page.getByTestId('library-add-option').filter({ hasText: title }).first();
+  await expect(option).toBeVisible({ timeout: PARSE_TIMEOUT });
+  await option.click();
 }
 
 /** Every slide's text, in presentation (slide number) order. */
