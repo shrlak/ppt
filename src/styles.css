@@ -3339,6 +3339,26 @@ main[data-direction='back'] .wizard-panel.active {
   color: var(--accent-dark);
 }
 
+/* Where in the service a song is sung. Pressed = 설교 후 찬양, which the
+   deck places after the sermon's 기도 slide rather than in the opening set;
+   the label reads the same either way, so the state is carried by
+   aria-pressed and the check mark, never by colour alone. */
+.song-slot {
+  flex: 0 0 auto;
+  align-self: center;
+  gap: var(--s-1);
+  padding: 0 var(--s-2);
+  font-size: var(--text-xs);
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.song-slot.is-post-sermon {
+  background: var(--accent-soft);
+  border-color: var(--notice-border);
+  color: var(--accent-dark);
+}
+
 /* A part the models read differently. The marker is an edge rather than a
    fill so the lyric text keeps its full contrast against the field. */
 .section-row textarea[data-confidence='low'] {

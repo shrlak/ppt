@@ -8,7 +8,7 @@ import { stripNonVisualParts } from './pptxPackage';
 import { removeContentTypeOverride, setContentTypeOverride } from './contentTypes';
 
 /** Resolve a deck's slide filenames in presentation display order. */
-async function slideOrderOf(zip: JSZip): Promise<string[]> {
+export async function slideOrderOf(zip: JSZip): Promise<string[]> {
   const presentation = await zip.file('ppt/presentation.xml')!.async('string');
   const rels = await zip.file('ppt/_rels/presentation.xml.rels')!.async('string');
   const section = presentation.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);

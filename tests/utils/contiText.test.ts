@@ -356,6 +356,48 @@ describe('splitLyricsAndConfessionSongs', () => {
     expect(confessionSong).toBeUndefined();
   });
 
+  it('takes the 고백송 named in 관리자 설정 instead of the default', () => {
+    const songs = [
+      { title: '주님의 사랑', key: 'E' },
+      { title: '나의 반석이신 하나님', key: 'G' },
+      { title: 'Celebrate the Light', key: 'G' },
+    ];
+    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs, '나의 반석이신 하나님');
+    expect(confessionSong?.title).toBe('나의 반석이신 하나님');
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', 'Celebrate the Light']);
+  });
+
+  it('recognizes a cover that names the slot rather than the song', () => {
+    const songs = [{ title: '주님의 사랑' }, { title: '공동체 고백송' }, { title: '축복하노라' }];
+    const { confessionSong, postSermonSong } = splitLyricsAndConfessionSongs(songs);
+    expect(confessionSong?.title).toBe('공동체 고백송');
+    expect(postSermonSong?.title).toBe('축복하노라');
+  });
+
+  it('reads the song after the 고백송 as the 설교 후 찬양', () => {
+    const songs = [
+      { title: '주님의 사랑', key: 'E' },
+      { title: 'Celebrate the Light', key: 'G' },
+      { title: '축복하노라', key: 'F' },
+      { title: '입례', key: 'F' },
+    ];
+    const { lyricsSongs, postSermonSong } = splitLyricsAndConfessionSongs(songs);
+    expect(postSermonSong?.title).toBe('축복하노라');
+    // It still needs generated lyric slides — only its position in the deck
+    // differs, so it stays in the list the 찬양 step edits.
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '축복하노라', '입례']);
+  });
+
+  it('leaves the 설교 후 찬양 unset when the 고백송 is last or absent', () => {
+    expect(
+      splitLyricsAndConfessionSongs([{ title: '주님의 사랑' }, { title: 'Celebrate the Light' }])
+        .postSermonSong,
+    ).toBeUndefined();
+    expect(
+      splitLyricsAndConfessionSongs([{ title: '주님의 사랑' }, { title: '입례' }]).postSermonSong,
+    ).toBeUndefined();
+  });
+
   it('handles an empty conti', () => {
     expect(splitLyricsAndConfessionSongs([])).toEqual({ lyricsSongs: [] });
   });

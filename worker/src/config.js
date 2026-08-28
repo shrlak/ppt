@@ -69,6 +69,9 @@ export function isFreeVisionCatalogEntry(entry) {
 
 export const DEFAULT_EXCLUDED_TITLES = ['공동체 고백송', '예배 전 준비 찬양'];
 
+/** Song the back deck's 공동체 고백 block is rewritten to, unless changed. */
+export const DEFAULT_CONFESSION_SONG = 'Celebrate the Light';
+
 // Same soft gate as the client's 관리자 설정 — this is a static site with no
 // user accounts, so the password only keeps casual visitors from rewriting
 // the shared configuration. Override with the ADMIN_PASSWORD Worker secret.
@@ -132,6 +135,12 @@ export function sanitizeExcludedTitles(raw) {
   return titles;
 }
 
+/** A 공동체 고백송 title; a blank one means "leave the back slides alone". */
+export function sanitizeConfessionSong(raw) {
+  if (typeof raw !== 'string') return DEFAULT_CONFESSION_SONG;
+  return raw.trim().slice(0, 100);
+}
+
 /** Keep only overrides that name a catalog model and a real role. */
 export function sanitizeRoleOverrides(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
@@ -149,6 +158,7 @@ export function sanitizeSharedSettings(raw) {
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
+    confessionSong: sanitizeConfessionSong(obj.confessionSong),
     roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }

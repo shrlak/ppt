@@ -952,6 +952,87 @@ test('manual flow without a PDF', async ({ page }, testInfo) => {
   expect(slideFileNames(zip).length).toBeGreaterThanOrEqual(2);
 });
 
+/** Add a bundled-library song to the 찬양 step by title. */
+async function addLibrarySong(page: Page, title: string): Promise<void> {
+  const librarySearch = page.getByTestId('library-add-search');
+  await librarySearch.click();
+  const options = page.getByTestId('library-add-option');
+  await expect(options.first()).toBeAttached({ timeout: PARSE_TIMEOUT });
+  await librarySearch.fill(title);
+  await options.filter({ hasText: title }).first().click();
+}
+
+/** Every slide's text, in presentation (slide number) order. */
+async function slideTexts(zip: JSZip): Promise<string[]> {
+  const count = slideFileNames(zip).length;
+  return Promise.all(
+    Array.from({ length: count }, (_, i) => zip.file(`ppt/slides/slide${i + 1}.xml`)!.async('string')),
+  );
+}
+
+test('설교 후 찬양 lands after the sermon prayer instead of in the opening set', async ({
+  page,
+}, testInfo) => {
+  await page.goto('./');
+  await addLibrarySong(page, '주님의 사랑');
+  await addLibrarySong(page, '주 은혜임을');
+
+  const cards = page.getByTestId('song-card');
+  await expect(cards).toHaveCount(2, { timeout: PARSE_TIMEOUT });
+  const toggle = cards.nth(1).getByTestId('song-post-sermon-toggle');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+  await moveFromLyricsToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const zip = await loadPptx(await dlPromise, testInfo.outputPath('post-sermon.pptx'));
+
+  const texts = await slideTexts(zip);
+  const lastOpening = texts.findLastIndex((xml) => xml.includes('주님의 사랑'));
+  const firstPostSermon = texts.findIndex((xml) => xml.includes('주 은혜임을'));
+  expect(lastOpening).toBeGreaterThan(0);
+  expect(firstPostSermon).toBeGreaterThan(lastOpening);
+  // Exactly the two 기도 slides sit between the opening set and this song —
+  // it is no longer merged straight onto the end of the praise block.
+  expect(firstPostSermon - lastOpening).toBe(3);
+});
+
+test('admin panel sets the 공동체 고백송 and the back slides print it', async ({ page }, testInfo) => {
+  await page.goto('./');
+  // The deck needs some content of its own before it can be generated.
+  await addLibrarySong(page, '주님의 사랑');
+  await page.getByTestId('admin-open').click();
+  await page.getByTestId('admin-password').fill('kccpmedia1980');
+  await page.getByTestId('admin-unlock').click();
+
+  const input = page.getByTestId('admin-confession-song');
+  await expect(input).toHaveValue('Celebrate the Light');
+  await expect(page.getByTestId('admin-confession-status')).toContainText('Celebrate the Light');
+  await input.fill('주 은혜임을');
+  await page.getByTestId('admin-confession-save').click();
+  // The status line reports what the generator will actually do with it.
+  await expect(page.getByTestId('admin-confession-status')).toContainText('공동체 고백 슬라이드');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('admin-confession-song')).toBeHidden();
+
+  await moveFromLyricsToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const zip = await loadPptx(await dlPromise, testInfo.outputPath('confession.pptx'));
+
+  const texts = await slideTexts(zip);
+  const marker = texts.findIndex((xml) => xml.includes('공동체 고백송'));
+  expect(marker).toBeGreaterThan(-1);
+  // The marker still says 공동체 고백송, but now names the chosen song, and the
+  // lyric slides behind it are that song's — not Celebrate the Light's.
+  expect(texts[marker]).toContain('주 은혜임을');
+  expect(texts[marker]).not.toContain('Celebrate the Light');
+  expect(texts[marker + 1]).toContain('주 은혜임을');
+  expect(texts.join('\n')).not.toContain('Celebrate the light 온 세상 비추네');
+});
+
 test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   await page.goto('./');
 

@@ -310,6 +310,24 @@ export default function SongCard({
             <span className="visually-hidden"> — {trust.detail}</span>
           </span>
         )}
+        {/* Where in the service this song is sung. 설교 후 찬양 is not part of
+            the opening praise set: its slides are placed after the 기도 slide
+            that follows the sermon, so the operator never has to jump back. */}
+        <button
+          type="button"
+          className={`btn btn-chip song-slot${song.postSermon ? ' is-post-sermon' : ''}`}
+          data-testid="song-post-sermon-toggle"
+          aria-pressed={!!song.postSermon}
+          title={
+            song.postSermon
+              ? '설교 후 찬양 — 설교 뒤 기도 슬라이드 다음에 들어갑니다. 누르면 일반 찬양으로 되돌립니다.'
+              : '이 곡을 설교 후 찬양으로 지정하면 설교 뒤 기도 슬라이드 다음에 들어갑니다.'
+          }
+          onClick={() => onChange({ ...song, postSermon: song.postSermon ? undefined : true })}
+        >
+          <Icon name={song.postSermon ? 'check' : 'next'} />
+          설교 후 찬양
+        </button>
         <div className="song-actions">
           <button
             type="button"

@@ -396,7 +396,7 @@ async function removeSupersededDecks(decks: DeckIdentity[]): Promise<void> {
 }
 
 /** Confirm the bytes are a loadable .pptx before archiving them. */
-export async function inspectDeckBytes(data: ArrayBuffer): Promise<{ slideCount: number }> {
+export async function inspectDeckBytes(data: ArrayBuffer | Uint8Array): Promise<{ slideCount: number }> {
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(data);

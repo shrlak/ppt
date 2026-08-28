@@ -145,10 +145,24 @@ export const DEFAULT_ATTEMPT_ORDER: RecognitionAttempt[] = RECOGNITION_MODEL_CAT
  */
 export const DEFAULT_EXCLUDED_TITLES: string[] = ['공동체 고백송', '예배 전 준비 찬양'];
 
+/**
+ * The song sung as the 공동체 고백송. Its lyric slides live inside the fixed
+ * back-slides deck, so this is what the generator rewrites that block to —
+ * and what the 콘티 splits off from the songs that need generated slides.
+ * The default is the song the bundled back deck already prints.
+ */
+export const DEFAULT_CONFESSION_SONG = 'Celebrate the Light';
+
 /** The part of the settings shared across every device via the proxy. */
 export interface SharedRecognitionSettings {
   attempts: RecognitionAttempt[];
   excludedTitles: string[];
+  /**
+   * Title of this season's 공동체 고백송, looked up in the 곡 라이브러리 to
+   * rewrite the back deck's 공동체 고백 block. An empty string means "leave
+   * the back slides exactly as they were supplied".
+   */
+  confessionSong: string;
   /**
    * Roles the administrator pinned by hand, keyed by `engine:model`.
    *
@@ -163,6 +177,7 @@ export interface SharedRecognitionSettings {
 export const DEFAULT_SHARED_SETTINGS: SharedRecognitionSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
+  confessionSong: DEFAULT_CONFESSION_SONG,
   roleOverrides: {},
 };
 
@@ -180,6 +195,7 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
+  confessionSong: DEFAULT_CONFESSION_SONG,
   roleOverrides: {},
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
@@ -265,6 +281,16 @@ export function sanitizeExcludedTitles(raw: unknown): string[] {
 }
 
 /**
+ * Coerce a stored/received 공동체 고백송 title. Anything that is not a string
+ * falls back to the default (the song the bundled back deck prints); an
+ * explicitly blank title is kept, and means "don't touch the back slides".
+ */
+export function sanitizeConfessionSong(raw: unknown): string {
+  if (typeof raw !== 'string') return DEFAULT_CONFESSION_SONG;
+  return raw.trim().slice(0, 100);
+}
+
+/**
  * Keep only overrides that name a catalog model and a real role. An override
  * for a model this build no longer ships would otherwise sit in shared
  * settings forever, invisible and unexplained.
@@ -286,6 +312,7 @@ export function sanitizeSharedSettings(raw: unknown): SharedRecognitionSettings 
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
+    confessionSong: sanitizeConfessionSong(obj.confessionSong),
     roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }

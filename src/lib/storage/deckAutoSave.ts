@@ -41,6 +41,8 @@ export interface AutoSaveInputs {
   /** 관리자 설정 replacements for the bundled front/back decks. */
   frontDeck: AutoSaveFile | null;
   backDeck: AutoSaveFile | null;
+  /** 관리자 설정's 공동체 고백송 — it rewrites a block of the back deck. */
+  confessionSong?: string;
 }
 
 /**
@@ -61,6 +63,8 @@ function songKey(song: Song) {
     sections: song.sections.map((section) => ({ label: section.label, lines: section.lines })),
     order: song.order,
     linesPerSlide: song.linesPerSlide,
+    // 설교 후 찬양 moves the song's slides to a different point in the deck.
+    postSermon: !!song.postSermon,
   };
 }
 
@@ -88,6 +92,7 @@ export function deckFingerprint(inputs: AutoSaveInputs): string {
     additional: inputs.additionalFiles.map((file) => fileKey(file)),
     front: fileKey(inputs.frontDeck),
     back: fileKey(inputs.backDeck),
+    confessionSong: (inputs.confessionSong ?? '').trim(),
   });
 }
 

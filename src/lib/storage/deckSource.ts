@@ -65,6 +65,7 @@ function songOf(value: unknown): Song | null {
     order: Array.isArray(raw.order) ? raw.order.filter((label): label is string => typeof label === 'string') : [],
     linesPerSlide: Number.isFinite(raw.linesPerSlide) ? Number(raw.linesPerSlide) : 4,
     ...(Number.isFinite(raw.pageIndex) ? { pageIndex: Number(raw.pageIndex) } : {}),
+    ...(raw.postSermon === true ? { postSermon: true as const } : {}),
   };
 }
 
