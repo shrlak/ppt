@@ -8,6 +8,7 @@ import { buildAnnouncementDeck } from '../src/lib/utils/announcementBuilder';
 import { buildPptx } from '../src/lib/pptx/pptxBuilder';
 import { mergePptxDecks } from '../src/lib/pptx/pptxMerge';
 import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptx/pptxPackage';
+import { applyConfessionSong } from '../src/lib/pptx/confessionSlides';
 import { extractSlideSubset } from '../src/lib/pptx/pptxSlices';
 import type { Song } from '../src/lib/utils/types';
 
@@ -38,6 +39,25 @@ const alternateSong: Song = {
     { label: 'C', lines: ['기쁨으로 주께 나아가', '영원토록 주를 높이리'] },
   ],
   order: ['V1', 'C'],
+  linesPerSlide: 4,
+};
+
+/** 설교 후 찬양 — placed after the sermon's 기도 slide, not in the opening set. */
+const postSermonSong: Song = {
+  id: 'post-sermon-song',
+  title: '축복하노라',
+  sections: [{ label: 'C', lines: ['축복하노라 주의 이름으로', '평강이 함께 하기를'] }],
+  order: ['C'],
+  linesPerSlide: 4,
+  postSermon: true,
+};
+
+/** This week's 공동체 고백송, printed into the back deck's 공동체 고백 block. */
+const confessionSong: Song = {
+  id: 'confession-song',
+  title: '나의 반석이신 하나님',
+  sections: [{ label: 'C', lines: ['나의 반석이신 하나님', '내 삶의 피난처 되시네'] }],
+  order: ['C'],
   linesPerSlide: 4,
 };
 
@@ -101,6 +121,8 @@ describe('complete service deck', () => {
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [42]), 'STORE');
     deck = await mergePptxDecks(deck, await foreignSermonDeck(), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [31]), 'STORE');
+    // 설교 후 찬양 goes between that 기도 slide and the 광고 title.
+    deck = await mergePptxDecks(deck, await buildPptx(lyricsTemplate, [postSermonSong]), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [32]), 'STORE');
     deck = await mergePptxDecks(
       deck,
@@ -109,7 +131,11 @@ describe('complete service deck', () => {
       ]),
       'STORE',
     );
-    deck = await mergePptxDecks(deck, backSlides);
+    // The back deck's 공동체 고백 block is rewritten to this week's song before
+    // it is appended, exactly as App.buildMergedDeck does.
+    const confessionApplied = await applyConfessionSong(backSlides, confessionSong);
+    expect(confessionApplied.applied).toBe(true);
+    deck = await mergePptxDecks(deck, confessionApplied.data);
 
     await expect(assertPptxIntegrity(deck)).resolves.toBeUndefined();
     const zip = await JSZip.loadAsync(deck);
@@ -124,17 +150,31 @@ describe('complete service deck', () => {
     expect(await zip.file('[Content_Types].xml')!.async('string')).not.toContain('/ppt/metadata');
 
     const slides = slideFiles(zip);
-    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 1 + 21);
+    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 2 + 1 + 20);
 
     const first = await zip.file('ppt/slides/slide1.xml')!.async('string');
     expect(first).toContain('빛주사랑');
     const firstLyricsSlide = await zip.file('ppt/slides/slide5.xml')!.async('string');
     expect(firstLyricsSlide).toContain('주님의 사랑');
-    const backStart = slides.length - 21 + 1;
+    // The confession song is one slide shorter than the bundled Celebrate the
+    // Light block, so the rewritten back deck is 20 slides rather than 21.
+    const backStart = slides.length - 20 + 1;
     const slideBeforeBack = await zip.file(`ppt/slides/slide${backStart - 1}.xml`)!.async('string');
     const firstBackSlide = await zip.file(`ppt/slides/slide${backStart}.xml`)!.async('string');
     expect(slideBeforeBack).toContain('테스트 광고');
     expect(firstBackSlide).toContain('공동체 고백송');
+    expect(firstBackSlide).toContain('나의 반석이신 하나님');
+    // 설교 후 찬양 sits after the sermon, not in the opening praise set: after
+    // the uploaded 설교 slides (and the 기도 slide that follows them) and
+    // before the 광고 title.
+    const orderedSlides = await Promise.all(
+      slides.map((_, i) => zip.file(`ppt/slides/slide${i + 1}.xml`)!.async('string')),
+    );
+    const positionOf = (text: string) => orderedSlides.findIndex((xml) => xml.includes(text));
+    expect(positionOf('축복하노라')).toBeGreaterThan(positionOf('플레이스홀더 제목'));
+    expect(positionOf('축복하노라')).toBeLessThan(positionOf('테스트 광고'));
+    // The opening praise set still comes first, before the scripture slides.
+    expect(positionOf('새 노래로 찬양해')).toBeLessThan(positionOf('하나님과 화평을 누리자'));
     const allText = (await Promise.all(slides.map((path) => zip.file(path)!.async('string')))).join('\n');
     expect(allText).toContain('주님의 사랑');
     expect(allText).toContain('새 노래로 찬양해');
@@ -143,6 +183,10 @@ describe('complete service deck', () => {
     expect(allText).toContain('플레이스홀더 제목');
     expect(allText).toContain('테스트 광고');
     expect(allText).toContain('공동체 고백송');
+    expect(allText).toContain('축복하노라');
+    expect(allText).toContain('나의 반석이신 하나님');
+    // Celebrate the Light's lyric slides were replaced, not left alongside.
+    expect(allText).not.toContain('Celebrate the light 온 세상 비추네');
 
     const outputPath = process.env.WRITE_VALIDATION_DECK;
     if (outputPath) {

@@ -51,6 +51,19 @@ describe('auto-save change detection', () => {
     expect(deckFingerprint(withSong({ title: '다른 제목' }))).not.toBe(base);
   });
 
+  it('changes when a song moves to 설교 후 찬양', () => {
+    // The same lyrics, but placed after the sermon's 기도 slide instead of in
+    // the opening set — a different deck, so a save is owed.
+    expect(deckFingerprint(withSong({ postSermon: true }))).not.toBe(deckFingerprint(inputs));
+  });
+
+  it('changes when 관리자 설정 names a different 공동체 고백송', () => {
+    const base = deckFingerprint(inputs);
+    expect(deckFingerprint({ ...inputs, confessionSong: '나의 반석이신 하나님' })).not.toBe(base);
+    // Whitespace around the title is not an edit.
+    expect(deckFingerprint({ ...inputs, confessionSong: '  ' })).toBe(base);
+  });
+
   it('ignores song fields that never reach a slide', () => {
     const base = deckFingerprint(inputs);
     // A reopened deck mints fresh ids for its editing session; that alone is

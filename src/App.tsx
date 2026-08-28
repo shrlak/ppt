@@ -17,6 +17,9 @@ import { normalizeContiScripture, parseVerseInput } from './bible/refParser';
 import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
+import { applyConfessionSong } from './lib/pptx/confessionSlides';
+import { lookupConfessionSong } from './lib/utils/confessionSong';
+import { DEFAULT_CONFESSION_SONG } from './lib/ai/aiSettings';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from './lib/pptx/pptxRenderer';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
@@ -55,8 +58,43 @@ const SERVICE_SLIDES = {
   announcementItemTemplate: 33,
 };
 
+/**
+ * Last back deck built with the confession song written into it.
+ *
+ * The 편집기 view rebuilds the whole deck after every edit pause, and
+ * rewriting the ~3 MB back deck means parsing and re-zipping it each time
+ * even though neither the deck nor the confession song usually changed. One
+ * remembered result is all it takes for those rebuilds to skip the work.
+ */
+let confessionDeckMemo: { key: string; data: Uint8Array } | null = null;
+
+async function backDeckWithConfessionSong(
+  source: ArrayBuffer | Uint8Array,
+  sourceKey: string,
+  song: Song,
+): Promise<ArrayBuffer | Uint8Array> {
+  const key = `${sourceKey}\u0000${JSON.stringify({
+    title: song.title,
+    sections: song.sections,
+    order: song.order,
+    linesPerSlide: song.linesPerSlide,
+  })}`;
+  if (confessionDeckMemo?.key === key) return confessionDeckMemo.data;
+  const result = await applyConfessionSong(source, song);
+  if (!result.applied) return source;
+  confessionDeckMemo = { key, data: result.data };
+  return result.data;
+}
+
 const FRONT_SLIDE_COUNT = 4;
 const BACK_SLIDE_COUNT = 21;
+/**
+ * Lyric slides the bundled back deck prints for its own 공동체 고백송
+ * (DEFAULT_CONFESSION_SONG). A different confession song replaces exactly
+ * those, so the deck ends up that many slides longer or shorter — which is
+ * all the pre-generation slide count needs to stay honest.
+ */
+const BUNDLED_CONFESSION_LYRIC_SLIDES = 2;
 
 const WIZARD_STEPS = [
   { id: 'lyrics', label: '찬양' },
@@ -134,6 +172,13 @@ export default function App() {
     front: null,
     back: null,
   });
+  // 관리자 설정's 공동체 고백송, mirrored here only so a change to it counts as
+  // a change to the deck (it rewrites a block of the back slides). The build
+  // itself always reads the setting fresh.
+  const [confessionSongTitle, setConfessionSongTitle] = useState('');
+  // Lyric slides that song fills, so the slide count below can allow for a
+  // confession song that is longer or shorter than the deck's own.
+  const [confessionSlideCount, setConfessionSlideCount] = useState(0);
   const [contiBibleAutoFill, setContiBibleAutoFill] = useState({
     version: 0,
     verseInput: '',
@@ -244,6 +289,21 @@ export default function App() {
     setCustomDecks((previous) => ({ ...previous, [slot]: deck }));
   }, []);
 
+  // Re-read on mount and whenever 관리자 설정 closes, so a confession song
+  // chosen there is picked up without a reload.
+  useEffect(() => {
+    if (adminOpen) return;
+    let cancelled = false;
+    void lookupConfessionSong(BASE).then((found) => {
+      if (cancelled) return;
+      setConfessionSongTitle(found.title);
+      setConfessionSlideCount(found.song ? found.slideCount : 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adminOpen]);
+
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
   const fileName = nameOverride ?? suggestFileName(contiDate);
@@ -312,6 +372,7 @@ export default function App() {
     additionalFiles,
     frontDeck: customDecks.front,
     backDeck: customDecks.back,
+    confessionSong: confessionSongTitle,
   });
 
   /**
@@ -322,7 +383,7 @@ export default function App() {
    * Shared by the download button, the 라이브러리 save action, and 편집기 view.
    */
   async function buildMergedDeck(): Promise<{ merged: Uint8Array; overview: DeckOverviewItem[] }> {
-    const [serviceTemplate, frontSlides, backSlides] = await Promise.all([
+    const [serviceTemplate, frontSlides, backSlidesSource] = await Promise.all([
       fetch(`${BASE}service-template.pptx`).then((r) => {
         if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
         return r.arrayBuffer();
@@ -342,6 +403,20 @@ export default function App() {
           }),
     ]);
 
+    // The back deck prints the 공동체 고백송 itself. Rewrite that block to the
+    // song 관리자 설정 names, so the fixed slides carry this season's
+    // confession song without anyone editing the .pptx by hand. Nothing is
+    // touched when the deck already prints it, or when the library has no
+    // lyrics under that title.
+    const confession = await lookupConfessionSong(BASE);
+    const backSlides = confession.song
+      ? await backDeckWithConfessionSong(
+          backSlidesSource,
+          customDecks.back ? `${customDecks.back.name}:${customDecks.back.updatedAt}` : 'bundled',
+          confession.song,
+        )
+      : backSlidesSource;
+
     const overview: DeckOverviewItem[] = [];
     let merged: Uint8Array = new Uint8Array(frontSlides);
     const frontCount = (await inspectDeckBytes(frontSlides)).slideCount;
@@ -349,13 +424,19 @@ export default function App() {
       ...expandDeckSegment({ kind: 'front', count: frontCount, labelAt: (i, count) => `Front ${i + 1}/${count}` }),
     );
 
-    if (songs.length > 0) {
-      const lyricsTemplate = await fetch(`${BASE}template.pptx`).then((r) => {
+    // 설교 후 찬양 is sung after the sermon, so its slides are built from the
+    // same template but spliced in after the post-sermon 기도 slide below.
+    const praiseSongs = songs.filter((song) => !song.postSermon);
+    const postSermonSongs = songs.filter((song) => song.postSermon);
+    const loadLyricsTemplate = () =>
+      fetch(`${BASE}template.pptx`).then((r) => {
         if (!r.ok) throw new Error('찬양 템플릿 파일을 불러오지 못했습니다.');
         return r.arrayBuffer();
       });
-      merged = await mergePptxDecks(merged, await buildPptx(lyricsTemplate, songs), 'STORE');
-      overview.push(...songs.flatMap((s) => songOverviewItems(s)));
+
+    if (praiseSongs.length > 0) {
+      merged = await mergePptxDecks(merged, await buildPptx(await loadLyricsTemplate(), praiseSongs), 'STORE');
+      overview.push(...praiseSongs.flatMap((s) => songOverviewItems(s)));
     }
 
     merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer1), 'STORE');
@@ -396,6 +477,12 @@ export default function App() {
 
     merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
     overview.push(...expandDeckSegment({ kind: 'prayer', count: SERVICE_SLIDES.prayer2.length, labelAt: () => '기도' }));
+
+    // 설교 후 찬양 — right after the 기도 slide that follows the sermon.
+    if (postSermonSongs.length > 0) {
+      merged = await mergePptxDecks(merged, await buildPptx(await loadLyricsTemplate(), postSermonSongs), 'STORE');
+      overview.push(...postSermonSongs.flatMap((s) => songOverviewItems(s)));
+    }
 
     if (announcementItems.length > 0) {
       merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.announcementTitle), 'STORE');
@@ -695,9 +782,18 @@ export default function App() {
 
   // Front/back + 2 prayer slides always count; the announcement title only
   // appears when there is matching content.
+  // Only the bundled deck's confession block is a known size, so only its
+  // count is adjusted; a replaced back deck is counted as the file itself says.
+  const confessionSlideDelta =
+    !customDecks.back &&
+    confessionSlideCount > 0 &&
+    confessionSongTitle.trim().toLowerCase() !== DEFAULT_CONFESSION_SONG.toLowerCase()
+      ? confessionSlideCount - BUNDLED_CONFESSION_LYRIC_SLIDES
+      : 0;
   const fixedSlideCount =
     (customDecks.front?.slideCount ?? FRONT_SLIDE_COUNT) +
     (customDecks.back?.slideCount ?? BACK_SLIDE_COUNT) +
+    confessionSlideDelta +
     SERVICE_SLIDES.prayer1.length +
     SERVICE_SLIDES.prayer2.length +
     (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0);

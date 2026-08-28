@@ -1,5 +1,6 @@
 import type { ContiInfo, ContiSongEntry, LibraryEntry } from './types';
 import { normalizeTitle } from '../storage/library';
+import { DEFAULT_CONFESSION_SONG } from '../ai/aiSettings';
 
 /** `주님의 사랑 (E): 설명...` — title, musical key, description. */
 const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:：]\s*(.*)$/;
@@ -478,29 +479,50 @@ export function deriveSongsFromMusicPages(
   });
 }
 
-// The KCCP 공동체 고백송 — its lyric slides live in the fixed back-slides deck,
-// so it never needs generated lyric slides. Matched by normalized title so
-// spacing/case/punctuation differences on the cover page don't matter.
-const CONFESSION_SONG_TITLE = normalizeTitle('Celebrate the Light');
+// The 공동체 고백송 — its lyric slides live in the fixed back-slides deck, so
+// it never needs generated lyric slides. Which song that is comes from
+// 관리자 설정 (DEFAULT_CONFESSION_SONG is the one the bundled back deck
+// prints). Matched by normalized title so spacing/case/punctuation
+// differences on the cover page don't matter.
+
+/** How a conti cover page usually labels the slot itself, not the song. */
+const CONFESSION_LABEL = '공동체고백';
 
 /** True when a conti entry is the 공동체 고백송 supplied by the back slides. */
-export function isConfessionSong(title: string): boolean {
-  return normalizeTitle(title) === CONFESSION_SONG_TITLE;
+export function isConfessionSong(title: string, confessionTitle?: string): boolean {
+  const normalized = normalizeTitle(title);
+  const wanted = normalizeTitle(confessionTitle ?? DEFAULT_CONFESSION_SONG);
+  if (wanted.length >= 2 && normalized === wanted) return true;
+  // Some contis print the slot rather than the song ("공동체 고백송"), which
+  // names the same thing wherever the back slides supply the lyrics.
+  return normalized.includes(CONFESSION_LABEL);
 }
 
 /**
- * The 공동체 고백송 (Celebrate the Light) is supplied by the fixed back-slides
- * deck, so it is split off from the entries that need generated lyric slides.
- * Every other song — including the 입례 song, wherever it appears in the
- * order — stays in the lyrics list.
+ * Split a conti's song list into the three roles the deck gives them.
+ *
+ * The 공동체 고백송 is supplied by the fixed back-slides deck, so it is split
+ * off from the entries that need generated lyric slides. The song listed
+ * right AFTER it is the 설교 후 찬양 — sung after the sermon, so its slides
+ * belong after the post-sermon 기도 slide rather than in the opening praise
+ * set. Every other song — including the 입례 song, wherever it appears in the
+ * order — stays in the lyrics list, in its printed order.
  */
-export function splitLyricsAndConfessionSongs(songs: ContiSongEntry[]): {
+export function splitLyricsAndConfessionSongs(
+  songs: ContiSongEntry[],
+  confessionTitle?: string,
+): {
   lyricsSongs: ContiSongEntry[];
   confessionSong?: ContiSongEntry;
+  postSermonSong?: ContiSongEntry;
 } {
-  const confessionSong = songs.find((song) => isConfessionSong(song.title));
+  const confessionIndex = songs.findIndex((song) => isConfessionSong(song.title, confessionTitle));
+  const confessionSong = confessionIndex === -1 ? undefined : songs[confessionIndex];
+  const postSermonSong =
+    confessionIndex === -1 ? undefined : songs[confessionIndex + 1];
   return {
     lyricsSongs: songs.filter((song) => song !== confessionSong),
     confessionSong,
+    postSermonSong,
   };
 }

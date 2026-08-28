@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ATTEMPT_ORDER,
+  DEFAULT_CONFESSION_SONG,
   DEFAULT_EXCLUDED_TITLES,
   RECOGNITION_MODEL_CATALOG,
   attemptKey,
@@ -10,11 +11,13 @@ import {
   migrateEngineName,
   sanitizeAttemptOrder,
   sanitizeExcludedTitles,
+  sanitizeConfessionSong,
   sanitizeSharedSettings,
 } from '../../src/lib/ai/aiSettings';
 import {
   OPENROUTER_NEMOTRON_MODEL,
   RECOGNITION_MODEL_CATALOG as WORKER_CATALOG,
+  DEFAULT_CONFESSION_SONG as WORKER_CONFESSION,
   DEFAULT_EXCLUDED_TITLES as WORKER_EXCLUDED,
   migrateEngineName as workerMigrateEngineName,
   resolveOpenRouterRoute,
@@ -59,6 +62,7 @@ describe('recognition model catalog', () => {
       })),
     ).toEqual(WORKER_CATALOG);
     expect(DEFAULT_EXCLUDED_TITLES).toEqual(WORKER_EXCLUDED);
+    expect(DEFAULT_CONFESSION_SONG).toBe(WORKER_CONFESSION);
   });
 
   it('pins every OpenRouter fallback to an allowlisted free vision model', () => {
@@ -160,6 +164,21 @@ describe('sanitizeExcludedTitles', () => {
   });
 });
 
+describe('sanitizeConfessionSong', () => {
+  it('trims the title and keeps it as typed otherwise', () => {
+    expect(sanitizeConfessionSong('  나의 반석이신 하나님 ')).toBe('나의 반석이신 하나님');
+  });
+
+  it('defaults when the stored value is not a string', () => {
+    expect(sanitizeConfessionSong(undefined)).toBe(DEFAULT_CONFESSION_SONG);
+    expect(sanitizeConfessionSong(42)).toBe(DEFAULT_CONFESSION_SONG);
+  });
+
+  it('keeps an explicitly blank title (leave the back slides alone)', () => {
+    expect(sanitizeConfessionSong('   ')).toBe('');
+  });
+});
+
 describe('shared settings sanitizers (client vs proxy)', () => {
   it('produce identical results for the same raw payload', () => {
     const raw = {
@@ -169,6 +188,7 @@ describe('shared settings sanitizers (client vs proxy)', () => {
         { engine: 'x', model: 'y' },
       ],
       excludedTitles: [' 공동체 고백송 ', 42, '준비 찬양'],
+      confessionSong: '  나의 반석이신 하나님  ',
     };
     expect(sanitizeSharedSettings(raw)).toEqual(workerSanitize(raw));
   });
@@ -179,6 +199,7 @@ describe('recognition settings without storage (node)', () => {
     const settings = getAiSettings();
     expect(settings.attempts).toEqual(DEFAULT_ATTEMPT_ORDER);
     expect(settings.excludedTitles).toEqual(DEFAULT_EXCLUDED_TITLES);
+    expect(settings.confessionSong).toBe(DEFAULT_CONFESSION_SONG);
     expect(settings.attempts[0]).toEqual({ engine: 'gemini', model: 'gemini-3.6-flash' });
   });
 });

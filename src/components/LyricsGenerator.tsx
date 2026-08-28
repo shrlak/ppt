@@ -1383,7 +1383,13 @@ export default function LyricsGenerator({
       const baseSongs = hasCover
         ? parsed.info.songs
         : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, lib);
-      const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(baseSongs);
+      // Which song is the 공동체 고백송 is an administrator setting, and it
+      // also decides which entry is the 설교 후 찬양 (the one listed after it).
+      const shared = await getSyncedAiSettings();
+      const { lyricsSongs, confessionSong, postSermonSong } = splitLyricsAndConfessionSongs(
+        baseSongs,
+        shared.confessionSong,
+      );
       const excludedPages = new Set<number>();
       if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
@@ -1399,6 +1405,9 @@ export default function LyricsGenerator({
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;
+        // 콘티 order: the song right after the 공동체 고백송 is sung after the
+        // sermon, so its slides go after the post-sermon 기도 slide.
+        if (postSermonSong && entry === postSermonSong) song.postSermon = true;
         next.push(song);
         if (entry.pageIndex != null) assigned.add(entry.pageIndex);
       }
@@ -1428,7 +1437,6 @@ export default function LyricsGenerator({
 
       // Cover-listed songs on the administrator exclusion list (공동체
       // 고백송, 예배 전 준비 찬양 등) never become cards in the first place.
-      const shared = await getSyncedAiSettings();
       const excludedSongs = next.filter(
         (song) => song.title.trim() && isExcludedTitle(song.title, shared.excludedTitles),
       );
@@ -1464,6 +1472,10 @@ export default function LyricsGenerator({
         );
       } else if (confessionSong) {
         showToast(`'${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다 (백 슬라이드에 포함).`);
+      }
+      const postSermonKept = kept.find((song) => song.postSermon);
+      if (postSermonKept) {
+        showToast(`'${postSermonKept.title}'은 설교 후 찬양으로 두었습니다 (설교 뒤 기도 슬라이드 다음).`);
       }
 
       // Render score previews in the background.

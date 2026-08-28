@@ -1,13 +1,14 @@
 // Administrator panel: replace or restore the front/back slide decks that
 // frame every generated presentation (stored in this browser via IndexedDB),
-// plus the shared recognition settings — concurrent model pool and excluded titles —
-// which are stored on the recognition proxy so every device sees the same
-// configuration.
+// plus the shared settings — concurrent model pool, the 공동체 고백송 printed
+// in the back deck, and excluded titles — which are stored on the recognition
+// proxy so every device sees the same configuration.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
 import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type StoredDeck } from '../lib/storage/deckStore';
 import {
   attemptKey,
+  DEFAULT_CONFESSION_SONG,
   fetchSharedSettings,
   findModelInfo,
   hasSharedSettings,
@@ -19,10 +20,14 @@ import {
   type SharedRecognitionSettings,
   type ModelRole,
 } from '../lib/ai/aiSettings';
+import { lookupConfessionSong } from '../lib/utils/confessionSong';
+import { fetchBundledLibrary, loadUserLibrary, mergeLibraries } from '../lib/storage/library';
 import { showToast } from '../lib/utils/toast';
 import { ADMIN_PASSWORD, ADMIN_UNLOCK_KEY } from '../lib/adminAuth';
 import Icon from './Icon';
 import LearningAdminSection from './LearningAdminSection';
+
+const BASE: string = import.meta.env.BASE_URL || '/';
 
 interface Props {
   onClose: () => void;
@@ -204,8 +209,8 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
     <Modal title="관리자 설정" onClose={onClose}>
       <p className="admin-intro">
         PPT의 front/back 슬라이드와 가사 인식 설정을 관리합니다. 슬라이드 파일은 이 브라우저에
-        저장되고, 동시 실행 모델 목록과 제외 곡 목록은 공유 서버에 저장되어 모든 기기에 동일하게
-        적용됩니다. 공유 API 사용량은 헤더의 '사용량' 버튼에서 확인할 수 있습니다.
+        저장되고, 동시 실행 모델 목록과 공동체 고백송, 제외 곡 목록은 공유 서버에 저장되어 모든
+        기기에 동일하게 적용됩니다. 공유 API 사용량은 헤더의 '사용량' 버튼에서 확인할 수 있습니다.
       </p>
       {SLOTS.map(({ slot, label, description }) => (
         <DeckSlotRow key={slot} slot={slot} label={label} description={description} onDeckChange={onDeckChange} />
@@ -218,6 +223,7 @@ export default function AdminPanel({ onClose, onDeckChange }: Props) {
 function RecognitionSettingsSection() {
   const [settings, setSettings] = useState<SharedRecognitionSettings>(() => loadLocalSharedSettings());
   const [excludedText, setExcludedText] = useState(() => settings.excludedTitles.join('\n'));
+  const [confessionText, setConfessionText] = useState(() => settings.confessionSong);
   // Deployment state rather than a setting: only the Worker's environment can
   // grant permission to read Bugs pages, so this is displayed, never toggled.
   const [bugsScrapingAllowed, setBugsScrapingAllowed] = useState(false);
@@ -239,6 +245,7 @@ function RecognitionSettingsSection() {
       if (shared) {
         setSettings(shared);
         setExcludedText(shared.excludedTitles.join('\n'));
+        setConfessionText(shared.confessionSong);
         setBugsScrapingAllowed(!!(shared as { bugsScrapingAllowed?: boolean }).bugsScrapingAllowed);
         setSync({ state: 'synced', message: '모든 기기와 동기화되어 있습니다.' });
       } else {
@@ -286,6 +293,17 @@ function RecognitionSettingsSection() {
     [persist, settings],
   );
 
+  function saveConfessionSong() {
+    const confessionSong = confessionText.trim();
+    setConfessionText(confessionSong);
+    persist({ ...settings, confessionSong });
+    showToast(
+      confessionSong
+        ? `공동체 고백송을 '${confessionSong}'으로 저장했습니다.`
+        : '공동체 고백송을 비웠습니다 — back slides를 그대로 사용합니다.',
+    );
+  }
+
   function saveExcluded() {
     const excludedTitles = sanitizeExcludedTitles(excludedText.split('\n'));
     setExcludedText(excludedTitles.join('\n'));
@@ -327,6 +345,12 @@ function RecognitionSettingsSection() {
           </ul>
         </div>
       </section>
+      <ConfessionSongSection
+        savedTitle={settings.confessionSong}
+        value={confessionText}
+        onChange={setConfessionText}
+        onSave={saveConfessionSong}
+      />
       <section className="admin-deck admin-recognition" data-testid="admin-excluded-section">
         <div className="admin-deck-info">
           <h4>찬양 편집 제외 곡</h4>
@@ -351,5 +375,102 @@ function RecognitionSettingsSection() {
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * Which song the back deck's 공동체 고백 slides print.
+ *
+ * Only the TITLE is stored (and shared with every device); the lyrics come
+ * from the 곡 라이브러리, so the confession song is corrected and saved in the
+ * 찬양 step like any other song rather than typed a second time here. The
+ * status line below says what the generator will actually do with the title —
+ * a title the library has no lyrics for leaves the back slides untouched, and
+ * that is worth seeing here rather than discovering in a downloaded deck.
+ */
+function ConfessionSongSection({
+  savedTitle,
+  value,
+  onChange,
+  onSave,
+}: {
+  savedTitle: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const [titles, setTitles] = useState<string[]>([]);
+  const [status, setStatus] = useState('확인 중…');
+  const [tone, setTone] = useState<'synced' | 'error' | 'local'>('local');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchBundledLibrary(BASE).then((bundled) => {
+      if (!cancelled) setTitles(mergeLibraries(bundled, loadUserLibrary()).map((entry) => entry.title));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void lookupConfessionSong(BASE, savedTitle).then((found) => {
+      if (cancelled) return;
+      if (!found.title) {
+        setTone('local');
+        setStatus('비워 두면 back slides의 공동체 고백 슬라이드를 그대로 사용합니다.');
+      } else if (found.song) {
+        setTone('synced');
+        setStatus(
+          `'${found.title}' — 라이브러리 가사로 공동체 고백 슬라이드 ${found.slideCount}장을 만듭니다.`,
+        );
+      } else {
+        setTone('error');
+        setStatus(
+          `라이브러리에 '${found.title}' 가사가 없어 back slides를 그대로 둡니다. 찬양 단계에서 이 곡을 라이브러리에 저장해 주세요.`,
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [savedTitle]);
+
+  return (
+    <section className="admin-deck admin-recognition" data-testid="admin-confession-section">
+      <div className="admin-deck-info">
+        <h4>공동체 고백송</h4>
+        <p>
+          Back slides에서 <strong>공동체 고백</strong>이라고 적힌 슬라이드와 그 뒤의 가사 슬라이드를
+          여기서 정한 곡으로 자동으로 바꿔 줍니다. 가사는 곡 라이브러리에서 가져오므로, 새 고백송은
+          찬양 단계에서 한 번 저장해 두면 됩니다. 콘티에서도 이 곡은 일반 찬양 슬라이드에서
+          빼고, 콘티에 이 곡 다음으로 적힌 찬양을 설교 후 찬양으로 잡습니다. 모든 기기에
+          적용됩니다.
+        </p>
+        <input
+          className="admin-excluded-input"
+          data-testid="admin-confession-song"
+          list="admin-confession-titles"
+          placeholder={DEFAULT_CONFESSION_SONG}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <datalist id="admin-confession-titles">
+          {titles.map((title) => (
+            <option key={title} value={title} />
+          ))}
+        </datalist>
+        <p className={`admin-sync admin-sync-${tone}`} data-testid="admin-confession-status" role="status">
+          {status}
+        </p>
+      </div>
+      <div className="admin-deck-actions">
+        <button type="button" className="btn" data-testid="admin-confession-save" onClick={onSave}>
+          <Icon name="save" />
+          고백송 저장
+        </button>
+      </div>
+    </section>
   );
 }

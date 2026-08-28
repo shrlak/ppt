@@ -71,6 +71,13 @@ export interface Song {
   linesPerSlide: number;
   /** 1-based page number of this song's score in the uploaded conti PDF */
   pageIndex?: number;
+  /**
+   * 설교 후 찬양: sung after the sermon rather than in the opening praise
+   * set, so its slides are placed right after the post-sermon 기도 slide
+   * instead of at the front of the deck. Set from the 콘티 (the song listed
+   * after the 공동체 고백송) and toggled per song in the 찬양 step.
+   */
+  postSermon?: boolean;
   /** Trust level of the current reading; absent means an untouched scaffold. */
   verification?: VerificationState;
   /** Bumped every time the user saves this song to the library. */
