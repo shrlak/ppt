@@ -121,8 +121,10 @@ describe('complete service deck', () => {
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [42]), 'STORE');
     deck = await mergePptxDecks(deck, await foreignSermonDeck(), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [31]), 'STORE');
-    // 설교 후 찬양 goes between that 기도 slide and the 광고 title.
+    // 설교 후 찬양 sits between that 기도 slide and one more 기도 slide, which
+    // is what the 광고 title then follows.
     deck = await mergePptxDecks(deck, await buildPptx(lyricsTemplate, [postSermonSong]), 'STORE');
+    deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [31]), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [32]), 'STORE');
     deck = await mergePptxDecks(
       deck,
@@ -150,7 +152,7 @@ describe('complete service deck', () => {
     expect(await zip.file('[Content_Types].xml')!.async('string')).not.toContain('/ppt/metadata');
 
     const slides = slideFiles(zip);
-    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 2 + 1 + 20);
+    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 2 + 1 + 1 + 20);
 
     const first = await zip.file('ppt/slides/slide1.xml')!.async('string');
     expect(first).toContain('빛주사랑');
@@ -173,6 +175,10 @@ describe('complete service deck', () => {
     const positionOf = (text: string) => orderedSlides.findIndex((xml) => xml.includes(text));
     expect(positionOf('축복하노라')).toBeGreaterThan(positionOf('플레이스홀더 제목'));
     expect(positionOf('축복하노라')).toBeLessThan(positionOf('테스트 광고'));
+    // …and a 기도 slide of its own separates it from the 광고 title.
+    const lastPostSermon = orderedSlides.findLastIndex((xml) => xml.includes('축복하노라'));
+    expect(orderedSlides[lastPostSermon + 1]).toContain('기도');
+    expect(orderedSlides[lastPostSermon + 2]).toContain('광고');
     // The opening praise set still comes first, before the scripture slides.
     expect(positionOf('새 노래로 찬양해')).toBeLessThan(positionOf('하나님과 화평을 누리자'));
     const allText = (await Promise.all(slides.map((path) => zip.file(path)!.async('string')))).join('\n');

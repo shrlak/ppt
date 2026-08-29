@@ -8,13 +8,15 @@
 ## 생성되는 슬라이드 순서
 
 ```
-Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  설교 후 찬양  →  광고  →  Back/End  →  추가 자료
+Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  설교 후 찬양  →  기도  →  광고  →  Back/End  →  추가 자료
 ```
 
 Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
 포함합니다. **설교 후 찬양**으로 지정한 곡만 찬양 자리 대신 설교 뒤 기도 슬라이드 다음으로
-들어가고(지정한 곡이 없으면 이 자리는 건너뜁니다), Back slides의 **공동체 고백** 슬라이드는
-관리자 설정에서 정한 고백송으로 자동으로 바뀝니다. 기도(×2)와 광고 서식은 `public/service-template.pptx`에서 가져오며, 나머지 입력을
+들어가고, 그 뒤에 기도 슬라이드가 한 장 더 붙습니다 (지정한 곡이 없으면 이 찬양과 기도를 함께
+건너뛰므로 기도 슬라이드가 연달아 나오지 않습니다). Back slides의 **공동체 고백** 슬라이드는
+관리자 설정에서 정한 고백송으로 자동으로 바뀝니다. 기도와 광고 서식은
+`public/service-template.pptx`에서 가져오며, 나머지 입력을
 고정 순서에 맞춰 하나의 `.pptx`로 내려받습니다. 추가 자료가 있으면 Back/End의 마지막 장 뒤에
 사용자가 정한 순서대로 이어집니다. 다운로드 파일명은 콘티 날짜가 속한
 주의 일요일을 기준으로 `MMDD.pptx`(예: `0712.pptx`)로 자동 생성됩니다.
@@ -23,7 +25,7 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 
 헤더의 **편집기 보기** 버튼을 누르면 단계별 화면 대신 PowerPoint 편집기 같은 화면으로
 전환됩니다. 왼쪽에 최종 PPT의 전체 슬라이드 목록(Front → 찬양 → 기도 → 성경 말씀 → 설교 →
-기도 → 설교 후 찬양 → 광고 → Back/End → 추가 자료)이 순서대로 나열되고, 오른쪽에는 모든 입력 편집기가 함께
+기도 → 설교 후 찬양 → 기도 → 광고 → Back/End → 추가 자료)이 순서대로 나열되고, 오른쪽에는 모든 입력 편집기가 함께
 표시됩니다. 찬양이나 광고 슬라이드를 왼쪽에서 클릭하면 오른쪽 편집 화면이 그 위치로
 이동합니다. 같은 데이터를 보여주는 것이라 **단계별 보기**로 다시 전환해도 입력한 내용은
 그대로 유지됩니다.
@@ -249,8 +251,9 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
   Back slides가 이미 그 곡을 담고 있으면 Back slides를 그대로 사용합니다. 기본값은 기본 Back
   slides에 들어 있는 `Celebrate the Light`입니다.
 - **설교 후 찬양** — 콘티에서 공동체 고백송 **다음에** 적힌 찬양은 설교 후 찬양으로 보고, 슬라이드를
-  맨 앞 찬양 자리가 아니라 **설교 뒤 기도 슬라이드 다음**에 넣습니다. 찬양 단계의 각 곡 카드에 있는
-  **설교 후 찬양** 버튼으로 언제든지 지정하거나 해제할 수 있습니다.
+  맨 앞 찬양 자리가 아니라 **설교 뒤 기도 슬라이드 다음**에 넣고, 그 뒤에 광고 앞 기도 슬라이드를
+  한 장 더 넣습니다. 설교 후 찬양으로 지정한 곡이 없는 주에는 이 찬양과 기도를 함께 건너뜁니다.
+  찬양 단계의 각 곡 카드에 있는 **설교 후 찬양** 버튼으로 언제든지 지정하거나 해제할 수 있습니다.
 - **제외 곡 목록 (관리자 설정)** — 인식된 곡 제목이 관리자 설정의 **제외 곡 목록**(기본:
   공동체 고백송, 예배 전 준비 찬양)과 일치하면 찬양 편집에 표시하지 않습니다. 목록은 공유
   서버에 저장되어 모든 기기에 적용됩니다.
@@ -373,8 +376,9 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
 **KCCP PPT Generator** is a six-step wizard that combines five input types into one downloaded
 `.pptx`, in this fixed order: **front slides → praise (찬양) → prayer → scripture (말씀) →
-sermon (설교) → prayer → post-sermon praise (설교 후 찬양) → announcements (광고) → back/end
-slides → additional files**. The supplied front and back decks
+sermon (설교) → prayer → post-sermon praise (설교 후 찬양) → prayer → announcements (광고) →
+back/end slides → additional files**. A week with no post-sermon praise skips that song and the
+prayer slide after it together. The supplied front and back decks
 are mandatory; the prayer and announcement layouts come from `public/service-template.pptx`. The
 download filename is generated automatically from that week's Sunday in `MMDD.pptx` format.
 
