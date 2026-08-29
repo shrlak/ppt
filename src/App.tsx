@@ -54,6 +54,10 @@ const BASE: string = import.meta.env.BASE_URL || '/';
 const SERVICE_SLIDES = {
   prayer1: [17],
   prayer2: [31],
+  // The 기도 slide between 설교 후 찬양 and 광고 is the same design as the
+  // one right after the sermon — the template ships one 기도 slide per point
+  // in the service, and these two are identical.
+  prayer3: [31],
   announcementTitle: [32],
   announcementItemTemplate: 33,
 };
@@ -478,10 +482,15 @@ export default function App() {
     merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer2), 'STORE');
     overview.push(...expandDeckSegment({ kind: 'prayer', count: SERVICE_SLIDES.prayer2.length, labelAt: () => '기도' }));
 
-    // 설교 후 찬양 — right after the 기도 slide that follows the sermon.
+    // 설교 후 찬양 — between the 기도 slide that follows the sermon and the
+    // 기도 slide that precedes 광고. Both that song and the 기도 after it are
+    // part of the same step of the service, so a week with no 설교 후 찬양
+    // skips the pair rather than showing two 기도 slides back to back.
     if (postSermonSongs.length > 0) {
       merged = await mergePptxDecks(merged, await buildPptx(await loadLyricsTemplate(), postSermonSongs), 'STORE');
       overview.push(...postSermonSongs.flatMap((s) => songOverviewItems(s)));
+      merged = await mergePptxDecks(merged, await extractSlideSubset(serviceTemplate, SERVICE_SLIDES.prayer3), 'STORE');
+      overview.push(...expandDeckSegment({ kind: 'prayer', count: SERVICE_SLIDES.prayer3.length, labelAt: () => '기도' }));
     }
 
     if (announcementItems.length > 0) {
@@ -780,8 +789,8 @@ export default function App() {
     .map((s) => ({ title: s.title, tokens: unmatchedTokens(s) }))
     .filter((w) => w.tokens.length > 0);
 
-  // Front/back + 2 prayer slides always count; the announcement title only
-  // appears when there is matching content.
+  // Front/back + the two fixed prayer slides always count; the third 기도 and
+  // the announcement title only appear when there is matching content.
   // Only the bundled deck's confession block is a known size, so only its
   // count is adjusted; a replaced back deck is counted as the file itself says.
   const confessionSlideDelta =
@@ -796,6 +805,7 @@ export default function App() {
     confessionSlideDelta +
     SERVICE_SLIDES.prayer1.length +
     SERVICE_SLIDES.prayer2.length +
+    (songs.some((song) => song.postSermon) ? SERVICE_SLIDES.prayer3.length : 0) +
     (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0);
   // Bible slide count isn't known until generation (it depends on how many
   // verses each reference expands to, which needs the full translation

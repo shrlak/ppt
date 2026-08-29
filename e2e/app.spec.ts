@@ -1001,6 +1001,9 @@ test('설교 후 찬양 lands after the sermon prayer instead of in the opening 
   // Exactly the two 기도 slides sit between the opening set and this song —
   // it is no longer merged straight onto the end of the praise block.
   expect(firstPostSermon - lastOpening).toBe(3);
+  // And a third 기도 slide follows it, before the deck's closing slides.
+  const lastPostSermon = texts.findLastIndex((xml) => xml.includes('주 은혜임을'));
+  expect(texts[lastPostSermon + 1]).toContain('기도');
 });
 
 test('admin panel sets the 공동체 고백송 and the back slides print it', async ({ page }, testInfo) => {
