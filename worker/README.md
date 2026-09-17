@@ -27,6 +27,10 @@ Admin    ──▶ /learning/correction-model── upload / activate / roll bac
 Everyone ◀──GET /learning/correction-model/:v/resolve/*── model files (app origins)
 Everyone ◀──GET /libraries/lyrics── shared user-added lyrics
 Admin    ──PUT/DELETE /libraries/lyrics── save or delete lyrics
+Browser  ──GET  /wednesday/songs──▶ Worker (search) ──▶ 찬양 PPT hits + signed tokens
+Browser  ──POST /wednesday/songs/file▶ Worker downloads that .pptx and relays it
+Everyone ◀──GET /libraries/wednesday-songs── 수요예배 song titles + source links
+Admin    ──PUT/DELETE /libraries/wednesday-songs── save or delete one
 Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
 Admin    ──POST/DELETE /libraries/ppt── save, edit, or delete PPT entries
 Cron     ──Sun 5 PM ET────────▶  wipe every PPT entry and its files
@@ -55,6 +59,45 @@ across all its files, and the shared library accepts up to 250 PPT entries.
 Browser storage remains an offline cache, so a temporary Worker outage does
 not discard a newly generated presentation. Deletion tombstones keep an old
 device from restoring an item deleted elsewhere.
+
+### 수요예배 찬양 PPT routes
+
+수요예배 찬양 slides are the 악보 pages of each song's own PowerPoint file, so
+the app needs the file itself. A browser cannot fetch one: search result pages
+and file hosts send no CORS headers, so the request is refused before it
+starts. These two routes do it on its behalf.
+
+`GET /wednesday/songs?title=…` searches the web (the same keyless DuckDuckGo
+HTML endpoints the lyrics route uses) for `"<제목> 찬양 ppt"` and returns the
+hits, **each with an HMAC-signed token in place of its URL**. That keeps the
+`/lyrics` invariant — the browser sends a title, never a URL — so a search
+result cannot be swapped for an address of the caller's choosing.
+
+`POST /wednesday/songs/file` takes `{ token }` (or `{ url }`, for an address
+the operator pasted) and returns the `.pptx` bytes. Before anything is
+fetched: https only, the host must be on the allowlist, IP literals and
+`localhost`/`.local`/`.internal` names are refused outright, the final URL
+after redirects is re-checked, the transfer is capped at 25 MB and timed out,
+and the bytes must actually be a PowerPoint package (ZIP magic plus a
+`ppt/presentation.xml` part) — a login page returned with HTTP 200 is not a
+deck. A post URL is followed exactly one step, to a `.pptx` attachment on an
+allowlisted host, with the post as `Referer` (attachment hosts require it).
+
+The allowlist ships with the 네이버 블로그·카페 file hosts and grows with the
+`WEDNESDAY_PPT_HOSTS` variable (see `wrangler.toml`) — whose files this proxy
+relays is a permission decision, not a code one. Anything off the list is
+still returned to the operator as a **link** to open and download by hand,
+which is also the only way to get a file from a source that needs a login
+(네이버 카페). Every deck can be uploaded by hand, so these routes failing
+never blocks a service.
+
+`GET|PUT|DELETE /libraries/wednesday-songs` is the 수요예배 song index: a
+title, where its PPT came from, and how many slides it had. **Links only, no
+files** — it remembers where to find a deck again, so the next week starts
+from "open this and download it" rather than from a search. It lives outside
+`library:ppt:*`, so the weekly purge below leaves it alone, exactly like the
+lyrics library. The week's actual files ride along with that week's PPT-library
+entry and are cleared with it.
 
 ### Weekly PPT purge (Sunday 5 PM)
 

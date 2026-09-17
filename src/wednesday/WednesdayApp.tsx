@@ -14,7 +14,7 @@ import { buildWednesdayDeck } from './deckBuilder';
 import { buildWednesdayThumbnail, thumbnailFileName } from './thumbnail';
 import { suggestWednesdayFileName } from './fields';
 import { EMPTY_PASSAGE, parsePassageInput, resolvePassage, type ResolvedPassage } from './passage';
-import WednesdaySongList, { blankWednesdaySong } from './WednesdaySongList';
+import WednesdaySongList, { blankWednesdaySong, type SongsUpdate } from './WednesdaySongList';
 import {
   clearWednesdayDraft,
   forgetWednesdaySongDeck,
@@ -314,7 +314,7 @@ export default function WednesdayApp() {
   const patchService = (patch: Partial<WednesdayService>) =>
     setService((current) => ({ ...current, ...patch }));
 
-  const handleSongsChange = useCallback((next: WednesdaySong[]) => {
+  const handleSongsChange = useCallback((next: SongsUpdate) => {
     setSongs(next);
     setOverview(null);
   }, []);
