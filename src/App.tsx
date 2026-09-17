@@ -28,6 +28,7 @@ import AutoSaveIndicator from './components/AutoSaveIndicator';
 import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/deckStore';
 import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck, type SavedDeckResult } from './lib/storage/pptLibrary';
 import { decodeDeckSource, encodeDeckSource } from './lib/storage/deckSource';
+import { isWednesdaySource } from './wednesday/source';
 import {
   AUTO_SAVE_BUSY_POLL_MS,
   AUTO_SAVE_DEBOUNCE_MS,
@@ -845,6 +846,14 @@ export default function App() {
    * re-parsed by the 찬양 step exactly as a fresh upload would be.
    */
   async function openSavedDeck(deck: SavedDeck) {
+    // 수요예배 decks are saved into the same library but belong to the other
+    // page — editing one here would open an empty week.
+    if (isWednesdaySource(deck.source)) {
+      showToast(`'${deck.name}'은(는) 수요예배 PPT입니다. 수요예배 생성기로 이동합니다.`);
+      window.location.href = `${BASE}wednesday.html?deck=${encodeURIComponent(deck.id)}`;
+      return;
+    }
+
     const source = decodeDeckSource(deck.source);
     let restoreWarning: string | null = null;
     if (deck.additionalFiles) {
@@ -918,6 +927,12 @@ export default function App() {
           {/* Narrow screens drop the labels and keep the icons; the label
               stays in the DOM as the accessible name either way. */}
           <nav className="header-actions" aria-label="도구">
+            {/* The 수요예배 generator is its own page: no 콘티, no 광고, no
+                추가 자료, and a different deck design end to end. */}
+            <a className="btn" href={`${BASE}wednesday.html`} data-testid="wednesday-link">
+              <Icon name="music" />
+              <span className="btn-label">수요예배</span>
+            </a>
             <button
               type="button"
               className="btn"

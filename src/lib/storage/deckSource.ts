@@ -105,6 +105,11 @@ export function decodeDeckSource(file: DeckSourceFile | null | undefined): DeckS
   if (!parsed || typeof parsed !== 'object') return null;
   const raw = parsed as Record<string, unknown>;
   if (raw.version !== DECK_SOURCE_VERSION) return null;
+  // The 수요예배 generator saves its own snapshot under the same file name and
+  // version, tagged with a kind (see wednesday/source.ts). Reading it as a
+  // 주일 snapshot would restore an empty week, so it is refused here; the
+  // library hands those entries to the Wednesday page instead.
+  if (typeof raw.kind === 'string' && raw.kind !== 'sunday') return null;
   return {
     version: DECK_SOURCE_VERSION,
     ...(typeof raw.contiDate === 'string' ? { contiDate: raw.contiDate } : {}),
