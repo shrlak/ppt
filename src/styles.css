@@ -3723,11 +3723,74 @@ main[data-direction='back'] .wizard-panel.active {
   color: var(--ink-muted);
 }
 
+/* 악보 사진: a strip of page thumbnails, in the order they become slides. */
+.wednesday-sheets {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wednesday-sheets li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+}
+.wednesday-sheets img {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.wednesday-sheet-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.wednesday-library-list {
+  display: grid;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.wednesday-library-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.wednesday-library-list .btn {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  text-align: left;
+}
+.wednesday-library-list em {
+  margin-left: var(--s-2);
+  color: var(--ink-faint);
+  font-style: normal;
+  font-size: var(--text-xs);
+}
+.wednesday-song-add-row {
+  display: flex;
+}
+
 @media (max-width: 640px) {
   .field-row {
     grid-template-columns: 1fr;
   }
   .wednesday-song-tools {
     margin-left: 0;
+  }
+  .wednesday-sheets img {
+    width: 64px;
+    height: 48px;
   }
 }

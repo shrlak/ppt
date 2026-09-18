@@ -8,6 +8,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Stands in for a downloaded 찬양 PPT. It is a real four-slide deck at another
 // slide size, so the rescale path runs here too.
 const SONG_PPTX = path.join(HERE, '..', 'public', 'front-slides.pptx');
+const SHEET_PNG = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
 const PROXY = 'http://localhost:4173/ppt/__proxy';
 // Reading the 개역개정 file and building the deck are both slower in CI.
 const BUILD_TIMEOUT = 60_000;
@@ -42,6 +43,17 @@ async function textOfSlides(zip: JSZip): Promise<string[]> {
     );
   }
   return texts;
+}
+
+/** One slide's raw XML, by its position in presentation order. */
+async function slideXmlAt(zip: JSZip, position: number): Promise<string> {
+  const presentation = await zip.file('ppt/presentation.xml')!.async('string');
+  const rels = await zip.file('ppt/_rels/presentation.xml.rels')!.async('string');
+  const order = [...(presentation.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/)?.[1] ?? '').matchAll(
+    /r:id="([^"]+)"/g,
+  )].map((match) => match[1]);
+  const target = rels.match(new RegExp(`Id="${order[position - 1]}"[^>]*Target="slides/(slide\\d+\\.xml)"`));
+  return zip.file(`ppt/slides/${target![1]}`)!.async('string');
 }
 
 async function fillServiceInfo(page: Page): Promise<void> {
@@ -209,6 +221,9 @@ test.describe('수요예배 generator', () => {
         json: { title: '없는 곡', candidates: [], links: [], message: '받아올 수 있는 찬양 PPT를 찾지 못했습니다.' },
       }),
     );
+    await page.route(`${PROXY}/wednesday/songs/sheets?*`, (route) =>
+      route.fulfill({ json: { title: '없는 곡', candidates: [] } }),
+    );
 
     await page.getByTestId('wednesday-tab-songs').click();
     await page.getByTestId('wednesday-song-add').click();
@@ -218,6 +233,118 @@ test.describe('수요예배 generator', () => {
     await expect(page.getByTestId('wednesday-song-message-0')).toContainText('찾지 못했습니다');
     // The upload path is still right there.
     await expect(page.getByTestId('wednesday-song-upload-0')).toBeVisible();
+  });
+
+  test('turns uploaded 악보 사진 into one slide each', async ({ page }, testInfo) => {
+    await fillServiceInfo(page);
+    await page.getByTestId('wednesday-next-service').click();
+
+    await page.getByTestId('wednesday-song-add').click();
+    await page.getByTestId('wednesday-song-title-0').fill('주 은혜임을');
+    // Two pages of the same 악보, as a phone photo or a scan would arrive.
+    await page.getByTestId('wednesday-song-input-0').setInputFiles([SHEET_PNG, SHEET_PNG]);
+    await expect(page.getByTestId('wednesday-song-sheets-0')).toContainText('악보 사진 2장');
+    await expect(page.getByTestId('wednesday-song-sheet-list-0').locator('img')).toHaveCount(2);
+
+    // A page can be taken back out before the deck is made.
+    await page.getByTestId('wednesday-song-sheet-remove-0-1').click();
+    await expect(page.getByTestId('wednesday-song-sheets-0')).toContainText('악보 사진 1장');
+
+    await page.getByTestId('wednesday-next-songs').click();
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
+      page.getByTestId('wednesday-download').click(),
+    ]);
+    const saved = testInfo.outputPath('sheets.pptx');
+    await download.saveAs(saved);
+    const zip = await JSZip.loadAsync(await fs.readFile(saved));
+    const texts = await textOfSlides(zip);
+
+    // 표지·인트로·경배와 찬양 + [제목 + 악보 1장] + 기도·말씀·본문 4장·설교·기도·합심기도·마지막
+    expect(texts).toHaveLength(15);
+    expect(texts[3]).toContain('주 은혜임을');
+    // The 악보 page is a picture, so its slide carries no text of its own.
+    expect(texts[4]).toBe('');
+    const sheetSlide = await slideXmlAt(zip, 5);
+    expect(sheetSlide).toContain('<p:pic>');
+  });
+
+  test('finds and attaches a song by itself once the title is typed', async ({ page }) => {
+    const sheet = await fs.readFile(SHEET_PNG);
+    // No 찬양 PPT for this song, but its 악보 is out there.
+    await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
+      route.fulfill({ json: { title: '주 은혜임을', candidates: [], links: [] } }),
+    );
+    await page.route(`${PROXY}/wednesday/songs/sheets?*`, (route) =>
+      route.fulfill({
+        json: {
+          title: '주 은혜임을',
+          candidates: [
+            {
+              token: 'signed-token',
+              url: 'https://postfiles.pstatic.net/score.png',
+              host: 'postfiles.pstatic.net',
+              title: '주 은혜임을 악보',
+              score: 1,
+              decision: 'auto',
+            },
+          ],
+        },
+      }),
+    );
+    await page.route(`${PROXY}/wednesday/songs/image`, (route) =>
+      route.fulfill({ status: 200, contentType: 'image/png', body: sheet }),
+    );
+
+    await page.getByTestId('wednesday-tab-songs').click();
+    await page.getByTestId('wednesday-song-add').click();
+    // Typing the title is the whole interaction — no search button, no picking.
+    await page.getByTestId('wednesday-song-title-0').fill('주 은혜임을');
+
+    await expect(page.getByTestId('wednesday-song-sheets-0')).toContainText('악보 사진 1장', {
+      timeout: BUILD_TIMEOUT,
+    });
+    await expect(page.getByTestId('wednesday-song-sheets-0')).toContainText('인터넷에서 받음');
+    await expect(page.getByTestId('wednesday-library')).toContainText('주 은혜임을');
+  });
+
+  test('prefers a 찬양 PPT when the search is sure of one', async ({ page }) => {
+    const songFile = await fs.readFile(SONG_PPTX);
+    await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
+      route.fulfill({
+        json: {
+          title: '나의 반석이신 하나님',
+          candidates: [
+            {
+              token: 'ppt-token',
+              url: 'https://blogfiles.pstatic.net/song.pptx',
+              host: 'blogfiles.pstatic.net',
+              title: '나의 반석이신 하나님 ppt',
+              direct: true,
+              score: 1,
+              decision: 'auto',
+            },
+          ],
+          links: [],
+        },
+      }),
+    );
+    await page.route(`${PROXY}/wednesday/songs/file`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        body: songFile,
+      }),
+    );
+
+    await page.getByTestId('wednesday-tab-songs').click();
+    await page.getByTestId('wednesday-song-add').click();
+    await page.getByTestId('wednesday-song-title-0').fill('나의 반석이신 하나님');
+
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장', {
+      timeout: BUILD_TIMEOUT,
+    });
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('인터넷에서 받음');
   });
 
   test('links both generators to each other', async ({ page }) => {

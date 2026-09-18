@@ -8,7 +8,7 @@
 | | 주일예배 | 수요예배 |
 |---|---|---|
 | 주소 | <https://shrlak.github.io/ppt/> | <https://shrlak.github.io/ppt/wednesday.html> |
-| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 곡 PPT를 받아 그 **악보·가사 슬라이드를 그대로 넣습니다** |
+| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
 | 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
 | 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
 | 파일명 | 그 주 **일요일** `MMDD.pptx` | 그 주 **수요일** `MMDD.pptx` |
@@ -362,17 +362,30 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 
 ### 2단계 · 찬양
 
-곡 제목을 적고, 그 곡의 PPT를 가져오면 **그 파일의 모든 슬라이드가** 찬양 제목 장 뒤에 순서대로
-들어갑니다. 가져오는 방법은 두 가지입니다.
+**곡 제목만 적으면 됩니다.** 제목을 입력하면 앱이 알아서 인터넷을 찾아 그 곡의 자료를 받아
+붙입니다. 붙는 것은 둘 중 하나입니다.
 
-- **인터넷에서 찾기** — 제목으로 `"<제목> 찬양 ppt"`를 검색해 받아올 수 있는 결과를 보여 주고,
-  고른 것을 서버가 대신 내려받습니다. 브라우저는 다른 사이트의 파일을 직접 받을 수 없어(CORS)
-  Worker가 중계합니다. 받아올 수 있는 사이트 목록은 배포 설정(`WEDNESDAY_PPT_HOSTS`)이 정합니다.
-- **파일 올리기** — 직접 내려받은 `.pptx`를 올립니다. **로그인이 필요한 네이버 카페처럼 자동으로
-  받을 수 없는 곳은 이 방법으로** 넣으세요. 언제나 동작하는 경로라 검색 버튼 옆에 항상 있습니다.
+- **찬양 PPT** — 그 파일의 **모든 슬라이드가** 찬양 제목 장 뒤에 순서대로 들어갑니다.
+- **악보 사진** — 사진 **한 장이 슬라이드 한 장**이 됩니다. 사진은 비율을 그대로 유지한 채 슬라이드
+  가운데에 맞춰 들어갑니다.
 
-곡은 위·아래 버튼으로 순서를 바꾸고, 필요하면 지울 수 있습니다. 파일을 아직 못 구한 곡도 제목만
+찬양 PPT가 확실히 그 곡으로 확인되면 그것을 쓰고, 없으면 악보 사진을 받아 붙입니다(보통 1~2장).
+확실한 결과가 없을 때는 **마음대로 고르지 않고** 찾은 것을 보여 주니 맞는 것을 고르시면 됩니다.
+
+- **직접 올리기도 됩니다** — `PPT·악보 사진 올리기` 버튼으로 `.pptx`나 사진(PNG·JPG)을 여러 장
+  한꺼번에 올릴 수 있습니다. **로그인이 필요한 네이버 카페처럼 자동으로 받을 수 없는 곳, 직접 찍은
+  악보 사진**은 이 방법으로 넣으세요. 언제나 동작하는 경로라 항상 함께 있습니다.
+- **사진은 한 장씩 빼고 더할 수 있습니다** — 붙은 악보 사진이 미리보기로 나오고, 필요 없는 장은
+  ✕로 지우고, 검색이 찾아 둔 나머지 장은 한 번 눌러 추가할 수 있습니다.
+- **다시 찾기** 버튼으로 같은 곡을 다시 찾아볼 수 있습니다.
+
+곡은 위·아래 버튼으로 순서를 바꾸고, 필요하면 지울 수 있습니다. 자료를 아직 못 구한 곡도 제목만
 적어 두면 **찬양 제목 장**은 만들어집니다.
+
+> 브라우저는 다른 사이트의 파일을 직접 받을 수 없어(CORS) Worker가 대신 받아 옵니다. 찬양 PPT는
+> 허용된 사이트 목록(`WEDNESDAY_PPT_HOSTS`)에서만 받고, 악보 사진은 어느 사이트든 받되 **PNG·JPG가
+> 맞는지와 크기(8MB)** 로 거릅니다 — 악보 이미지는 블로그마다 다른 CDN에 올라가 있어 목록으로는
+> 걸러낼 수 없기 때문입니다. 사이트를 목록으로 제한하려면 `WEDNESDAY_IMAGE_HOSTS_ONLY=true`.
 
 - **슬라이드 크기가 다르면 자동으로 맞춥니다** — 내려받은 곡 PPT가 수요예배 PPT와 크기가 다르면
   비율을 유지한 채 가운데로 맞추고, 다운로드 화면에 그 사실을 알려 줍니다.
@@ -381,8 +394,8 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 
 ### 수요예배 찬양 라이브러리
 
-쓴 곡은 **제목과 그 PPT를 받은 주소**만 라이브러리에 남습니다 (파일은 보관하지 않습니다). 다음
-주에 같은 곡을 쓸 때 목록에서 고르면 저장된 주소에서 바로 다시 받아오고, 자동으로 받을 수 없는
+쓴 곡은 **제목과 그 자료를 받은 주소**만 라이브러리에 남습니다 (파일과 사진은 보관하지 않습니다).
+다음 주에 같은 곡을 쓸 때 목록에서 고르면 저장된 주소에서 바로 다시 받아오고, 자동으로 받을 수 없는
 주소면 **출처 열기** 링크로 직접 내려받아 올리면 됩니다. 이 목록은 공유 서버에 저장되어 다른
 기기에서도 같게 보이며, 주일 오후 5시 자동 삭제 대상이 **아닙니다**.
 
@@ -447,9 +460,13 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   분할 보관하며, `scripts/assemble-pptx-assets.mjs`가 개발·테스트·빌드 전에 체크섬을 확인해
   `public/back-slides.pptx`로 자동 복원합니다.
 - 수요예배 페이지는 Vite의 두 번째 진입점입니다: `wednesday.html` + `src/wednesday/` (빌드 설정은
-  `vite.config.ts`의 `build.rollupOptions.input`). 찬양 PPT 검색·다운로드와 곡 라이브러리는
-  Worker의 `/wednesday/songs`, `/libraries/wednesday-songs` 경로가 담당합니다 —
-  `worker/README.md` 참고.
+  `vite.config.ts`의 `build.rollupOptions.input`). 찬양 PPT·악보 사진 검색과 중계, 곡 라이브러리는
+  Worker의 `/wednesday/songs`, `/wednesday/songs/sheets`, `/libraries/wednesday-songs` 경로가
+  담당합니다 — `worker/README.md` 참고.
+- 악보 사진 슬라이드는 `src/lib/pptx/imageDeckBuilder.ts`가 만듭니다. 슬라이드 크기와 바탕이 될
+  템플릿 장을 옵션으로 받아 수요예배 캔버스에 맞추고, 만든 덱은
+  `pptxPackage.ts`의 `pruneToSlides()`로 **자기 슬라이드가 쓰지 않는 파트를 모두 덜어낸 뒤** 합쳐집니다
+  (그러지 않으면 곡마다 템플릿 배경 2MB가 한 벌씩 복사됩니다).
 - 데스크톱 앱(별도 프로젝트): `desktop/` — Tauri 기반 예배 셋리스트 관리 앱, 자세한 내용은
   `desktop/README.md` 참고
 
@@ -492,11 +509,15 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 song's own downloaded `.pptx` spliced in whole, and the sermon slides are inserted by hand after
 the deck is made. The operator types the date, sermon title, preacher and a scripture range; the
 verses come from the same 개역개정 text, the file is named after that week's Wednesday
-(`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. A song's file is either
-downloaded through the proxy (`GET /wednesday/songs` searches, `POST /wednesday/songs/file`
-relays — a browser cannot fetch a cross-origin `.pptx` itself) or uploaded by hand, which is the
-path that always works for sources behind a login. The 수요예배 song library keeps titles and
-source links only, never files.
+(`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. Typing a song's title is the whole
+interaction: the app searches, downloads and attaches what it is confident about by itself — the
+song's own 찬양 PPT when one is found, otherwise its 악보 사진, one slide per page, centred on the
+deck's canvas. A browser cannot fetch a cross-origin file, so the proxy does it
+(`GET /wednesday/songs` and `/wednesday/songs/sheets` search; `POST /wednesday/songs/file` and
+`/wednesday/songs/image` relay). Nothing is guessed at: an uncertain search shows what it found
+instead of attaching it, and `.pptx` files or photos can always be uploaded by hand — the only way
+to use a source behind a login, or a sheet photographed on a phone. The 수요예배 song library keeps
+titles and source links only, never files.
 
 Generated decks are archived in a shared PPT library backed by a Cloudflare Worker, together with
 every file that produced them (conti PDF, sermon PPTX, ordered additional-file originals, and a

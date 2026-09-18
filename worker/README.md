@@ -29,6 +29,8 @@ Everyone ◀──GET /libraries/lyrics── shared user-added lyrics
 Admin    ──PUT/DELETE /libraries/lyrics── save or delete lyrics
 Browser  ──GET  /wednesday/songs──▶ Worker (search) ──▶ 찬양 PPT hits + signed tokens
 Browser  ──POST /wednesday/songs/file▶ Worker downloads that .pptx and relays it
+Browser  ──GET  /wednesday/songs/sheets▶ Worker (image search) ──▶ 악보 사진 hits
+Browser  ──POST /wednesday/songs/image▶ Worker downloads that image and relays it
 Everyone ◀──GET /libraries/wednesday-songs── 수요예배 song titles + source links
 Admin    ──PUT/DELETE /libraries/wednesday-songs── save or delete one
 Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
@@ -83,6 +85,22 @@ and the bytes must actually be a PowerPoint package (ZIP magic plus a
 deck. A post URL is followed exactly one step, to a `.pptx` attachment on an
 allowlisted host, with the post as `Referer` (attachment hosts require it).
 
+`GET /wednesday/songs/sheets?title=…` and `POST /wednesday/songs/image` are the
+same pair for **악보 사진**, which is how most Korean worship songs are shared.
+Each hit comes back ranked against the title (`scoreSongMatch` in
+`src/songPpt.js`): a hit whose own title or file name carries the song is
+marked `auto`, and the app attaches those by itself; anything below that is
+`review` and is shown to the operator instead of acted on.
+
+The image route's host policy is deliberately different. 악보 images live on
+whatever CDN their blog uses, so an allowlist would mean the feature never
+finds anything; they are gated by **what comes back** instead — https only,
+never an address that resolves inside (`localhost`, `.local`, `.internal`, IP
+literals), 8 MB cap, the final URL re-checked after redirects, and the bytes
+have to start with the PNG or JPEG magic number, so a 200-with-an-HTML-page is
+refused. A deployment that would rather apply the 찬양 PPT allowlist here too
+sets `WEDNESDAY_IMAGE_HOSTS_ONLY=true`.
+
 The allowlist ships with the 네이버 블로그·카페 file hosts and grows with the
 `WEDNESDAY_PPT_HOSTS` variable (see `wrangler.toml`) — whose files this proxy
 relays is a permission decision, not a code one. Anything off the list is
@@ -92,7 +110,7 @@ which is also the only way to get a file from a source that needs a login
 never blocks a service.
 
 `GET|PUT|DELETE /libraries/wednesday-songs` is the 수요예배 song index: a
-title, where its PPT came from, and how many slides it had. **Links only, no
+title, where its PPT or 악보 came from, and how many slides it made. **Links only, no
 files** — it remembers where to find a deck again, so the next week starts
 from "open this and download it" rather than from a search. It lives outside
 `library:ppt:*`, so the weekly purge below leaves it alone, exactly like the

@@ -53,3 +53,47 @@ describe('buildImageDeck', () => {
     await expect(buildImageDeck(template, [])).rejects.toThrow('이미지가 없습니다');
   });
 });
+
+describe('an image deck built on the 수요예배 template', () => {
+  const wednesdayTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'wednesday-template.pptx'));
+  const canvas = { cx: 13_004_800, cy: 9_753_600 };
+
+  it('centers each page on that deck\'s own canvas', async () => {
+    const deck = await buildImageDeck(
+      wednesdayTemplate,
+      [
+        { data: png1x1, mimeType: 'image/png', width: 800, height: 1120 },
+        { data: png1x1, mimeType: 'image/png', width: 800, height: 1120 },
+      ],
+      { slideNumber: 6, canvas },
+    );
+
+    const zip = await JSZip.loadAsync(deck);
+    const slide = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    // A portrait 악보 page fills the height and is centred left to right.
+    const expected = containRect(800, 1120, canvas.cx, canvas.cy);
+    expect(slide).toContain(`<a:off x="${expected.x}" y="${expected.y}"/>`);
+    expect(slide).toContain(`<a:ext cx="${expected.cx}" cy="${expected.cy}"/>`);
+    expect(Object.keys(zip.files).filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))).toHaveLength(2);
+    await expect(assertPptxIntegrity(deck)).resolves.toBeUndefined();
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+  });
+
+  it('carries only what its own slides use', async () => {
+    const deck = await buildImageDeck(
+      wednesdayTemplate,
+      [{ data: png1x1, mimeType: 'image/png', width: 800, height: 1120 }],
+      { slideNumber: 6, canvas },
+    );
+    const zip = await JSZip.loadAsync(deck);
+
+    // The template's 2 MB cover background belongs to a master these slides
+    // never reach; carrying it would put a second copy in every service deck.
+    expect(Object.keys(zip.files).filter((path) => path.endsWith('.emf'))).toEqual([]);
+    const media = Object.keys(zip.files).filter(
+      (path) => path.startsWith('ppt/media/') && !zip.files[path].dir,
+    );
+    expect(media).toEqual(['ppt/media/additional-image-1.png']);
+    expect(deck.byteLength).toBeLessThan(200_000);
+  });
+});

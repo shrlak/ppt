@@ -4,7 +4,7 @@
 // deck this template was derived from:
 //
 //   표지 · 인트로 · 경배와 찬양
-//     곡마다: [찬양 제목] + [그 곡 PPT의 모든 슬라이드]
+//     곡마다: [찬양 제목] + [그 곡 PPT의 모든 슬라이드, 또는 악보 사진 한 장씩]
 //   기도 · 말씀 · 말씀 본문 ×N · 설교 · 기도 · 합심기도 · 마지막
 //
 // 설교 slides are not generated: the deck stops at the 설교 구분 장 and the
@@ -20,12 +20,13 @@ import { assertPptxIntegrity } from '../lib/pptx/pptxPackage';
 import { extractSlideSubset, slideOrderOf } from '../lib/pptx/pptxSlices';
 import { mergePptxDecks } from '../lib/pptx/pptxMerge';
 import { readSlideSize, rescaleDeckToSize, type SlideSize } from '../lib/pptx/slideGeometry';
+import { buildImageDeck } from '../lib/pptx/imageDeckBuilder';
 import { expandDeckSegment, type DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Verse } from '../bible/types';
 import { buildWednesdayVerseSlide, groupVerses } from './bibleSlides';
 import { clearRemainingTokens, formatDateDot, formatDateKo, substituteTokens } from './fields';
-import { WEDNESDAY_SLIDES } from './template';
-import { isAttached, type WednesdayService, type WednesdaySong } from './types';
+import { WEDNESDAY_IMAGE_CARRIER, WEDNESDAY_SLIDES } from './template';
+import { isAttached, songSlideCount, type WednesdayService, type WednesdaySong } from './types';
 
 export interface WednesdayDeckInput {
   /** public/wednesday-template.pptx. */
@@ -231,14 +232,14 @@ export async function buildWednesdayDeck(input: WednesdayDeckInput): Promise<Wed
     const song = attached[index];
     if (!song) continue;
 
-    const songDeck = await prepareSongDeck(song.deck, templateSize, song.title, warnings);
+    const songDeck = await songSlides(song, input.template, templateSize, warnings);
     remainingMerges -= 1;
     // A 찬양 제목 slide sits at 3 + index; its song's slides follow it.
     deck = await mergePptxDecks(deck, songDeck, {
       insertAt: 4 + index,
       compression: remainingMerges === 0 ? 'DEFLATE' : 'STORE',
     });
-    songSlideCounts.set(song.id, song.slideCount);
+    songSlideCounts.set(song.id, songSlideCount(song));
   }
 
   await assertPptxIntegrity(deck);
@@ -257,17 +258,34 @@ export async function buildWednesdayDeck(input: WednesdayDeckInput): Promise<Wed
   return { deck, overview, warnings };
 }
 
-/** Bring a song deck onto the template's canvas if it was authored elsewhere. */
-async function prepareSongDeck(
-  songDeck: ArrayBuffer,
+/**
+ * The slides one song contributes: its own 찬양 PPT, or one slide per 악보
+ * 사진 built on the service template so the pages sit on the deck's own
+ * background at the deck's own size.
+ */
+async function songSlides(
+  song: WednesdaySong,
+  template: ArrayBuffer | Uint8Array,
   templateSize: SlideSize,
-  title: string,
   warnings: string[],
 ): Promise<Uint8Array> {
-  const { data, rescaled, from } = await rescaleDeckToSize(songDeck, templateSize, 'STORE');
+  if (!song.deck) {
+    return buildImageDeck(
+      template,
+      (song.images ?? []).map((image) => ({
+        data: new Uint8Array(image.data.slice(0)),
+        mimeType: image.mimeType,
+        width: image.width,
+        height: image.height,
+      })),
+      { slideNumber: WEDNESDAY_IMAGE_CARRIER, canvas: templateSize, compression: 'STORE' },
+    );
+  }
+
+  const { data, rescaled, from } = await rescaleDeckToSize(song.deck, templateSize, 'STORE');
   if (rescaled) {
     warnings.push(
-      `"${title || '제목 없음'}" 곡 PPT는 슬라이드 크기가 달라(${from.cx}×${from.cy}) 이 예배 PPT 크기에 맞게 자동으로 맞췄습니다. 위치를 한 번 확인해 주세요.`,
+      `"${song.title || '제목 없음'}" 곡 PPT는 슬라이드 크기가 달라(${from.cx}×${from.cy}) 이 예배 PPT 크기에 맞게 자동으로 맞췄습니다. 위치를 한 번 확인해 주세요.`,
     );
   }
   return data;

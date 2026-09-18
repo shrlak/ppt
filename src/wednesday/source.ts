@@ -15,6 +15,19 @@ import { DEFAULT_VERSES_PER_SLIDE, emptyWednesdayService, type WednesdayService,
 export const WEDNESDAY_SOURCE_KIND = 'wednesday';
 export const WEDNESDAY_SOURCE_VERSION = 1;
 
+/**
+ * An 악보 사진 without its bytes: the pixel size travels in the snapshot so a
+ * restored week does not have to decode every image again just to lay it out.
+ */
+interface StoredSongImage {
+  id: string;
+  name: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  width: number;
+  height: number;
+  sourceUrl?: string;
+}
+
 interface StoredSong {
   id: string;
   title: string;
@@ -23,6 +36,7 @@ interface StoredSong {
   sourceUrl?: string;
   sourceHost?: string;
   fileName?: string;
+  images?: StoredSongImage[];
 }
 
 export interface WednesdaySource {
@@ -61,6 +75,14 @@ export function encodeWednesdaySource(input: {
       sourceUrl: song.sourceUrl,
       sourceHost: song.sourceHost,
       fileName: song.fileName,
+      images: song.images?.map((image) => ({
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        width: image.width,
+        height: image.height,
+        sourceUrl: image.sourceUrl,
+      })),
     })),
     ...(input.fileNameOverride ? { fileNameOverride: input.fileNameOverride } : {}),
   };
@@ -107,6 +129,7 @@ export function decodeWednesdaySource(file: DeckSourceFile | null | undefined): 
           sourceUrl: typeof entry.sourceUrl === 'string' ? entry.sourceUrl : undefined,
           sourceHost: typeof entry.sourceHost === 'string' ? entry.sourceHost : undefined,
           fileName: typeof entry.fileName === 'string' ? entry.fileName : undefined,
+          images: storedImagesOf(entry.images),
         },
       ];
     }),
@@ -121,19 +144,26 @@ export function decodeWednesdaySource(file: DeckSourceFile | null | undefined): 
  * week's working copy, and the weekly purge clears it with everything else.
  */
 export async function encodeWednesdaySongDecks(songs: WednesdaySong[]): Promise<{ name: string; data: ArrayBuffer } | null> {
-  const files: AdditionalFile[] = songs.flatMap((song) =>
-    song.deck
-      ? [
-          {
-            id: song.id,
-            name: songArchiveName(song),
-            kind: 'pptx' as const,
-            data: song.deck,
-            slideCount: song.slideCount ?? 0,
-          },
-        ]
-      : [],
-  );
+  const files: AdditionalFile[] = songs.flatMap((song): AdditionalFile[] => {
+    if (song.deck) {
+      return [
+        {
+          id: song.id,
+          name: songArchiveName(song),
+          kind: 'pptx' as const,
+          data: song.deck,
+          slideCount: song.slideCount ?? 0,
+        },
+      ];
+    }
+    return (song.images ?? []).map((image) => ({
+      id: image.id,
+      name: songImageArchiveName(song, image),
+      kind: image.mimeType === 'image/png' ? ('png' as const) : ('jpeg' as const),
+      data: image.data,
+      slideCount: 1,
+    }));
+  });
   if (files.length === 0) return null;
   return encodeAdditionalFiles(files);
 }
@@ -143,23 +173,64 @@ export async function decodeWednesdaySongDecks(
   file: { name: string; data: ArrayBuffer } | null | undefined,
   songs: StoredSong[],
 ): Promise<WednesdaySong[]> {
-  if (!file) return songs.map((song) => ({ ...song }));
+  if (!file) return songs.map((song) => ({ ...song, images: undefined }));
   const unpacked = await decodeAdditionalFiles(file);
   const byName = new Map(unpacked.map((entry) => [entry.name, entry]));
   return songs.map((song) => {
-    const match = byName.get(songArchiveName(song));
+    const deck = byName.get(songArchiveName(song));
+    // Only the images whose bytes actually came back can contribute a slide.
+    const images = (song.images ?? []).flatMap((image) => {
+      const match = byName.get(songImageArchiveName(song, image));
+      return match ? [{ ...image, data: match.data }] : [];
+    });
     return {
       ...song,
-      deck: match?.data,
-      slideCount: match ? (song.slideCount ?? match.slideCount) : undefined,
+      deck: deck?.data,
+      slideCount: deck ? (song.slideCount ?? deck.slideCount) : undefined,
+      images: images.length > 0 ? images : undefined,
     };
   });
 }
 
 /** Archive entry name: unique per song, and recognizable when unzipped by hand. */
 function songArchiveName(song: { id: string; title?: string }): string {
-  const title = (song.title ?? '').trim().replace(/[\\/:*?"<>|]/g, '').slice(0, 40);
-  return `${song.id}${title ? `-${title}` : ''}.pptx`;
+  return `${song.id}${archiveTitle(song.title)}.pptx`;
+}
+
+function songImageArchiveName(
+  song: { id: string; title?: string },
+  image: { id: string; mimeType: string },
+): string {
+  return `${song.id}-${image.id}${archiveTitle(song.title)}.${image.mimeType === 'image/png' ? 'png' : 'jpg'}`;
+}
+
+function archiveTitle(title: string | undefined): string {
+  const clean = (title ?? '').trim().replace(/[\\/:*?"<>|]/g, '').slice(0, 40);
+  return clean ? `-${clean}` : '';
+}
+
+/** Keep only the 악보 사진 metadata whose shape can be trusted. */
+function storedImagesOf(raw: unknown): StoredSongImage[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const images = raw.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const entry = item as Record<string, unknown>;
+    const mimeType = entry.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+    const width = Number(entry.width);
+    const height = Number(entry.height);
+    if (typeof entry.id !== 'string' || !(width > 0) || !(height > 0)) return [];
+    return [
+      {
+        id: entry.id,
+        name: typeof entry.name === 'string' ? entry.name : '악보.png',
+        mimeType: mimeType as 'image/png' | 'image/jpeg',
+        width,
+        height,
+        ...(typeof entry.sourceUrl === 'string' ? { sourceUrl: entry.sourceUrl } : {}),
+      },
+    ];
+  });
+  return images.length > 0 ? images : undefined;
 }
 
 /**
@@ -187,6 +258,7 @@ export function wednesdayFingerprint(input: {
     songs: input.songs.map((song) => ({
       title: song.title.trim(),
       deck: song.deck ? `${song.fileName ?? ''}:${song.deck.byteLength}` : null,
+      images: (song.images ?? []).map((image) => `${image.name}:${image.data.byteLength}`),
     })),
   });
 }

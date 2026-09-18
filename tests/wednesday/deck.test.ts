@@ -58,6 +58,30 @@ function songFrom(id: string, title: string, deck: ArrayBuffer, slideCount: numb
   return { id, title, deck, slideCount, origin: 'upload' };
 }
 
+/** A 1×1 PNG, standing in for a scanned 악보 page. */
+const PNG_1X1 = new Uint8Array(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=',
+    'base64',
+  ),
+);
+
+function songWithSheets(id: string, title: string, pages: number): WednesdaySong {
+  return {
+    id,
+    title,
+    origin: 'upload',
+    images: Array.from({ length: pages }, (_, index) => ({
+      id: `${id}-page-${index + 1}`,
+      name: `${title} ${index + 1}.png`,
+      mimeType: 'image/png' as const,
+      data: toArrayBuffer(PNG_1X1),
+      width: 800,
+      height: 1120,
+    })),
+  };
+}
+
 async function slideTexts(data: Uint8Array): Promise<string[]> {
   const zip = await JSZip.loadAsync(data);
   const names = await slideOrderOf(zip);
@@ -237,6 +261,57 @@ describe('buildWednesdayDeck', () => {
       // Title slide only — no slides came from a file.
       expect(overview.filter((item) => item.songId === 's1')).toHaveLength(1);
       await expect(assertPptxIntegrity(deck)).resolves.toBeUndefined();
+    },
+    30_000,
+  );
+});
+
+describe('악보 사진 songs', () => {
+  it(
+    'gives each page its own slide, in the same place a 찬양 PPT would go',
+    async () => {
+      const songs = [songWithSheets('s1', '주 은혜임을', 2), songFrom('s2', '두 번째 곡', await sameSizeSongDeck(2), 2)];
+      const { deck, overview } = await buildWednesdayDeck({
+        template,
+        service,
+        songs,
+        verses: verses.slice(0, 3),
+        rangeKo,
+      });
+
+      const texts = await slideTexts(deck);
+      // 표지·인트로·경배와 찬양 (3) + [제목 + 악보 2장] + [제목 + 2장] (6)
+      // + 기도 · 말씀 · 본문 1장 · 설교 · 기도 · 합심기도 · 마지막 (7)
+      expect(texts).toHaveLength(16);
+      expect(texts[3]).toContain('주 은혜임을');
+      // The 악보 pages carry no text of their own — they are the picture.
+      expect(texts[4]).toBe('');
+      expect(texts[5]).toBe('');
+      expect(texts[6]).toContain('두 번째 곡');
+      expect(overview.filter((item) => item.songId === 's1')).toHaveLength(3);
+      await expect(assertPptxIntegrity(deck)).resolves.toBeUndefined();
+      expect(await findBrokenRelationships(await JSZip.loadAsync(deck))).toEqual([]);
+    },
+    30_000,
+  );
+
+  it(
+    'keeps the deck as light as it was without them',
+    async () => {
+      const bare = await buildWednesdayDeck({ template, service, songs: [], verses, rangeKo });
+      const withSheets = await buildWednesdayDeck({
+        template,
+        service,
+        songs: [songWithSheets('s1', '악보 곡', 3)],
+        verses,
+        rangeKo,
+      });
+
+      const zip = await JSZip.loadAsync(withSheets.deck);
+      // One cover background, not one per song: the 악보 deck is pruned to
+      // the parts its own slides use before it is merged in.
+      expect(Object.keys(zip.files).filter((path) => path.endsWith('.emf'))).toHaveLength(1);
+      expect(withSheets.deck.byteLength).toBeLessThan(bare.deck.byteLength + 200_000);
     },
     30_000,
   );

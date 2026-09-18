@@ -21,7 +21,13 @@ import {
   loadWednesdayDraft,
   saveWednesdayDraft,
 } from './draft';
-import { emptyWednesdayService, isAttached, type WednesdayService, type WednesdaySong } from './types';
+import {
+  emptyWednesdayService,
+  isAttached,
+  songSlideCount,
+  type WednesdayService,
+  type WednesdaySong,
+} from './types';
 import {
   decodeWednesdaySongDecks,
   decodeWednesdaySource,
@@ -332,13 +338,13 @@ export default function WednesdayApp() {
   }, []);
 
   const attachedCount = songs.filter(isAttached).length;
-  const songSlideCount = songs.reduce((total, song) => total + (song.slideCount ?? 0), 0);
+  const songSlideTotal = songs.reduce((total, song) => total + songSlideCount(song), 0);
   const verseGroupCount =
     passage.verses.length > 0
       ? Math.ceil(passage.verses.length / Math.max(1, service.versesPerSlide))
       : 0;
   // 표지·인트로·경배와 찬양 + 곡 제목 장 + 기도·말씀·설교·기도·합심기도·마지막
-  const slideCount = 3 + songs.length + 6 + verseGroupCount + songSlideCount;
+  const slideCount = 3 + songs.length + 6 + verseGroupCount + songSlideTotal;
   const canBuild = service.date !== '' || songs.length > 0 || passage.verses.length > 0;
 
   const build = async () => {
@@ -578,7 +584,8 @@ export default function WednesdayApp() {
                 <p className="wizard-kicker">2 / 3</p>
                 <h2>찬양</h2>
                 <p>
-                  곡 제목을 적고 찬양 PPT를 받아 오세요. 그 파일의 슬라이드가 순서대로 모두 들어갑니다.
+                  곡 제목만 적으면 인터넷에서 찬양 PPT나 악보 사진을 찾아 자동으로 넣어 드립니다. 직접
+                  올리셔도 됩니다.
                 </p>
               </div>
 
@@ -631,7 +638,7 @@ export default function WednesdayApp() {
                   <div>
                     <dt>찬양</dt>
                     <dd>
-                      {songs.length}곡 (파일 있는 곡 {attachedCount}곡 · 슬라이드 {songSlideCount}장)
+                      {songs.length}곡 (파일 있는 곡 {attachedCount}곡 · 슬라이드 {songSlideTotal}장)
                     </dd>
                   </div>
                   <div>

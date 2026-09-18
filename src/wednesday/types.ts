@@ -30,8 +30,24 @@ export function emptyWednesdayService(): WednesdayService {
   };
 }
 
-/** Where a song's .pptx came from, for the card's badge and the library. */
+/** Where a song's slides came from, for the card's badge and the library. */
 export type WednesdaySongOrigin = 'download' | 'upload';
+
+/**
+ * One 악보 사진. A song's 악보 is often two or three pages, and each page
+ * becomes its own slide, centred on the service deck's canvas.
+ */
+export interface WednesdaySongImage {
+  id: string;
+  name: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  data: ArrayBuffer;
+  /** Pixel size, read from the file — the slide keeps the image's aspect. */
+  width: number;
+  height: number;
+  /** Where it was downloaded from, when it came off the web. */
+  sourceUrl?: string;
+}
 
 export interface WednesdaySong {
   id: string;
@@ -45,6 +61,11 @@ export interface WednesdaySong {
   deck?: ArrayBuffer;
   /** Slides `deck` contributes, counted from the file itself. */
   slideCount?: number;
+  /**
+   * 악보 사진, one slide per page, used when there is no 찬양 PPT for the song
+   * — the two are alternatives, and attaching one clears the other.
+   */
+  images?: WednesdaySongImage[];
   origin?: WednesdaySongOrigin;
   /** Where the file was downloaded from — the only thing the library keeps. */
   sourceUrl?: string;
@@ -53,12 +74,13 @@ export interface WednesdaySong {
   fileName?: string;
 }
 
-/** A song that can actually contribute slides. */
-export interface AttachedWednesdaySong extends WednesdaySong {
-  deck: ArrayBuffer;
-  slideCount: number;
+/** How many slides a song contributes: its PPT's, or one per 악보 사진. */
+export function songSlideCount(song: WednesdaySong): number {
+  if (song.deck) return song.slideCount ?? 0;
+  return song.images?.length ?? 0;
 }
 
-export function isAttached(song: WednesdaySong): song is AttachedWednesdaySong {
-  return song.deck !== undefined && (song.slideCount ?? 0) > 0;
+/** True when a song can actually contribute slides. */
+export function isAttached(song: WednesdaySong): boolean {
+  return songSlideCount(song) > 0;
 }

@@ -3,6 +3,7 @@ import {
   contentTypeOf,
   parseContentTypes,
   partNameKey,
+  removeContentTypeOverride,
   removeContentTypeOverridesWhere,
   setContentTypeOverride,
 } from './contentTypes';
@@ -192,6 +193,131 @@ export async function repairContentTypes(zip: JSZip): Promise<void> {
     changed = true;
   }
   if (changed) zip.file('[Content_Types].xml', xml);
+}
+
+/**
+ * Strip everything a deck's own slides do not use.
+ *
+ * A deck cut out of a template with extractSlideSubset keeps the template's
+ * whole supporting cast — every master, every layout, every image — because
+ * that function deliberately leaves them alone. For a deck that is about to be
+ * merged into another one, that is dead weight the merge then copies: an 악보
+ * 사진 deck built on the 수요예배 template was carrying a second copy of its
+ * 2 MB cover background per song.
+ *
+ * Three passes: drop media relationships nothing in the slide refers to, drop
+ * slide masters no kept slide's layout belongs to, then drop every part left
+ * unreachable from the package root.
+ */
+export async function pruneToSlides(zip: JSZip): Promise<void> {
+  await dropUnusedMediaRelationships(zip);
+  await dropUnusedMasters(zip);
+  await dropUnreachableParts(zip);
+}
+
+const MEDIA_REL_KIND = /\/(?:image|video|audio|media|hdphoto)$/i;
+
+/** Drop image relationships whose id nothing in the part actually references. */
+async function dropUnusedMediaRelationships(zip: JSZip): Promise<void> {
+  for (const relsPath of Object.keys(zip.files).filter((path) => /ppt\/slides\/_rels\/.+\.rels$/.test(path))) {
+    const owner = relationshipOwner(relsPath);
+    const ownerFile = owner ? zip.file(owner) : null;
+    if (!ownerFile) continue;
+    const xml = await ownerFile.async('string');
+    const used = new Set([...xml.matchAll(RELATIONSHIP_REF)].map((match) => match[1]));
+    const relsXml = await zip.file(relsPath)!.async('string');
+    const pruned = relsXml.replace(/<Relationship\b[^>]*\/>/g, (tag) => {
+      const type = tag.match(/Type="([^"]*)"/)?.[1] ?? '';
+      if (!MEDIA_REL_KIND.test(type)) return tag;
+      const id = tag.match(/Id="([^"]*)"/)?.[1] ?? '';
+      return used.has(id) ? tag : '';
+    });
+    if (pruned !== relsXml) zip.file(relsPath, pruned);
+  }
+}
+
+/** Drop slide masters that no kept slide reaches through its layout. */
+async function dropUnusedMasters(zip: JSZip): Promise<void> {
+  const presentationFile = zip.file('ppt/presentation.xml');
+  const presRelsFile = zip.file('ppt/_rels/presentation.xml.rels');
+  if (!presentationFile || !presRelsFile) return;
+
+  const layouts = new Set<string>();
+  for (const relsPath of Object.keys(zip.files).filter((path) => /ppt\/slides\/_rels\/.+\.rels$/.test(path))) {
+    const relsXml = await zip.file(relsPath)!.async('string');
+    for (const tag of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+      if (!/\/slideLayout"/.test(tag[0])) continue;
+      const target = tag[0].match(/Target="([^"]*)"/)?.[1];
+      if (target) layouts.add(resolveRelationshipTarget(relsPath, target));
+    }
+  }
+
+  const keptMasters = new Set<string>();
+  for (const layout of layouts) {
+    const layoutRels = zip.file(`${layout.slice(0, layout.lastIndexOf('/'))}/_rels/${layout.split('/').pop()}.rels`);
+    if (!layoutRels) continue;
+    const relsXml = await layoutRels.async('string');
+    for (const tag of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+      if (!/\/slideMaster"/.test(tag[0])) continue;
+      const target = tag[0].match(/Target="([^"]*)"/)?.[1];
+      if (target) {
+        keptMasters.add(
+          resolveRelationshipTarget(`${layout.slice(0, layout.lastIndexOf('/'))}/_rels/x.rels`, target),
+        );
+      }
+    }
+  }
+  if (keptMasters.size === 0) return;
+
+  let presentation = await presentationFile.async('string');
+  let presRels = await presRelsFile.async('string');
+  for (const tag of [...presentation.matchAll(/<p:sldMasterId\b[^>]*\/>/g)]) {
+    const rid = tag[0].match(/r:id="([^"]*)"/)?.[1];
+    if (!rid) continue;
+    const relTag = presRels.match(new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*/>`))?.[0];
+    const target = relTag?.match(/Target="([^"]*)"/)?.[1];
+    const path = target ? resolveRelationshipTarget('ppt/_rels/presentation.xml.rels', target) : null;
+    if (!path || keptMasters.has(path)) continue;
+    presentation = presentation.replace(tag[0], '');
+    if (relTag) presRels = presRels.replace(relTag, '');
+  }
+  zip.file('ppt/presentation.xml', presentation);
+  zip.file('ppt/_rels/presentation.xml.rels', presRels);
+}
+
+/** Remove every part the package can no longer reach, and its content type. */
+async function dropUnreachableParts(zip: JSZip): Promise<void> {
+  const reachable = new Set(['[Content_Types].xml', '_rels/.rels']);
+  const queue = ['_rels/.rels'];
+
+  while (queue.length > 0) {
+    const relsPath = queue.shift()!;
+    const file = zip.file(relsPath);
+    if (!file) continue;
+    const xml = await file.async('string');
+    for (const tag of xml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+      if (/TargetMode="External"/.test(tag[0])) continue;
+      const target = tag[0].match(/Target="([^"]*)"/)?.[1];
+      if (!target || /^[a-z]+:/i.test(target)) continue;
+      const resolved = resolveRelationshipTarget(relsPath, target);
+      if (!resolved || reachable.has(resolved)) continue;
+      reachable.add(resolved);
+      const childRels = `${resolved.includes('/') ? `${resolved.slice(0, resolved.lastIndexOf('/'))}/` : ''}_rels/${resolved.split('/').pop()}.rels`;
+      if (zip.file(childRels) && !reachable.has(childRels)) {
+        reachable.add(childRels);
+        queue.push(childRels);
+      }
+    }
+  }
+
+  const contentTypesFile = zip.file('[Content_Types].xml');
+  let contentTypes = contentTypesFile ? await contentTypesFile.async('string') : null;
+  for (const path of Object.keys(zip.files)) {
+    if (zip.files[path].dir || reachable.has(path)) continue;
+    zip.remove(path);
+    if (contentTypes) contentTypes = removeContentTypeOverride(contentTypes, path);
+  }
+  if (contentTypes && contentTypesFile) zip.file('[Content_Types].xml', contentTypes);
 }
 
 // Attributes in the officeDocument relationships namespace: their value must

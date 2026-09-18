@@ -105,11 +105,18 @@ import {
   fetchSongPptCandidates,
   fetchSongPptFile,
   isAllowedSongPptUrl,
+  rankSongMatches,
   sanitizeWednesdaySongEntries,
   sanitizeWednesdaySongEntry,
+  signSongPptToken,
   songPptHosts,
   verifySongPptToken,
 } from './songPpt.js';
+import {
+  fetchSheetImage,
+  fetchSheetImageCandidates,
+  isAllowedSheetImageUrl,
+} from './songSheet.js';
 import { bugsScrapingAllowed } from './lyricsSources.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -1447,6 +1454,82 @@ export default {
         200,
         { ...headers, 'Cache-Control': 'no-store' },
       );
+    }
+
+    // 악보 사진 search: the other way to fill a song's slides, for the many
+    // songs whose 악보 is shared as images rather than as a PowerPoint file.
+    if (request.method === 'GET' && url.pathname === '/wednesday/songs/sheets') {
+      const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+      if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+
+      let found = { candidates: [] };
+      try {
+        found = await fetchSheetImageCandidates(title, env, (target) =>
+          signSongPptToken(target, adminPassword(env)),
+        );
+      } catch (error) {
+        console.warn('sheet image search failed:', error instanceof Error ? error.message : error);
+      }
+      // Ranked so the browser can attach a confident match without asking.
+      const candidates = rankSongMatches(title, found.candidates);
+      return jsonResponse(
+        {
+          title,
+          candidates,
+          ...(candidates.length === 0
+            ? { message: '악보 사진을 찾지 못했습니다. 사진을 직접 올려 주세요.' }
+            : {}),
+        },
+        200,
+        { ...headers, 'Cache-Control': 'no-store' },
+      );
+    }
+
+    // Hand over one 악보 사진.
+    if (request.method === 'POST' && url.pathname === '/wednesday/songs/image') {
+      let body;
+      try {
+        body = JSON.parse(await request.text());
+      } catch {
+        return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
+      }
+
+      let target = null;
+      if (typeof body?.token === 'string' && body.token) {
+        target = await verifySongPptToken(body.token, adminPassword(env));
+        if (!target) {
+          return jsonResponse({ error: '검색 결과가 만료되었습니다. 다시 검색해 주세요.' }, 400, headers);
+        }
+      } else if (typeof body?.url === 'string' && isAllowedSheetImageUrl(body.url, env)) {
+        target = body.url;
+      }
+      if (!target) {
+        return jsonResponse(
+          { error: '이 주소에서는 악보 사진을 받아올 수 없습니다. 사진을 직접 올려 주세요.' },
+          400,
+          headers,
+        );
+      }
+
+      try {
+        const image = await fetchSheetImage(target, env);
+        return new Response(image.bytes, {
+          status: 200,
+          headers: {
+            ...headers,
+            'Content-Type': image.mimeType,
+            'Content-Length': String(image.bytes.length),
+            'Cache-Control': 'no-store',
+            'X-Song-Ppt-Source': encodeURIComponent(image.url),
+          },
+        });
+      } catch (error) {
+        return jsonResponse(
+          { error: error instanceof Error ? error.message : '악보 사진을 받지 못했습니다.' },
+          502,
+          headers,
+        );
+      }
     }
 
     // Hand over one 찬양 PPT. The bytes are returned as-is; the browser splices
