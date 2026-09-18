@@ -9,6 +9,7 @@ import type { Song } from '../../src/lib/utils/types';
 import type { VerseSlidePlan } from '../../src/bible/versePlanner';
 import { assertPptxIntegrity, findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 import { contentTypeOf, parseContentTypes } from '../../src/lib/pptx/contentTypes';
+import { slideOrderOf } from '../../src/lib/pptx/pptxSlices';
 
 const lyricsTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'template.pptx'));
 const bibleTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'bible-template.pptx'));
@@ -237,6 +238,107 @@ describe('mergePptxDecks', () => {
     const emptyZip = new JSZip();
     // Minimal but slide-less package should be rejected rather than silently no-op.
     await expect(mergePptxDecks(lyricsDeck, await emptyZip.generateAsync({ type: 'uint8array' }))).rejects.toThrow();
+  });
+
+  describe('a song deck whose slides link to each other', () => {
+    /**
+     * 찬양 PPT files carry jump buttons — a shape with
+     * `<a:hlinkClick action="ppaction://hlinksldjump">` and a relationship to a
+     * sibling slide, written as a bare filename because it sits in the same
+     * directory. Those filenames are renumbered on merge.
+     */
+    async function withJumpLink(deck: Uint8Array, target: string): Promise<Uint8Array> {
+      const zip = await JSZip.loadAsync(deck);
+      const relsPath = 'ppt/slides/_rels/slide1.xml.rels';
+      const rels = await zip.file(relsPath)!.async('string');
+      zip.file(
+        relsPath,
+        rels.replace(
+          '</Relationships>',
+          `<Relationship Id="rIdJump" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${target}"/></Relationships>`,
+        ),
+      );
+      const slide = await zip.file('ppt/slides/slide1.xml')!.async('string');
+      zip.file(
+        'ppt/slides/slide1.xml',
+        slide.replace(
+          /<p:cNvPr\b([^>]*?)\/>/,
+          (_m, attrs: string) =>
+            `<p:cNvPr${attrs}><a:hlinkClick r:id="rIdJump" action="ppaction://hlinksldjump"/></p:cNvPr>`,
+        ),
+      );
+      return zip.generateAsync({ type: 'uint8array' });
+    }
+
+    it('retargets the link to the slide\'s new number', async () => {
+      const songDeck = await withJumpLink(await buildPptx(lyricsTemplate, songs), 'slide2.xml');
+      const base = await buildPptx(lyricsTemplate, songs);
+      const baseSlideCount = slideFiles(await JSZip.loadAsync(base)).length;
+
+      const merged = await mergePptxDecks(base, songDeck);
+      const zip = await JSZip.loadAsync(merged);
+      const firstAdded = baseSlideCount + 1;
+      const rels = await zip.file(`ppt/slides/_rels/slide${firstAdded}.xml.rels`)!.async('string');
+
+      // slide2 of the song deck became slide<baseSlideCount + 2>.
+      expect(rels).toContain(`Target="slide${baseSlideCount + 2}.xml"`);
+      expect(rels).not.toContain('Target="slide2.xml"');
+      const slide = await zip.file(`ppt/slides/slide${firstAdded}.xml`)!.async('string');
+      expect(slide).toContain('ppaction://hlinksldjump');
+      expect(await findBrokenRelationships(zip)).toEqual([]);
+      await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+    });
+
+    it('drops a link whose target slide is not coming along', async () => {
+      // A hidden slide, or one left out of <p:sldIdLst>, is not copied; the
+      // relationship would then point at a part that does not exist.
+      const songDeck = await withJumpLink(await buildPptx(lyricsTemplate, songs), 'slide99.xml');
+      const merged = await mergePptxDecks(await buildPptx(lyricsTemplate, songs), songDeck);
+      const zip = await JSZip.loadAsync(merged);
+
+      const relsPaths = Object.keys(zip.files).filter((path) => /^ppt\/slides\/_rels\/.+\.rels$/.test(path));
+      const allRels = (await Promise.all(relsPaths.map((path) => zip.file(path)!.async('string')))).join('\n');
+      expect(allRels).not.toContain('slide99.xml');
+      expect(allRels).not.toContain('rIdJump');
+
+      const allSlides = (
+        await Promise.all(slideFiles(zip).map((path) => zip.file(path)!.async('string')))
+      ).join('\n');
+      expect(allSlides).not.toContain('rIdJump');
+      expect(await findBrokenRelationships(zip)).toEqual([]);
+      await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+    });
+  });
+
+  it('places the addition at insertAt instead of the end', async () => {
+    const lyricsDeck = await buildPptx(lyricsTemplate, songs);
+    const bibleDeck = await buildBiblePptx(bibleTemplate, biblePlan);
+    const bibleSlideCount = slideFiles(await JSZip.loadAsync(bibleDeck)).length;
+
+    const merged = await mergePptxDecks(lyricsDeck, bibleDeck, { insertAt: 1 });
+    const zip = await JSZip.loadAsync(merged);
+    const order = await slideOrderOf(zip);
+    const texts = await Promise.all(
+      order.map(async (name) => await zip.file(`ppt/slides/${name}`)!.async('string')),
+    );
+
+    // Base slide 1 (the song title) still leads; the bible slides follow it,
+    // ahead of the base's remaining slides.
+    expect(texts[0]).toContain('주님의 사랑');
+    expect(texts.slice(1, 1 + bibleSlideCount).join('\n')).toContain('요한복음 3:16');
+    expect(texts[1 + bibleSlideCount]).toContain('눈부신 햇살');
+    await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+  });
+
+  it('clamps insertAt past the end to appending', async () => {
+    const lyricsDeck = await buildPptx(lyricsTemplate, songs);
+    const bibleDeck = await buildBiblePptx(bibleTemplate, biblePlan);
+    const merged = await mergePptxDecks(lyricsDeck, bibleDeck, { insertAt: 99, compression: 'STORE' });
+    const zip = await JSZip.loadAsync(merged);
+    const order = await slideOrderOf(zip);
+    const last = await zip.file(`ppt/slides/${order[order.length - 1]}`)!.async('string');
+    expect(last).toContain('요한복음');
+    await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
   });
 
   it('merges the supplied front and back decks without PowerPoint repair relationships', async () => {

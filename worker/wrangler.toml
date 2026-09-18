@@ -27,6 +27,14 @@ OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 # a link the user can open, but never fetches the page itself. Set to "true"
 # only once the deployment's administrator has permission to read those pages.
 BUGS_SCRAPING_ALLOWED = "false"
+# Extra hosts the 수요예배 찬양 PPT routes may download a .pptx from, on top of
+# the 네이버 블로그·카페 file hosts src/songPpt.js ships with. Whose files this
+# proxy is willing to relay is a permission decision, like Bugs above, so it
+# lives here and not in code. Comma-separated hostnames, no scheme or path:
+#   WEDNESDAY_PPT_HOSTS = "praise.example.kr,files.example.kr"
+# A host that is not listed is still shown to the operator as a link to open
+# and download by hand.
+WEDNESDAY_PPT_HOSTS = ""
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"
 

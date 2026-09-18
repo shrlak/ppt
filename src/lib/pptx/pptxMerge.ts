@@ -163,21 +163,62 @@ const SUPPORT_DIRS = [
 ];
 
 /**
- * Merge two standalone .pptx decks: `addition`'s slides are appended after
- * `base`'s. Everything `addition`'s slides depend on (layouts, master,
- * theme, media) is copied in under a unique "merged-" prefix so it can't
- * collide with `base`'s own parts.
+ * Splice `<p:sldId>` entries into the presentation's slide list at `insertAt`
+ * (0-based position among the existing entries); appended when it is omitted,
+ * and clamped when it points past either end.
+ */
+function insertSlideIds(presentationXml: string, sldIds: string[], insertAt?: number): string {
+  if (sldIds.length === 0) return presentationXml;
+  if (insertAt === undefined) {
+    return presentationXml.replace('</p:sldIdLst>', `${sldIds.join('')}</p:sldIdLst>`);
+  }
+  const section = presentationXml.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);
+  if (!section) throw new Error('프레젠테이션에서 슬라이드 목록을 찾지 못했습니다.');
+  const existing = [...section[1].matchAll(/<p:sldId\b[^>]*\/>|<p:sldId\b[\s\S]*?<\/p:sldId>/g)].map(
+    (match) => match[0],
+  );
+  const at = Math.max(0, Math.min(insertAt, existing.length));
+  const ordered = [...existing.slice(0, at), ...sldIds, ...existing.slice(at)];
+  return presentationXml.replace(
+    /<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/,
+    `<p:sldIdLst>${ordered.join('')}</p:sldIdLst>`,
+  );
+}
+
+export interface MergeOptions {
+  /**
+   * How the *result* is packed. A full deck download chains many of these
+   * calls, each re-zipping the whole (growing) package — 'STORE' on the
+   * intermediate calls skips the DEFLATE work until the final one, which is
+   * the only output actually written to disk.
+   */
+  compression?: 'STORE' | 'DEFLATE';
+  /**
+   * Where the addition's slides land in the result, as a 0-based index into
+   * the base deck's slide order. Omitted (the default) appends them at the
+   * end. The 수요예배 deck uses this to drop each song's slides in right
+   * after that song's title slide.
+   */
+  insertAt?: number;
+}
+
+/**
+ * Merge two standalone .pptx decks: `addition`'s slides are spliced into
+ * `base` — appended at the end, or at `options.insertAt`. Everything
+ * `addition`'s slides depend on (layouts, master, theme, media) is copied in
+ * under a unique "merged-" prefix so it can't collide with `base`'s own parts.
  *
- * `compression` controls how the *result* is packed. A full deck download
- * chains many of these calls, each re-zipping the whole (growing) package —
- * defaulting intermediate calls to 'STORE' skips the DEFLATE work until the
- * final call, which is the only one whose output is actually written to disk.
+ * The third argument accepts either the compression mode on its own or the
+ * full options object.
  */
 export async function mergePptxDecks(
   base: ArrayBuffer | Uint8Array,
   addition: ArrayBuffer | Uint8Array,
-  compression: 'STORE' | 'DEFLATE' = 'DEFLATE',
+  options: 'STORE' | 'DEFLATE' | MergeOptions = 'DEFLATE',
 ): Promise<Uint8Array> {
+  const merge: MergeOptions = typeof options === 'string' ? { compression: options } : options;
+  const compression = merge.compression ?? 'DEFLATE';
+  const insertAt = merge.insertAt;
   const baseP = await loadPkg(base);
   const addP = await loadPkg(addition);
   const suffix = Math.random().toString(36).slice(2, 8);
@@ -262,6 +303,58 @@ export async function mergePptxDecks(
     return out;
   }
 
+  // A slide's own .rels points at sibling slides with a bare filename
+  // (Target="slide5.xml", no "../"), which is how a jump button
+  // (ppaction://hlinksldjump) addresses its target. Those names are renumbered
+  // by the copy below, so without this substitution the button would keep
+  // pointing at whichever slide now occupies the old number — silently, since
+  // that part still exists.
+  const slideBasenameSubs = new Map<string, string>();
+  for (const [oldPath, newPath] of slideRenameMap) {
+    if (oldPath.endsWith('.rels')) continue;
+    slideBasenameSubs.set(oldPath.split('/').pop()!, newPath.split('/').pop()!);
+  }
+  function applySlideTargetSubs(text: string): string {
+    return text.replace(
+      /(Target=")(?:\.\.\/slides\/)?(slide\d+\.xml)(")/g,
+      (whole, open: string, filename: string, close: string) => {
+        const replacement = slideBasenameSubs.get(filename);
+        return replacement ? `${open}${replacement}${close}` : whole;
+      },
+    );
+  }
+
+  /**
+   * Drop slide relationships whose target is not coming along. Only slides
+   * listed in the addition's `<p:sldIdLst>` are copied, so a jump button
+   * pointing at a slide that is hidden (or outside the list) would otherwise
+   * leave a relationship with no part behind it — which fails the integrity
+   * check and stops the download. The `<a:hlinkClick>` that used it goes too,
+   * or the slide XML would carry an r:id that no longer resolves.
+   */
+  function dropUnmappedSlideLinks(relsXml: string, slideXml: string): { rels: string; xml: string } {
+    const dropped: string[] = [];
+    const rels = relsXml.replace(/<Relationship\b[^>]*\/>/g, (tag) => {
+      if (!/Type="[^"]*\/relationships\/slide"/.test(tag)) return tag;
+      if (/TargetMode="External"/.test(tag)) return tag;
+      const target = xmlAttr(tag, 'Target')?.replace(/^\.\.\/slides\//, '');
+      if (!target || slideBasenameSubs.has(target)) return tag;
+      const id = xmlAttr(tag, 'Id');
+      if (id) dropped.push(id);
+      return '';
+    });
+    if (dropped.length === 0) return { rels: relsXml, xml: slideXml };
+
+    let xml = slideXml;
+    for (const id of dropped) {
+      xml = xml.replace(
+        new RegExp(`<a:hlinkClick\\b[^>]*r:id="${escapeRegExp(id)}"[^>]*(?:/>|>[\\s\\S]*?</a:hlinkClick>)`, 'g'),
+        '',
+      );
+    }
+    return { rels, xml };
+  }
+
   const allRenames = new Map<string, string>([...renameMap, ...slideRenameMap]);
   for (const [oldPath, newPath] of allRenames) {
     const file = addP.zip.file(oldPath);
@@ -273,6 +366,22 @@ export async function mergePptxDecks(
       const bytes = await file.async('uint8array');
       baseP.zip.file(newPath, bytes);
     }
+  }
+
+  // ---- Retarget the copied slides' own slide→slide links (jump buttons) ----
+  for (const [oldPath, newPath] of slideRenameMap) {
+    if (oldPath.endsWith('.rels')) continue;
+    const relsPath = `ppt/slides/_rels/${newPath.split('/').pop()}.rels`;
+    const relsFile = baseP.zip.file(relsPath);
+    if (!relsFile) continue;
+    const slideFile = baseP.zip.file(newPath);
+    if (!slideFile) continue;
+
+    // Drop first, retarget second: the check is against the *original* slide
+    // names, which the retargeting replaces.
+    const pruned = dropUnmappedSlideLinks(await relsFile.async('string'), await slideFile.async('string'));
+    baseP.zip.file(relsPath, applySlideTargetSubs(pruned.rels));
+    baseP.zip.file(newPath, pruned.xml);
   }
 
   // ---- [Content_Types].xml: carry over Overrides for renamed parts + any new Default extensions ----
@@ -316,6 +425,7 @@ export async function mergePptxDecks(
     }
   }
 
+  const newSldIds: string[] = [];
   for (const newNum of slideNewNumbers) {
     const rid = `rId${nextRid++}`;
     const id = nextSlideId++;
@@ -323,8 +433,9 @@ export async function mergePptxDecks(
       '</Relationships>',
       `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${newNum}.xml"/></Relationships>`,
     );
-    presentation = presentation.replace('</p:sldIdLst>', `<p:sldId id="${id}" r:id="${rid}"/></p:sldIdLst>`);
+    newSldIds.push(`<p:sldId id="${id}" r:id="${rid}"/>`);
   }
+  presentation = insertSlideIds(presentation, newSldIds, insertAt);
 
   presentation = await normalizeSlideMasterAndLayoutIds(baseP.zip, presentation, presRels);
 

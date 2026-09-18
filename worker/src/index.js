@@ -101,6 +101,15 @@ import {
 } from './trainingCorpus.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 import { fetchLyricsCandidates } from './lyrics.js';
+import {
+  fetchSongPptCandidates,
+  fetchSongPptFile,
+  isAllowedSongPptUrl,
+  sanitizeWednesdaySongEntries,
+  sanitizeWednesdaySongEntry,
+  songPptHosts,
+  verifySongPptToken,
+} from './songPpt.js';
 import { bugsScrapingAllowed } from './lyricsSources.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -223,6 +232,64 @@ export class UsageTracker extends DurableObject {
     });
     await this.ctx.storage.delete(`library:lyrics:deleted:${normalized}`);
     return entry;
+  }
+
+  /**
+   * The 수요예배 찬양 library: titles and where each song's PPT came from.
+   *
+   * Link-only by decision — the deck itself is not kept here, so this stays a
+   * small index of where to find a song again rather than a file store. It
+   * lives outside `library:ppt:*`, which means the weekly purge leaves it
+   * alone, exactly like the lyrics library.
+   */
+  async wednesdaySongLibrary() {
+    const stored = await this.ctx.storage.list({ prefix: 'library:wednesday-songs:entry:' });
+    const tombstones = await this.ctx.storage.list({ prefix: 'library:wednesday-songs:deleted:' });
+    return {
+      entries: [...stored.values()].map((value) => value.entry).filter(Boolean),
+      deletedTitles: [...tombstones.values()].map((value) => value.normalizedTitle).filter(Boolean),
+    };
+  }
+
+  async upsertWednesdaySong(rawEntry) {
+    const entry = sanitizeWednesdaySongEntry(rawEntry);
+    if (!entry) throw new Error('invalid 수요예배 song entry');
+    const normalized = normalizeLibraryTitle(entry.title);
+    if (!normalized) throw new Error('invalid 수요예배 song title');
+    await this.ctx.storage.put(`library:wednesday-songs:entry:${normalized}`, {
+      entry,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.ctx.storage.delete(`library:wednesday-songs:deleted:${normalized}`);
+    return entry;
+  }
+
+  async mergeWednesdaySongs(rawEntries) {
+    for (const entry of sanitizeWednesdaySongEntries(rawEntries)) {
+      const normalized = normalizeLibraryTitle(entry.title);
+      if (!normalized) continue;
+      const entryKey = `library:wednesday-songs:entry:${normalized}`;
+      const [existing, deleted] = await Promise.all([
+        this.ctx.storage.get(entryKey),
+        this.ctx.storage.get(`library:wednesday-songs:deleted:${normalized}`),
+      ]);
+      // Migration only: a cloud copy wins, and a tombstone is never
+      // resurrected by another device's stale local cache.
+      if (!existing && !deleted) {
+        await this.ctx.storage.put(entryKey, { entry, updatedAt: new Date().toISOString() });
+      }
+    }
+    return this.wednesdaySongLibrary();
+  }
+
+  async deleteWednesdaySong(title) {
+    const normalized = normalizeLibraryTitle(title);
+    if (!normalized) throw new Error('invalid 수요예배 song title');
+    await this.ctx.storage.delete(`library:wednesday-songs:entry:${normalized}`);
+    await this.ctx.storage.put(`library:wednesday-songs:deleted:${normalized}`, {
+      normalizedTitle: normalized,
+      deletedAt: new Date().toISOString(),
+    });
   }
 
   async deleteLyricsEntry(title) {
@@ -953,6 +1020,42 @@ export default {
       return libraryError('not found', headers, 404);
     }
 
+    // The 수요예배 찬양 library: title + where its PPT came from, nothing else.
+    // Same storage and the same administrator password as the lyrics library.
+    if (url.pathname === '/libraries/wednesday-songs') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        if (request.method === 'GET') {
+          return jsonResponse(await tracker.wednesdaySongLibrary(), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+        const body = JSON.parse(await request.text());
+        if (request.method === 'POST') {
+          return jsonResponse(await tracker.mergeWednesdaySongs(body.entries), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'PUT') {
+          return jsonResponse({ entry: await tracker.upsertWednesdaySong(body.entry) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'DELETE') {
+          await tracker.deleteWednesdaySong(body.title);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
     // Measured model accuracy. Reads are open (the numbers carry no lyrics);
     // writes take the administrator password, like every other shared write.
     if (url.pathname === '/learning/models') {
@@ -1312,6 +1415,93 @@ export default {
         );
       }
       return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+    }
+
+    // 수요예배 찬양 PPT search. Like /lyrics, only a title crosses the wire:
+    // each hit comes back with a signed token standing in for its URL, so the
+    // download route below can tell a URL the proxy chose off its own
+    // allowlist from one that was handed to it.
+    if (request.method === 'GET' && url.pathname === '/wednesday/songs') {
+      const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+      if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+
+      let found = { candidates: [], links: [] };
+      try {
+        found = await fetchSongPptCandidates(title, env, adminPassword(env));
+      } catch (error) {
+        console.warn('song ppt search failed:', error instanceof Error ? error.message : error);
+      }
+      return jsonResponse(
+        {
+          title,
+          candidates: found.candidates,
+          links: found.links,
+          hosts: songPptHosts(env),
+          ...(found.candidates.length === 0
+            ? {
+                message:
+                  '받아올 수 있는 찬양 PPT를 찾지 못했습니다. 직접 내려받아 파일을 올려 주세요.',
+              }
+            : {}),
+        },
+        200,
+        { ...headers, 'Cache-Control': 'no-store' },
+      );
+    }
+
+    // Hand over one 찬양 PPT. The bytes are returned as-is; the browser splices
+    // its slides into the service deck.
+    if (request.method === 'POST' && url.pathname === '/wednesday/songs/file') {
+      let body;
+      try {
+        body = JSON.parse(await request.text());
+      } catch {
+        return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
+      }
+
+      // A token is a URL this proxy itself picked; a pasted URL still has to
+      // pass the same host allowlist.
+      let target = null;
+      if (typeof body?.token === 'string' && body.token) {
+        target = await verifySongPptToken(body.token, adminPassword(env));
+        if (!target) {
+          return jsonResponse(
+            { error: '검색 결과가 만료되었습니다. 다시 검색해 주세요.' },
+            400,
+            headers,
+          );
+        }
+      } else if (typeof body?.url === 'string' && isAllowedSongPptUrl(body.url, env)) {
+        target = body.url;
+      }
+      if (!target) {
+        return jsonResponse(
+          { error: '이 주소에서는 받아올 수 없습니다. 파일을 직접 올려 주세요.' },
+          400,
+          headers,
+        );
+      }
+
+      try {
+        const file = await fetchSongPptFile(target, env);
+        return new Response(file.bytes, {
+          status: 200,
+          headers: {
+            ...headers,
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'Content-Length': String(file.bytes.length),
+            'Cache-Control': 'no-store',
+            'X-Song-Ppt-Source': encodeURIComponent(file.url),
+          },
+        });
+      } catch (error) {
+        return jsonResponse(
+          { error: error instanceof Error ? error.message : '찬양 PPT를 받지 못했습니다.' },
+          502,
+          headers,
+        );
+      }
     }
 
     if (request.method === 'GET' && url.pathname === '/usage') {

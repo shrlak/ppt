@@ -3,7 +3,18 @@
 찬양, 성경 말씀, 설교, 광고, 추가 자료를 **6단계 화면**에서 `다음`/이전 버튼으로 입력하면
 **하나의 예배 슬라이드 PPTX**로 합쳐서 만들어 주는 웹 앱입니다.
 
-배포 주소: <https://shrlak.github.io/ppt/>
+예배 종류마다 준비 방식이 달라 생성기도 **두 개**입니다.
+
+| | 주일예배 | 수요예배 |
+|---|---|---|
+| 주소 | <https://shrlak.github.io/ppt/> | <https://shrlak.github.io/ppt/wednesday.html> |
+| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 곡 PPT를 받아 그 **악보·가사 슬라이드를 그대로 넣습니다** |
+| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
+| 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
+| 파일명 | 그 주 **일요일** `MMDD.pptx` | 그 주 **수요일** `MMDD.pptx` |
+
+헤더의 **수요예배**/**주일예배 생성기** 버튼으로 두 화면을 오갈 수 있습니다. 아래 설명은
+따로 표시하지 않는 한 주일예배 생성기 기준입니다 (수요예배는 [🌙 수요예배](#-수요예배) 참고).
 
 ## 생성되는 슬라이드 순서
 
@@ -321,6 +332,69 @@ Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slid
 - PPTX는 원본 슬라이드·레이아웃·테마를 유지한 채 전체가 삽입됩니다.
 - 저장된 PPT를 라이브러리에서 다시 편집하면 파일 이름, 원본 데이터, 순서가 함께 복원됩니다.
 
+## 🌙 수요예배
+
+수요예배는 주일예배와 만드는 방식이 완전히 달라 **별도 페이지**(`/ppt/wednesday.html`)에서
+만듭니다. 콘티가 없고, 찬양 슬라이드는 각 곡의 PPT 파일에서 **악보·가사 장을 그대로 가져오며**,
+설교 슬라이드는 앱이 넣지 않습니다.
+
+### 생성되는 슬라이드 순서
+
+```
+표지  →  수요예배  →  경배와 찬양  →  [찬양 제목 + 그 곡 PPT 전체] × N  →  기도
+      →  말씀  →  말씀 본문 × N  →  설교  →  기도  →  합심기도  →  마지막 장
+```
+
+**설교 슬라이드는 '설교' 구분 장 뒤에 직접 넣으세요.** 앱은 거기까지만 만듭니다.
+고정 슬라이드 11종은 모두 `public/wednesday-template.pptx`에서 가져옵니다 — 실제 수요예배 PPT에서
+그 주의 문구만 `{{...}}` 자리표시자로 바꾼 파일이라, 표지 배경·글꼴·배치가 원본 그대로입니다.
+
+### 1단계 · 예배 정보
+
+날짜, 설교 제목, 설교자 성함과 직분, 성경 본문 **범위**만 입력하면 됩니다.
+
+- **본문은 범위만** — `시18:1-12`처럼 짧게 적어도 되고, `시편 18편 1-12절`처럼 적어도 됩니다.
+  본문은 주일예배와 같은 **개역개정**에서 자동으로 채웁니다. 입력하는 동안 아래에
+  `시편 18편 1-12절 · 12절 · 말씀 슬라이드 4장`처럼 결과를 미리 보여 줍니다.
+- **한 장에 넣을 절 수**는 기본 3절입니다. 절이 길면 글자 크기를 자동으로 줄여 상자 안에 맞춥니다.
+- **파일명은 그 주 수요일** 날짜로 `MMDD.pptx`(예: `0916.pptx`)가 자동으로 정해집니다. 직접 고쳐도
+  됩니다.
+
+### 2단계 · 찬양
+
+곡 제목을 적고, 그 곡의 PPT를 가져오면 **그 파일의 모든 슬라이드가** 찬양 제목 장 뒤에 순서대로
+들어갑니다. 가져오는 방법은 두 가지입니다.
+
+- **인터넷에서 찾기** — 제목으로 `"<제목> 찬양 ppt"`를 검색해 받아올 수 있는 결과를 보여 주고,
+  고른 것을 서버가 대신 내려받습니다. 브라우저는 다른 사이트의 파일을 직접 받을 수 없어(CORS)
+  Worker가 중계합니다. 받아올 수 있는 사이트 목록은 배포 설정(`WEDNESDAY_PPT_HOSTS`)이 정합니다.
+- **파일 올리기** — 직접 내려받은 `.pptx`를 올립니다. **로그인이 필요한 네이버 카페처럼 자동으로
+  받을 수 없는 곳은 이 방법으로** 넣으세요. 언제나 동작하는 경로라 검색 버튼 옆에 항상 있습니다.
+
+곡은 위·아래 버튼으로 순서를 바꾸고, 필요하면 지울 수 있습니다. 파일을 아직 못 구한 곡도 제목만
+적어 두면 **찬양 제목 장**은 만들어집니다.
+
+- **슬라이드 크기가 다르면 자동으로 맞춥니다** — 내려받은 곡 PPT가 수요예배 PPT와 크기가 다르면
+  비율을 유지한 채 가운데로 맞추고, 다운로드 화면에 그 사실을 알려 줍니다.
+- **곡 안의 이동 버튼이 그대로 동작합니다** — 찬양 PPT 아래쪽의 `1절`·`2절` 같은 버튼(슬라이드
+  바로가기)은 합쳐진 뒤에도 자기 곡의 슬라이드를 가리킵니다.
+
+### 수요예배 찬양 라이브러리
+
+쓴 곡은 **제목과 그 PPT를 받은 주소**만 라이브러리에 남습니다 (파일은 보관하지 않습니다). 다음
+주에 같은 곡을 쓸 때 목록에서 고르면 저장된 주소에서 바로 다시 받아오고, 자동으로 받을 수 없는
+주소면 **출처 열기** 링크로 직접 내려받아 올리면 됩니다. 이 목록은 공유 서버에 저장되어 다른
+기기에서도 같게 보이며, 주일 오후 5시 자동 삭제 대상이 **아닙니다**.
+
+### 3단계 · 다운로드와 자동 저장
+
+- **수요예배 PPT**와 **썸네일**(16:9 한 장짜리 `0916 썸네일.pptx`)을 각각 내려받습니다. 썸네일은
+  표지와 같은 내용이며, 원본 썸네일 파일과 같은 레이아웃을 그대로 씁니다.
+- 만들어진 슬라이드 목록을 순서대로 보여 주므로, 설교 슬라이드를 넣을 자리를 바로 확인할 수 있습니다.
+- **자동 저장** — 입력한 내용은 이 브라우저(새로고침해도 유지, 올린 곡 파일 포함)와 공유 PPT
+  라이브러리 양쪽에 자동으로 저장됩니다. 라이브러리에서 수요예배 항목의 **편집**을 누르면 이
+  페이지가 열리면서 그 주의 입력과 곡 파일이 함께 복원됩니다.
+
 ## 로컬 개발
 
 ```bash
@@ -360,6 +434,11 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 - 기본 곡 라이브러리: `public/library.json` (교체 가능)
 - 성경 슬라이드 템플릿: `public/bible-template.pptx` (교체 가능, 앱에서 세션별 업로드도 지원)
 - 성경 본문 데이터: `public/bible-text/*.json` (번역본별 전체 본문, 실제 사용 시에만 지연 로드)
+- 수요예배 고정 슬라이드: `public/wednesday-template.pptx` (11장), 썸네일:
+  `public/wednesday-thumbnail.pptx` (16:9 한 장). 실제 수요예배 PPT에서
+  `scripts/prepare-wednesday-template.mjs`가 뽑아낸 파일로, 그 주의 문구를 `{{...}}`로 바꾸고
+  쓰이지 않는 파트(그 주의 악보 이미지 등)를 모두 지웁니다. 교회 디자인이 바뀌면 새 PPT로 같은
+  스크립트를 다시 돌리면 됩니다 (원본 예배 파일은 저장소에 두지 않습니다).
 - 서로 다른 템플릿에서 생성된 슬라이드 묶음은 `src/lib/pptxMerge.ts`가 하나의 파일로 합칩니다
   (레이아웃·마스터·테마·이미지가 겹치지 않도록 이름을 바꿔 복사합니다).
 - `src/lib/pptxPackage.ts`는 노트/댓글 관계를 함께 정리하고, 다운로드 직전에 모든 내부 관계와
@@ -367,6 +446,10 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 - Back deck 원본은 저장소의 파일 크기 전송 제약을 피하기 위해 `assets/pptx/back-slides/*.b64`에
   분할 보관하며, `scripts/assemble-pptx-assets.mjs`가 개발·테스트·빌드 전에 체크섬을 확인해
   `public/back-slides.pptx`로 자동 복원합니다.
+- 수요예배 페이지는 Vite의 두 번째 진입점입니다: `wednesday.html` + `src/wednesday/` (빌드 설정은
+  `vite.config.ts`의 `build.rollupOptions.input`). 찬양 PPT 검색·다운로드와 곡 라이브러리는
+  Worker의 `/wednesday/songs`, `/libraries/wednesday-songs` 경로가 담당합니다 —
+  `worker/README.md` 참고.
 - 데스크톱 앱(별도 프로젝트): `desktop/` — Tauri 기반 예배 셋리스트 관리 앱, 자세한 내용은
   `desktop/README.md` 참고
 
@@ -404,6 +487,17 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    final back/end slide. PDFs become one slide per page, images are fitted without cropping, and
    uploaded PPTX slides keep their own layouts and themes.
 
+**수요예배 (Wednesday service)** is prepared differently enough to get its own page at
+`/ppt/wednesday.html`: there is no 콘티 to read, each song's slides are the 악보 pages of that
+song's own downloaded `.pptx` spliced in whole, and the sermon slides are inserted by hand after
+the deck is made. The operator types the date, sermon title, preacher and a scripture range; the
+verses come from the same 개역개정 text, the file is named after that week's Wednesday
+(`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. A song's file is either
+downloaded through the proxy (`GET /wednesday/songs` searches, `POST /wednesday/songs/file`
+relays — a browser cannot fetch a cross-origin `.pptx` itself) or uploaded by hand, which is the
+path that always works for sources behind a login. The 수요예배 song library keeps titles and
+source links only, never files.
+
 Generated decks are archived in a shared PPT library backed by a Cloudflare Worker, together with
 every file that produced them (conti PDF, sermon PPTX, ordered additional-file originals, and a
 snapshot of the wizard inputs), and
@@ -411,8 +505,8 @@ auto-save keeps that server copy current while you edit. The server side of that
 every **Sunday at 5 PM US Eastern** so each week starts from an empty shelf — download anything you
 want to keep before then. The song-lyrics library is never purged.
 
-Slide generation itself runs client-side — Vite + React + TypeScript, deployed to GitHub Pages via
-GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). `src/lib/pptxMerge.ts`
+Slide generation itself runs client-side — Vite + React + TypeScript, two pages
+(`index.html`, `wednesday.html`), deployed to GitHub Pages via GitHub Actions (set repo Settings → Pages → Source to "GitHub Actions"). `src/lib/pptxMerge.ts`
 stitches decks built from different templates into one file by renaming any colliding layout/
 master/theme/media parts. Local dev: `npm install && npm run dev`; e2e tests:
 `npm run build && CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e`.

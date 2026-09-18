@@ -14,8 +14,12 @@ export async function slideOrderOf(zip: JSZip): Promise<string[]> {
   const section = presentation.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);
   if (!section) throw new Error('프레젠테이션에서 슬라이드 목록을 찾지 못했습니다.');
   const names: string[] = [];
-  for (const m of section[1].matchAll(/r:id="(rId\d+)"/g)) {
-    const target = rels.match(new RegExp(`Id="${m[1]}"[^>]*Target="slides/(slide\\d+\\.xml)"`));
+  // Relationship ids are opaque strings, not necessarily "rIdN": the decks
+  // this function reads include ones written by extractSlideSubset itself
+  // (rIdSliceN) and by scripts/prepare-wednesday-template.mjs.
+  for (const m of section[1].matchAll(/r:id="([^"]+)"/g)) {
+    const id = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const target = rels.match(new RegExp(`Id="${id}"[^>]*Target="slides/(slide\\d+\\.xml)"`));
     if (target) names.push(target[1]);
   }
   return names;
@@ -30,6 +34,7 @@ export async function slideOrderOf(zip: JSZip): Promise<string[]> {
 export async function extractSlideSubset(
   templateData: ArrayBuffer | Uint8Array,
   slideNumbers: number[],
+  compression: 'STORE' | 'DEFLATE' = 'DEFLATE',
 ): Promise<Uint8Array> {
   if (slideNumbers.length === 0) throw new Error('추출할 슬라이드 번호가 없습니다.');
 
@@ -96,5 +101,5 @@ export async function extractSlideSubset(
   zip.file('ppt/presentation.xml', presentation);
   zip.file('ppt/_rels/presentation.xml.rels', presRels);
 
-  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  return zip.generateAsync({ type: 'uint8array', compression });
 }
