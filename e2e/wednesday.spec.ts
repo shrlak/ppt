@@ -347,6 +347,58 @@ test.describe('수요예배 generator', () => {
     await expect(page.getByTestId('wednesday-song-file-0')).toContainText('인터넷에서 받음');
   });
 
+  test('moves on to the next hit when the first one has no file', async ({ page }) => {
+    // 제목을 검색해서 위에 있는 걸 눌러 보는 것과 같습니다 — 첫 글에 첨부가
+    // 없으면 그다음 것을 눌러 봅니다.
+    const songFile = await fs.readFile(SONG_PPTX);
+    const hit = (token: string, url: string) => ({
+      token,
+      url,
+      host: new URL(url).hostname,
+      title: '나의 반석이신 하나님 ppt',
+      direct: false,
+      score: 1,
+      decision: 'auto',
+    });
+    await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
+      route.fulfill({
+        json: {
+          title: '나의 반석이신 하나님',
+          candidates: [
+            hit('dead-end', 'https://praise.tistory.com/entry/1'),
+            hit('has-the-file', 'https://blog.naver.com/church/2'),
+          ],
+          links: [],
+        },
+      }),
+    );
+    const asked: string[] = [];
+    await page.route(`${PROXY}/wednesday/songs/file`, (route) => {
+      const token = String(JSON.parse(route.request().postData() ?? '{}').token ?? '');
+      asked.push(token);
+      if (token === 'dead-end') {
+        return route.fulfill({
+          status: 400,
+          json: { error: '이 게시글에서 PPT 첨부를 찾지 못했습니다. 파일을 직접 올려 주세요.' },
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        body: songFile,
+      });
+    });
+
+    await page.getByTestId('wednesday-tab-songs').click();
+    await page.getByTestId('wednesday-song-add').click();
+    await page.getByTestId('wednesday-song-title-0').fill('나의 반석이신 하나님');
+
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장', {
+      timeout: BUILD_TIMEOUT,
+    });
+    expect(asked).toEqual(['dead-end', 'has-the-file']);
+  });
+
   test('links both generators to each other', async ({ page }) => {
     await page.getByTestId('wednesday-to-sunday').click();
     await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();

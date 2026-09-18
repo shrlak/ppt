@@ -110,6 +110,7 @@ import {
   sanitizeWednesdaySongEntry,
   signSongPptToken,
   songPptHosts,
+  songPptHostsOnly,
   verifySongPptToken,
 } from './songPpt.js';
 import {
@@ -1444,6 +1445,7 @@ export default {
           candidates: found.candidates,
           links: found.links,
           hosts: songPptHosts(env),
+          hostsOnly: songPptHostsOnly(env),
           ...(found.candidates.length === 0
             ? {
                 message:
@@ -1487,6 +1489,12 @@ export default {
 
     // Hand over one 악보 사진.
     if (request.method === 'POST' && url.pathname === '/wednesday/songs/image') {
+      // These two routes fetch an outside address and return its bytes, so
+      // they are the one place worth restating the CORS rule server-side: only
+      // this app's own origins may ask, not anything that found the URL.
+      if (!isAllowedModelOrigin(request, allowedOrigins(env))) {
+        return jsonResponse({ error: 'origin not allowed' }, 403, headers);
+      }
       let body;
       try {
         body = JSON.parse(await request.text());
@@ -1535,6 +1543,9 @@ export default {
     // Hand over one 찬양 PPT. The bytes are returned as-is; the browser splices
     // its slides into the service deck.
     if (request.method === 'POST' && url.pathname === '/wednesday/songs/file') {
+      if (!isAllowedModelOrigin(request, allowedOrigins(env))) {
+        return jsonResponse({ error: 'origin not allowed' }, 403, headers);
+      }
       let body;
       try {
         body = JSON.parse(await request.text());
@@ -1542,8 +1553,8 @@ export default {
         return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
       }
 
-      // A token is a URL this proxy itself picked; a pasted URL still has to
-      // pass the same host allowlist.
+      // A token is a URL this proxy itself picked off its own search; a pasted
+      // URL still has to pass the same checks before it is fetched.
       let target = null;
       if (typeof body?.token === 'string' && body.token) {
         target = await verifySongPptToken(body.token, adminPassword(env));

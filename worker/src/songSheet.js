@@ -5,15 +5,13 @@
 // browser cannot read one itself — and the same token discipline: search
 // returns a signed token per hit, never a URL the caller can choose.
 //
-// The one deliberate difference is the host policy. A 찬양 PPT comes from a
-// handful of known file hosts, so that route is allowlisted by host. 악보
-// images are scattered across every blog CDN there is, so an allowlist would
-// mean the feature never finds anything. These are gated by *what comes back*
-// instead: https only, never an address that resolves inside, a hard size cap,
-// and bytes that really are a PNG or JPEG. A deployment that wants the
-// stricter rule anyway sets WEDNESDAY_IMAGE_HOSTS_ONLY=true and gets the
-// songPpt allowlist applied here too.
-import { fetchWithTimeout, isAllowedSongPptUrl, readBoundedText, songPptHosts } from './songPpt.js';
+// Both routes are gated the same way, by *what comes back* rather than by a
+// host list — 악보 images live on whatever CDN their blog uses, and the 찬양
+// PPT is on whichever 자료실 that song happens to be on. Here that means https
+// only, never an address that resolves inside, a hard size cap, and bytes that
+// really are a PNG or JPEG. A deployment that wants a list anyway sets
+// WEDNESDAY_IMAGE_HOSTS_ONLY=true and gets WEDNESDAY_PPT_HOSTS applied here.
+import { fetchWithTimeout, isKnownSongPptHost, readBoundedText, songPptHosts } from './songPpt.js';
 
 export const MAX_SHEET_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_SHEET_IMAGES = 6;
@@ -76,7 +74,7 @@ export function isAllowedSheetImageUrl(rawUrl, env = {}) {
   }
   if (parsed.protocol !== 'https:') return false;
   if (isLocalHostname(parsed.hostname)) return false;
-  if (imageHostsOnly(env)) return isAllowedSongPptUrl(rawUrl, env);
+  if (imageHostsOnly(env)) return isKnownSongPptHost(rawUrl, env);
   return true;
 }
 
