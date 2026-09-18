@@ -14,7 +14,7 @@ import { buildWednesdayDeck } from './deckBuilder';
 import { buildWednesdayThumbnail, thumbnailFileName } from './thumbnail';
 import { suggestWednesdayFileName } from './fields';
 import { EMPTY_PASSAGE, parsePassageInput, resolvePassage, type ResolvedPassage } from './passage';
-import WednesdaySongList, { blankWednesdaySong, type SongsUpdate } from './WednesdaySongList';
+import WednesdaySongList, { type SongsUpdate } from './WednesdaySongList';
 import {
   clearWednesdayDraft,
   forgetWednesdaySongDeck,
@@ -226,18 +226,30 @@ export default function WednesdayApp() {
     };
   }, [restoreSavedDeck]);
 
+  // Which songs are attached, and with which file. Typing is debounced, but
+  // adding or attaching a song is a single deliberate act — and the thing most
+  // expensive to lose — so it is written out at once.
+  const songsKey = songs.map((song) => `${song.id}:${song.deck?.byteLength ?? 0}`).join('|');
+  const savedSongsKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!draftLoaded) return;
-    const timer = setTimeout(() => {
+    const save = () =>
       void saveWednesdayDraft({
         service,
         songs,
         fileNameOverride: fileNameOverride ?? undefined,
         deckId: autoSaveTargetRef.current ?? undefined,
       });
-    }, DRAFT_DEBOUNCE_MS);
+
+    if (savedSongsKeyRef.current !== songsKey) {
+      savedSongsKeyRef.current = songsKey;
+      save();
+      return;
+    }
+    const timer = setTimeout(save, DRAFT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [draftLoaded, service, songs, fileNameOverride]);
+  }, [draftLoaded, service, songs, songsKey, fileNameOverride]);
 
   // ---- shared 라이브러리 auto-save: build and upload once edits settle ----
   useEffect(() => {
@@ -709,6 +721,3 @@ export default function WednesdayApp() {
     </>
   );
 }
-
-/** Exported for the e2e spec: a fresh song row. */
-export { blankWednesdaySong };

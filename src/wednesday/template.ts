@@ -43,6 +43,3 @@ export const WEDNESDAY_TOKENS = {
   songTitle: '{{SONG_TITLE}}',
   body: '{{BODY}}',
 } as const;
-
-/** The 표지's own aspect: the cover was authored 16:9 even though the deck is 4:3. */
-export const THUMBNAIL_SLIDE_SIZE = { cx: 12192000, cy: 6858000 } as const;

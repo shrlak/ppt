@@ -22,7 +22,7 @@ import { mergePptxDecks } from '../lib/pptx/pptxMerge';
 import { readSlideSize, rescaleDeckToSize, type SlideSize } from '../lib/pptx/slideGeometry';
 import { expandDeckSegment, type DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Verse } from '../bible/types';
-import { buildWednesdayVerseSlide, groupVerses, verseLine } from './bibleSlides';
+import { buildWednesdayVerseSlide, groupVerses } from './bibleSlides';
 import { clearRemainingTokens, formatDateDot, formatDateKo, substituteTokens } from './fields';
 import { WEDNESDAY_SLIDES } from './template';
 import { isAttached, type WednesdayService, type WednesdaySong } from './types';
@@ -271,9 +271,4 @@ async function prepareSongDeck(
     );
   }
   return data;
-}
-
-/** The first line of a passage, for the download screen's summary. */
-export function firstVersePreview(verses: Verse[]): string {
-  return verses.length > 0 ? verseLine(verses[0]) : '';
 }

@@ -21,6 +21,11 @@ import { DEFAULT_ADMIN_PASSWORD } from '../../worker/src/config.js';
 const BLOG = 'https://blog.naver.com/church/12345';
 const FILE = 'https://blogfiles.pstatic.net/MjAy/song.pptx';
 
+/** A response body from raw bytes, which BodyInit does not take directly. */
+function bodyOf(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 /** Bytes that pass for a .pptx: ZIP magic plus the presentation part's name. */
 function pptxBytes(size = 512): Uint8Array {
   const bytes = new Uint8Array(size);
@@ -88,7 +93,7 @@ describe('search result parsing', () => {
     ]);
     // A .pptx off the allowlist is shown but never fetched; a plain page is not
     // worth showing at all.
-    expect(links.map((link) => link.url)).toEqual(['https://elsewhere.test/song.pptx']);
+    expect(links.map((link: { url: string }) => link.url)).toEqual(['https://elsewhere.test/song.pptx']);
   });
 
   it('recognizes a file URL with a query string', () => {
@@ -151,7 +156,7 @@ describe('downloading a song deck', () => {
           headers: { 'Content-Type': 'text/html' },
         });
       }
-      return new Response(bytes, { status: 200 });
+      return new Response(bodyOf(bytes), { status: 200 });
     });
 
     const file = await fetchSongPptFile(BLOG);
@@ -166,14 +171,14 @@ describe('downloading a song deck', () => {
   });
 
   it('refuses a file that is not a PowerPoint package', async () => {
-    stubFetch(() => new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }));
+    stubFetch(() => new Response(bodyOf(new Uint8Array([1, 2, 3, 4])), { status: 200 }));
     await expect(fetchSongPptFile(FILE)).rejects.toThrow('PowerPoint(.pptx) 파일이 아닙니다');
   });
 
   it('refuses a file over the size cap without reading it', async () => {
     stubFetch(
       () =>
-        new Response(pptxBytes(), {
+        new Response(bodyOf(pptxBytes()), {
           status: 200,
           headers: { 'Content-Length': String(MAX_SONG_PPT_BYTES + 1) },
         }),
@@ -183,7 +188,7 @@ describe('downloading a song deck', () => {
 
   it('re-checks where a redirect actually landed', async () => {
     stubFetch(() => {
-      const response = new Response(pptxBytes(), { status: 200 });
+      const response = new Response(bodyOf(pptxBytes()), { status: 200 });
       // An allowlisted host may redirect anywhere; response.url is where we
       // really ended up.
       Object.defineProperty(response, 'url', { value: 'https://elsewhere.test/song.pptx' });
@@ -315,7 +320,7 @@ describe('the song PPT routes', () => {
   it('serves the file for a token it signed', async () => {
     const harness = createWorkerHarness();
     const bytes = pptxBytes();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(bodyOf(bytes), { status: 200 })));
 
     const token = await signSongPptToken(FILE, DEFAULT_ADMIN_PASSWORD);
     const response = await harness.fetch('/wednesday/songs/file', {
