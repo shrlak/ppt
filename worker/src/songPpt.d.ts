@@ -4,6 +4,8 @@ export interface SongPptHit {
   title: string;
   /** True when the hit is the .pptx itself rather than a page carrying one. */
   direct: boolean;
+  /** True when the host is one known to share 찬양 PPT files. */
+  known?: boolean;
 }
 
 export interface SongPptCandidate extends SongPptHit {
@@ -48,6 +50,9 @@ export function fetchWithTimeout(
 ): Promise<Response>;
 export function readBoundedText(response: Response): Promise<string>;
 export function songPptHosts(env?: Record<string, string | undefined>): string[];
+export function songPptHostsOnly(env?: Record<string, string | undefined>): boolean;
+export function isKnownSongPptHost(rawUrl: string, env?: Record<string, string | undefined>): boolean;
+export function isNeverFileHost(rawUrl: string): boolean;
 export function isAllowedSongPptUrl(rawUrl: string, env?: Record<string, string | undefined>): boolean;
 export function looksLikePptxUrl(rawUrl: string): boolean;
 export function extractSongPptResults(

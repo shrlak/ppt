@@ -16,8 +16,9 @@
 // uploaded, and this module is the one place that knows how each arrives.
 //
 // Nothing here trusts the search result: the proxy hands out a signed token per
-// hit instead of a URL, and the download route re-checks the host against its
-// own allowlist. See worker/src/songPpt.js and worker/src/songSheet.js.
+// hit instead of a URL, and what it will fetch is decided there — https only,
+// never an address that resolves inside, a size cap, and bytes that really are
+// a .pptx or a PNG/JPEG. See worker/src/songPpt.js and worker/src/songSheet.js.
 import { cloudLibraryBaseUrl, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { inspectDeckBytes } from '../lib/storage/pptLibrary';
 
@@ -304,6 +305,9 @@ export function hostOf(url: string): string {
 /** How many 악보 사진 the app attaches by itself — a 찬양 악보 is usually 1-2 pages. */
 export const MAX_AUTO_SHEET_IMAGES = 2;
 
+/** How many sure 찬양 PPT hits are tried before falling back to 악보 사진. */
+export const MAX_AUTO_DECK_TRIES = 3;
+
 export type AutoAttachResult =
   | { kind: 'deck'; deck: LoadedSongDeck; candidate: SongPptCandidate }
   | { kind: 'images'; images: LoadedSheetImage[]; candidates: SheetImageCandidate[] }
@@ -328,12 +332,18 @@ export async function autoAttachSong(title: string, signal?: AbortSignal): Promi
   if (!trimmed) return { kind: 'none', pptCandidates: [], sheetCandidates: [] };
 
   const ppt = await searchSongPpt(trimmed, signal);
-  const bestDeck = ppt.candidates.find((candidate) => candidate.decision === 'auto');
-  if (bestDeck) {
+  // Most hits are a post rather than the file, and a post does not always
+  // still have its attachment — so try the next sure hit down, the way a
+  // person clicks the second result when the first one is a dead end.
+  const sureDecks = ppt.candidates
+    .filter((candidate) => candidate.decision === 'auto')
+    .slice(0, MAX_AUTO_DECK_TRIES);
+  for (const candidate of sureDecks) {
     try {
-      return { kind: 'deck', deck: await downloadSongPpt(bestDeck, signal), candidate: bestDeck };
+      return { kind: 'deck', deck: await downloadSongPpt(candidate, signal), candidate };
     } catch {
-      // The file would not come; fall through to 악보 사진 rather than stop.
+      // That one would not come; try the next, then 악보 사진.
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
     }
   }
 

@@ -7,12 +7,15 @@ import {
   fetchSongPptFile,
   findSongPptAttachment,
   isAllowedSongPptUrl,
+  isKnownSongPptHost,
+  isNeverFileHost,
   isPptxBytes,
   looksLikePptxUrl,
   sanitizeWednesdaySongEntries,
   sanitizeWednesdaySongEntry,
   signSongPptToken,
   songPptHosts,
+  songPptHostsOnly,
   verifySongPptToken,
 } from '../../worker/src/songPpt.js';
 import { createWorkerHarness } from '../support/workerHarness';
@@ -20,6 +23,7 @@ import { DEFAULT_ADMIN_PASSWORD } from '../../worker/src/config.js';
 
 const BLOG = 'https://blog.naver.com/church/12345';
 const FILE = 'https://blogfiles.pstatic.net/MjAy/song.pptx';
+const TISTORY = 'https://praise.tistory.com/entry/찬양-ppt';
 
 /** A response body from raw bytes, which BodyInit does not take directly. */
 function bodyOf(bytes: Uint8Array): ArrayBuffer {
@@ -39,31 +43,61 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('song PPT host allowlist', () => {
-  it('accepts only https hosts it was told about', () => {
+describe('song PPT host policy', () => {
+  it('downloads from any https host, because the song decides the site', () => {
+    // 찾는 방법이 "제목 검색 → 위에 있는 데 들어가서 받기"라서, 주소 목록으로
+    // 막으면 대부분의 곡이 "직접 올려 주세요"가 됩니다. 대신 받아온 바이트가
+    // 진짜 PowerPoint 파일인지로 거릅니다 (isPptxBytes).
     expect(isAllowedSongPptUrl(FILE)).toBe(true);
     expect(isAllowedSongPptUrl(BLOG)).toBe(true);
-    // http is refused even on an allowlisted host.
+    expect(isAllowedSongPptUrl(TISTORY)).toBe(true);
+    expect(isAllowedSongPptUrl('https://praise.example.kr/song.pptx')).toBe(true);
+    // http is refused wherever it points, and so is a non-URL.
     expect(isAllowedSongPptUrl('http://blog.naver.com/church/1')).toBe(false);
-    expect(isAllowedSongPptUrl('https://example.test/song.pptx')).toBe(false);
     expect(isAllowedSongPptUrl('not a url')).toBe(false);
   });
 
   it('never resolves a host that points back inside', () => {
-    // An operator-supplied host must not be able to reach the Worker's own
-    // network, whatever the allowlist says.
+    // The open policy must not become a way to reach the Worker's own network,
+    // whatever an operator lists.
     const env = { WEDNESDAY_PPT_HOSTS: 'localhost,127.0.0.1,[::1],router.local,169.254.169.254' };
     expect(isAllowedSongPptUrl('https://localhost/song.pptx', env)).toBe(false);
     expect(isAllowedSongPptUrl('https://127.0.0.1/song.pptx', env)).toBe(false);
     expect(isAllowedSongPptUrl('https://router.local/song.pptx', env)).toBe(false);
     expect(isAllowedSongPptUrl('https://169.254.169.254/latest/meta-data', env)).toBe(false);
+    expect(isAllowedSongPptUrl('https://box.internal/song.pptx', env)).toBe(false);
+  });
+
+  it('knows the sites this church downloads from, subdomains included', () => {
+    expect(isKnownSongPptHost(BLOG)).toBe(true);
+    // 티스토리 blogs are all on their own subdomain, 갓피플 spreads over several.
+    expect(isKnownSongPptHost(TISTORY)).toBe(true);
+    expect(isKnownSongPptHost('https://www.godpeople.com/bbs/view?id=1')).toBe(true);
+    expect(isKnownSongPptHost('https://blog.kakaocdn.net/dn/x/song.pptx')).toBe(true);
+    expect(isKnownSongPptHost('https://elsewhere.test/song.pptx')).toBe(false);
+    // Not a subdomain, just a look-alike suffix.
+    expect(isKnownSongPptHost('https://nottistory.com/1')).toBe(false);
+  });
+
+  it('never follows a page that cannot hold a file', () => {
+    expect(isNeverFileHost('https://www.youtube.com/watch?v=x')).toBe(true);
+    expect(isNeverFileHost('https://ko.wikipedia.org/wiki/x')).toBe(true);
+    expect(isNeverFileHost(TISTORY)).toBe(false);
   });
 
   it('takes a deployment\'s own hosts from the environment', () => {
     const env = { WEDNESDAY_PPT_HOSTS: ' praise.example.kr , Files.Example.Kr ' };
     expect(songPptHosts(env)).toEqual([...DEFAULT_SONG_PPT_HOSTS, 'praise.example.kr', 'files.example.kr']);
-    expect(isAllowedSongPptUrl('https://files.example.kr/a.pptx', env)).toBe(true);
-    expect(isAllowedSongPptUrl('https://files.example.kr/a.pptx')).toBe(false);
+    expect(isKnownSongPptHost('https://files.example.kr/a.pptx', env)).toBe(true);
+    expect(isKnownSongPptHost('https://files.example.kr/a.pptx')).toBe(false);
+  });
+
+  it('can be locked back down to that list', () => {
+    const env = { WEDNESDAY_PPT_HOSTS_ONLY: 'true', WEDNESDAY_PPT_HOSTS: 'praise.example.kr' };
+    expect(songPptHostsOnly(env)).toBe(true);
+    expect(isAllowedSongPptUrl(FILE, env)).toBe(true);
+    expect(isAllowedSongPptUrl('https://praise.example.kr/a.pptx', env)).toBe(true);
+    expect(isAllowedSongPptUrl('https://elsewhere.test/song.pptx', env)).toBe(false);
   });
 });
 
@@ -77,22 +111,44 @@ describe('search result parsing', () => {
     expect(buildSongPptQueries('   ')).toEqual([]);
   });
 
-  it('keeps fetchable hits and offers the rest as links only', () => {
+  it('puts the file first, then the sites we know, then the rest', () => {
     const html = `
       <a href="https://duckduckgo.com/y.js?ad=1">ad</a>
-      <a href="/l/?uddg=${encodeURIComponent(FILE)}">나의 반석이신 하나님 ppt</a>
-      <a href="/l/?uddg=${encodeURIComponent(BLOG)}">찬양 ppt 모음 &amp; 악보</a>
-      <a href="/l/?uddg=${encodeURIComponent('https://elsewhere.test/song.pptx')}">다른 사이트</a>
       <a href="/l/?uddg=${encodeURIComponent('https://elsewhere.test/page')}">본문만</a>
+      <a href="/l/?uddg=${encodeURIComponent(BLOG)}">찬양 ppt 모음 &amp; 악보</a>
+      <a href="/l/?uddg=${encodeURIComponent(FILE)}">나의 반석이신 하나님 ppt</a>
+      <a href="/l/?uddg=${encodeURIComponent('https://www.youtube.com/watch?v=x')}">찬양 영상</a>
     `;
     const { results, links } = extractSongPptResults(html);
 
-    expect(results).toEqual([
-      { url: FILE, host: 'blogfiles.pstatic.net', title: '나의 반석이신 하나님 ppt', direct: true },
-      { url: BLOG, host: 'blog.naver.com', title: '찬양 ppt 모음 & 악보', direct: false },
+    // Page order says nothing about which hit holds a file, so a .pptx comes
+    // first, a 자료실 we know next, and an unknown blog after both.
+    expect(results.map((hit: { url: string }) => hit.url)).toEqual([
+      FILE,
+      BLOG,
+      'https://elsewhere.test/page',
     ]);
-    // A .pptx off the allowlist is shown but never fetched; a plain page is not
-    // worth showing at all.
+    expect(results[0]).toEqual({
+      url: FILE,
+      host: 'blogfiles.pstatic.net',
+      title: '나의 반석이신 하나님 ppt',
+      direct: true,
+      known: true,
+    });
+    expect(results[2].known).toBe(false);
+    // A video page can never hold the file, so it is not worth a fetch.
+    expect(results.some((hit: { host: string }) => hit.host.includes('youtube'))).toBe(false);
+    expect(links).toEqual([]);
+  });
+
+  it('offers what it may not fetch as a link instead', () => {
+    const html = `
+      <a href="/l/?uddg=${encodeURIComponent(BLOG)}">네이버 블로그</a>
+      <a href="/l/?uddg=${encodeURIComponent('https://elsewhere.test/song.pptx')}">다른 사이트</a>
+    `;
+    const { results, links } = extractSongPptResults(html, { WEDNESDAY_PPT_HOSTS_ONLY: 'true' });
+
+    expect(results.map((hit: { url: string }) => hit.url)).toEqual([BLOG]);
     expect(links.map((link: { url: string }) => link.url)).toEqual(['https://elsewhere.test/song.pptx']);
   });
 
@@ -103,6 +159,8 @@ describe('search result parsing', () => {
   });
 
   it('finds an attachment inside a post, resolving a relative link', () => {
+    // A post links out to other sites too, so the file host we know wins over
+    // a .pptx someone linked elsewhere, wherever each appears in the page.
     const html = `
       <a href="/common/download?x=1">첨부</a>
       <a href="https://elsewhere.test/song.pptx">다른 곳</a>
@@ -112,6 +170,26 @@ describe('search result parsing', () => {
       'https://blogfiles.pstatic.net/MjAy/%EC%B0%AC%EC%96%91.pptx',
     );
     expect(findSongPptAttachment('<a href="/none">없음</a>', BLOG)).toBeNull();
+
+    // On a site we know nothing about, the post's own domain is the next best
+    // clue as to which .pptx is the attachment.
+    const board = `
+      <a href="https://ads.other.test/free.pptx">광고</a>
+      <a href="https://cdn.example.kr/files/song.pptx">주 은혜임을.pptx</a>
+    `;
+    expect(findSongPptAttachment(board, 'https://board.example.kr/view/44')).toBe(
+      'https://cdn.example.kr/files/song.pptx',
+    );
+  });
+
+  it('falls back to the link a person would click', () => {
+    // 갓피플 and most 자료실 boards hide the file behind a download script, so
+    // the only place the name appears is the link's own text.
+    const html = '<a href="/bbs/download.php?no=44"><span>주 은혜임을.pptx</span> (2.1MB)</a>';
+    expect(findSongPptAttachment(html, 'https://www.godpeople.com/bbs/view?no=44')).toBe(
+      'https://www.godpeople.com/bbs/download.php?no=44',
+    );
+    expect(findSongPptAttachment('<a href="/bbs/download.php?no=44">첨부파일</a>', BLOG)).toBeNull();
   });
 });
 
@@ -164,10 +242,31 @@ describe('downloading a song deck', () => {
     expect(calls).toEqual([BLOG, FILE]);
   });
 
-  it('refuses a host it was not told about', async () => {
-    await expect(fetchSongPptFile('https://elsewhere.test/song.pptx')).rejects.toThrow(
+  it('downloads from a site it has never seen, and checks what arrives', async () => {
+    const bytes = pptxBytes();
+    const calls = stubFetch((url) => {
+      if (url === TISTORY) return new Response(`<a href="${'https://blog.kakaocdn.net/dn/x/찬양.pptx'}">찬양.pptx</a>`, { status: 200 });
+      return new Response(bodyOf(bytes), { status: 200 });
+    });
+
+    const file = await fetchSongPptFile(TISTORY);
+    expect(file.bytes.length).toBe(bytes.length);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('refuses http and an address that points inside', async () => {
+    await expect(fetchSongPptFile('http://elsewhere.test/song.pptx')).rejects.toThrow(
       '이 주소에서는 받아올 수 없습니다. 파일을 직접 올려 주세요.',
     );
+    await expect(fetchSongPptFile('https://127.0.0.1/song.pptx')).rejects.toThrow(
+      '이 주소에서는 받아올 수 없습니다. 파일을 직접 올려 주세요.',
+    );
+  });
+
+  it('refuses a host off the list when the deployment asks for one', async () => {
+    await expect(
+      fetchSongPptFile('https://elsewhere.test/song.pptx', { WEDNESDAY_PPT_HOSTS_ONLY: 'true' }),
+    ).rejects.toThrow('이 주소에서는 받아올 수 없습니다. 파일을 직접 올려 주세요.');
   });
 
   it('refuses a file that is not a PowerPoint package', async () => {
@@ -189,9 +288,9 @@ describe('downloading a song deck', () => {
   it('re-checks where a redirect actually landed', async () => {
     stubFetch(() => {
       const response = new Response(bodyOf(pptxBytes()), { status: 200 });
-      // An allowlisted host may redirect anywhere; response.url is where we
-      // really ended up.
-      Object.defineProperty(response, 'url', { value: 'https://elsewhere.test/song.pptx' });
+      // Any host may redirect anywhere, including back inside; response.url is
+      // where we really ended up.
+      Object.defineProperty(response, 'url', { value: 'https://169.254.169.254/latest/meta-data' });
       return response;
     });
     await expect(fetchSongPptFile(FILE)).rejects.toThrow('허용되지 않은 주소로 이동했습니다.');
@@ -332,7 +431,20 @@ describe('the song PPT routes', () => {
     expect((await response.arrayBuffer()).byteLength).toBe(bytes.length);
   });
 
-  it('refuses an expired token and an off-allowlist URL', async () => {
+  it('only lets this app ask for an outside file', async () => {
+    // The route fetches an address and hands back the bytes, so the CORS rule
+    // is restated here rather than left to the browser.
+    const harness = createWorkerHarness();
+    const token = await signSongPptToken(FILE, DEFAULT_ADMIN_PASSWORD);
+    const elsewhere = await harness.fetch('/wednesday/songs/file', {
+      method: 'POST',
+      headers: { Origin: 'https://not-ours.test' },
+      body: JSON.stringify({ token }),
+    });
+    expect(elsewhere.status).toBe(403);
+  });
+
+  it('refuses an expired token and a URL it may not fetch', async () => {
     const harness = createWorkerHarness();
     const stale = await signSongPptToken(FILE, DEFAULT_ADMIN_PASSWORD, { ttlMs: -1000 });
     const expired = await harness.fetch('/wednesday/songs/file', {
@@ -342,7 +454,14 @@ describe('the song PPT routes', () => {
     expect(expired.status).toBe(400);
     expect(((await expired.json()) as { error: string }).error).toContain('만료');
 
-    const pasted = await harness.fetch('/wednesday/songs/file', {
+    const inside = await harness.fetch('/wednesday/songs/file', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://169.254.169.254/song.pptx' }),
+    });
+    expect(inside.status).toBe(400);
+
+    const locked = createWorkerHarness({ WEDNESDAY_PPT_HOSTS_ONLY: 'true' });
+    const pasted = await locked.fetch('/wednesday/songs/file', {
       method: 'POST',
       body: JSON.stringify({ url: 'https://elsewhere.test/song.pptx' }),
     });

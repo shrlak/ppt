@@ -77,13 +77,16 @@ result cannot be swapped for an address of the caller's choosing.
 
 `POST /wednesday/songs/file` takes `{ token }` (or `{ url }`, for an address
 the operator pasted) and returns the `.pptx` bytes. Before anything is
-fetched: https only, the host must be on the allowlist, IP literals and
-`localhost`/`.local`/`.internal` names are refused outright, the final URL
-after redirects is re-checked, the transfer is capped at 25 MB and timed out,
-and the bytes must actually be a PowerPoint package (ZIP magic plus a
-`ppt/presentation.xml` part) — a login page returned with HTTP 200 is not a
-deck. A post URL is followed exactly one step, to a `.pptx` attachment on an
-allowlisted host, with the post as `Referer` (attachment hosts require it).
+fetched: https only, IP literals and `localhost`/`.local`/`.internal` names are
+refused outright, the final URL after redirects is re-checked, the transfer is
+capped at 25 MB and timed out, and the bytes must actually be a PowerPoint
+package (ZIP magic plus a `ppt/presentation.xml` part) — a login page returned
+with HTTP 200 is not a deck. A post URL is followed exactly one step to its
+`.pptx` attachment, with the post as `Referer` (attachment hosts require it);
+the attachment is the link whose address ends in `.pptx`, preferring a file
+host we know or the post's own domain, or failing that the link whose visible
+text names a `.pptx` (갓피플 and most 자료실 boards hide the file behind a
+download script).
 
 `GET /wednesday/songs/sheets?title=…` and `POST /wednesday/songs/image` are the
 same pair for **악보 사진**, which is how most Korean worship songs are shared.
@@ -92,22 +95,37 @@ Each hit comes back ranked against the title (`scoreSongMatch` in
 marked `auto`, and the app attaches those by itself; anything below that is
 `review` and is shown to the operator instead of acted on.
 
-The image route's host policy is deliberately different. 악보 images live on
-whatever CDN their blog uses, so an allowlist would mean the feature never
-finds anything; they are gated by **what comes back** instead — https only,
-never an address that resolves inside (`localhost`, `.local`, `.internal`, IP
-literals), 8 MB cap, the final URL re-checked after redirects, and the bytes
-have to start with the PNG or JPEG magic number, so a 200-with-an-HTML-page is
-refused. A deployment that would rather apply the 찬양 PPT allowlist here too
-sets `WEDNESDAY_IMAGE_HOSTS_ONLY=true`.
+The image route works the same way — https only, never an address that
+resolves inside, 8 MB cap, the final URL re-checked after redirects, and bytes
+that start with the PNG or JPEG magic number, so a 200-with-an-HTML-page is
+refused.
 
-The allowlist ships with the 네이버 블로그·카페 file hosts and grows with the
-`WEDNESDAY_PPT_HOSTS` variable (see `wrangler.toml`) — whose files this proxy
-relays is a permission decision, not a code one. Anything off the list is
-still returned to the operator as a **link** to open and download by hand,
-which is also the only way to get a file from a source that needs a login
-(네이버 카페). Every deck can be uploaded by hand, so these routes failing
-never blocks a service.
+**Neither route is gated by a host list**, and that is deliberate. The way a
+song is actually found is to search its title and open whichever site comes up
+first — 네이버 블로그 one week, 갓피플 or some 티스토리 blog the next, and
+악보 images sit on whatever CDN their blog uses. A list would have to name
+every 자료실 that has ever hosted a 찬양 PPT, and everything it missed would
+come back as "직접 올려 주세요" — the manual work these routes exist to
+remove. What makes that safe is the checks above, on **what comes back**: the
+response has to be a real PowerPoint package or a real PNG/JPEG, under its
+cap, from an address that does not resolve inside. A deployment that wants a
+list anyway sets `WEDNESDAY_PPT_HOSTS_ONLY=true` (and
+`WEDNESDAY_IMAGE_HOSTS_ONLY=true` for images); off-list hits are then returned
+as **links** to open and download by hand.
+
+Because those two routes fetch an outside address and return its bytes, they
+also check the `Origin` header against `ALLOWED_ORIGINS` server-side (403
+otherwise) instead of leaving that to the browser, so the proxy is not a
+general-purpose downloader for anything that finds the URL.
+
+`WEDNESDAY_PPT_HOSTS` (see `wrangler.toml`) is therefore a preference, not a
+permission: hits on a host it names — the 네이버 블로그·카페 file hosts,
+갓피플 and 티스토리 defaults plus a deployment's own, subdomains included —
+are tried before a page that merely shares a word with the title, and hosts
+that can never hold a file (streaming, video, wikis) are not fetched at all.
+Uploading by hand stays the path that always works, and the only one for a
+source that needs a login (네이버 카페), so these routes failing never blocks
+a service.
 
 `GET|PUT|DELETE /libraries/wednesday-songs` is the 수요예배 song index: a
 title, where its PPT or 악보 came from, and how many slides it made. **Links only, no

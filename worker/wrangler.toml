@@ -27,18 +27,22 @@ OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 # a link the user can open, but never fetches the page itself. Set to "true"
 # only once the deployment's administrator has permission to read those pages.
 BUGS_SCRAPING_ALLOWED = "false"
-# Extra hosts the 수요예배 찬양 PPT routes may download a .pptx from, on top of
-# the 네이버 블로그·카페 file hosts src/songPpt.js ships with. Whose files this
-# proxy is willing to relay is a permission decision, like Bugs above, so it
-# lives here and not in code. Comma-separated hostnames, no scheme or path:
+# Extra hosts the 수요예배 찬양 PPT search should treat as known 자료실, on top
+# of the 네이버 블로그·카페, 갓피플 and 티스토리 hosts src/songPpt.js ships
+# with. Hits on these outrank a page that merely shares a word with the title.
+# An entry covers its subdomains too. Comma-separated hostnames, no scheme:
 #   WEDNESDAY_PPT_HOSTS = "praise.example.kr,files.example.kr"
-# A host that is not listed is still shown to the operator as a link to open
-# and download by hand.
 WEDNESDAY_PPT_HOSTS = ""
-# 악보 사진 are fetched from any https host by default and judged on what comes
-# back (PNG/JPEG magic bytes, 8MB cap, no address that resolves inside), because
-# sheet-music images live on whatever CDN their blog uses. Set this to "true" to
-# apply WEDNESDAY_PPT_HOSTS to images as well.
+# 찬양 PPT are downloaded from any https host by default and judged on what
+# comes back (ZIP magic bytes plus ppt/presentation.xml, 25MB cap, no address
+# that resolves inside, redirects re-checked) — the way a song is really found
+# is to search its title and open whichever site comes up first, which is a
+# different one most weeks. Set this to "true" to restrict downloads to
+# WEDNESDAY_PPT_HOSTS instead; off-list hits are then shown as links to open
+# and download by hand.
+WEDNESDAY_PPT_HOSTS_ONLY = "false"
+# The same choice for 악보 사진, judged on PNG/JPEG magic bytes and an 8MB cap.
+# "true" restricts them to WEDNESDAY_PPT_HOSTS as well.
 WEDNESDAY_IMAGE_HOSTS_ONLY = "false"
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"

@@ -8,24 +8,33 @@
 // That makes this the one route family that returns bytes from an arbitrary
 // outside URL, so the invariant the lyrics route states ("only a title crosses
 // the wire — never a URL") is kept here too, by a different means: search
-// hands back an opaque HMAC-signed token per hit instead of a URL, and the
-// download route re-checks the host against its own allowlist whether the URL
-// arrived in a token or was pasted by the operator. A hit off the allowlist is
-// still shown as a link — the operator can open it, download the file
-// themselves and upload it, which is the path that always works (네이버 카페
-// and anything else behind a login can never be automated).
+// hands back an opaque HMAC-signed token per hit instead of a URL, so the
+// address fetched is one this proxy chose off its own search.
+//
+// Which addresses those may be is decided by what comes back, not by a host
+// list: https only, never an address that resolves inside, a 25MB cap, the URL
+// re-checked after redirects, and bytes that really are a PowerPoint package.
+// A host list would have to name every 자료실 and 티스토리 blog that has ever
+// hosted a 찬양 PPT, and the way a song is really found is to search its title
+// and open whatever comes up first. A deployment that wants the list anyway
+// sets WEDNESDAY_PPT_HOSTS_ONLY=true. Uploading the file by hand stays the
+// path that always works (네이버 카페 and anything else behind a login can
+// never be automated).
 //
 // Everything except fetchSongPptCandidates/fetchSongPptFile is a pure
 // function of its input, so the whole chain is unit-tested without network.
 
 /**
- * Hosts the proxy may download a 찬양 PPT from.
+ * Hosts known to carry a 찬양 PPT.
  *
- * Korean worship decks are shared as blog and café attachments and from
- * church 자료실 pages, so the defaults are the file hosts those two use.
- * A deployment adds its own with the WEDNESDAY_PPT_HOSTS variable; that is a
- * permission decision (whose files this proxy is willing to relay), not a code
- * decision, exactly like BUGS_SCRAPING_ALLOWED for the lyrics route.
+ * This is no longer a permission list — see isAllowedSongPptUrl below — but it
+ * is still what the search prefers, because a hit on one of these is far more
+ * likely to end in a real file than a hit on some news page. An entry matches
+ * the host itself and every subdomain, so `tistory.com` covers the hundreds of
+ * `*.tistory.com` blogs that share one.
+ *
+ * These are the places this church actually downloads from. A deployment adds
+ * its own with the WEDNESDAY_PPT_HOSTS variable.
  */
 export const DEFAULT_SONG_PPT_HOSTS = [
   // 네이버 블로그 — the post is on blog.naver.com, its attachments on these.
@@ -33,11 +42,44 @@ export const DEFAULT_SONG_PPT_HOSTS = [
   'm.blog.naver.com',
   'blogfiles.pstatic.net',
   'postfiles.pstatic.net',
-  // 네이버 카페 — listed so a public café attachment can be relayed; anything
-  // that needs a login will simply fail the fetch, and the operator uploads.
+  // 네이버 카페 — a public café attachment can be relayed; anything behind a
+  // login simply fails the fetch, and the operator uploads instead.
   'cafe.naver.com',
   'cafefiles.naver.net',
   'cafeptthumb-phinf.pstatic.net',
+  // 갓피플 — 악보·PPT 자료실, every subdomain.
+  'godpeople.com',
+  'godpeople.co.kr',
+  // 티스토리 — the blog is *.tistory.com, its attachments on Kakao's CDNs.
+  'tistory.com',
+  'blog.kakaocdn.net',
+  'daumcdn.net',
+];
+
+/**
+ * Hosts that are never where a file is, however well their title matches.
+ *
+ * Search for a song title and the first page of hits is mostly streaming and
+ * video. Following one costs a fetch that can only fail, so page hits from
+ * these are shown as links rather than tried.
+ */
+const NEVER_FILE_HOSTS = [
+  'youtube.com',
+  'youtu.be',
+  'music.youtube.com',
+  'bugs.co.kr',
+  'melon.com',
+  'genie.co.kr',
+  'flo.co.kr',
+  'spotify.com',
+  'apple.com',
+  'instagram.com',
+  'facebook.com',
+  'twitter.com',
+  'x.com',
+  'tiktok.com',
+  'namu.wiki',
+  'wikipedia.org',
 ];
 
 /** Per-request ceilings, so one lookup can never stall the Worker. */
@@ -62,13 +104,62 @@ export function buildSongPptQueries(title) {
   return [`${clean} 찬양 ppt`, `${clean} ppt 다운로드`, `${clean} 악보 ppt`];
 }
 
-/** The allowlist for this deployment: the defaults plus its own additions. */
+/** The known-host list for this deployment: the defaults plus its own. */
 export function songPptHosts(env = {}) {
   const extra = String(env.WEDNESDAY_PPT_HOSTS || '')
     .split(',')
     .map((host) => host.trim().toLowerCase())
     .filter(Boolean);
   return [...new Set([...DEFAULT_SONG_PPT_HOSTS, ...extra])];
+}
+
+/** True when `hostname` is `entry` or a subdomain of it. */
+function hostMatches(hostname, entry) {
+  const host = String(hostname || '').toLowerCase();
+  const want = String(entry || '').toLowerCase();
+  if (!host || !want) return false;
+  return host === want || host.endsWith(`.${want}`);
+}
+
+/** True when two hosts share their last two labels, e.g. a post and its CDN. */
+function sameSite(a, b) {
+  const labels = (host) => String(host || '').toLowerCase().split('.').slice(-2).join('.');
+  const site = labels(a);
+  return Boolean(site) && site === labels(b);
+}
+
+/** True when this host is one we know shares 찬양 PPT files. */
+export function isKnownSongPptHost(rawUrl, env = {}) {
+  let hostname;
+  try {
+    hostname = new URL(rawUrl).hostname;
+  } catch {
+    return false;
+  }
+  return songPptHosts(env).some((entry) => hostMatches(hostname, entry));
+}
+
+/** True when this host never holds a file, whatever its page is titled. */
+export function isNeverFileHost(rawUrl) {
+  let hostname;
+  try {
+    hostname = new URL(rawUrl).hostname;
+  } catch {
+    return true;
+  }
+  return NEVER_FILE_HOSTS.some((entry) => hostMatches(hostname, entry));
+}
+
+/**
+ * True when this deployment restricts downloads to the known-host list.
+ *
+ * Off by default, because the way a song is actually found is to search the
+ * title and open whichever site comes up first — 네이버 블로그 one week, 갓피플
+ * or some 티스토리 blog the next. An allowlist would turn most of those into
+ * "직접 올려 주세요", which is the manual work this route exists to remove.
+ */
+export function songPptHostsOnly(env = {}) {
+  return String(env.WEDNESDAY_PPT_HOSTS_ONLY || '').toLowerCase() === 'true';
 }
 
 /** Hostnames that are never a public file host, whatever an allowlist says. */
@@ -84,7 +175,16 @@ function isLocalHostname(hostname) {
   return false;
 }
 
-/** True when the proxy may fetch this URL at all. */
+/**
+ * True when the proxy may fetch this URL at all.
+ *
+ * What makes this safe is not the host but what comes back: only bytes that
+ * really are a PowerPoint package are ever returned (isPptxBytes), under a
+ * 25MB cap, over https, never to an address that resolves inside, and the URL
+ * after redirects is checked again. That is the same posture the 악보 사진
+ * route already takes, for the same reason — the files are everywhere.
+ * WEDNESDAY_PPT_HOSTS_ONLY=true restores the old allowlist behaviour.
+ */
 export function isAllowedSongPptUrl(rawUrl, env = {}) {
   let parsed;
   try {
@@ -93,9 +193,9 @@ export function isAllowedSongPptUrl(rawUrl, env = {}) {
     return false;
   }
   if (parsed.protocol !== 'https:') return false;
-  const hostname = parsed.hostname.toLowerCase();
-  if (isLocalHostname(hostname)) return false;
-  return songPptHosts(env).includes(hostname);
+  if (isLocalHostname(parsed.hostname)) return false;
+  if (songPptHostsOnly(env)) return isKnownSongPptHost(rawUrl, env);
+  return true;
 }
 
 /** True when a URL names a PowerPoint file outright. */
@@ -135,9 +235,15 @@ function unwrapSearchHref(href) {
 /**
  * Pull 찬양 PPT hits out of a search engine's HTML.
  *
- * Both kinds of hit are kept: a link straight to a .pptx, and a page on an
- * allowlisted host that may carry one as an attachment. Everything else is
- * returned as `links` — shown to the operator to open by hand, never fetched.
+ * Three kinds of hit come back. A link straight to a .pptx is best. A page is
+ * next — the file is usually an attachment on the post, which the download
+ * route follows one step to reach, exactly as a person would. Hits from hosts
+ * that never carry a file (streaming, video, wikis) and anything this
+ * deployment may not fetch are returned as `links` instead: shown so the
+ * operator can open them by hand, never fetched.
+ *
+ * Known 찬양 자료 hosts come first, so 네이버 블로그·갓피플·티스토리 outrank a
+ * random page that happens to share a word with the title.
  */
 export function extractSongPptResults(html, env = {}, limit = MAX_SONG_PPT_CANDIDATES) {
   const results = [];
@@ -146,6 +252,7 @@ export function extractSongPptResults(html, env = {}, limit = MAX_SONG_PPT_CANDI
   const text = String(html || '');
 
   for (const match of text.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    if (results.length >= limit * 5) break;
     const url = unwrapSearchHref(match[1]);
     if (!url) continue;
     const key = url.replace(/\/$/, '');
@@ -165,33 +272,84 @@ export function extractSongPptResults(html, env = {}, limit = MAX_SONG_PPT_CANDI
       .trim()
       .slice(0, 160);
 
-    if (isAllowedSongPptUrl(url, env)) {
-      results.push({ url, host, title, direct: looksLikePptxUrl(url) });
-      if (results.length >= limit) break;
-    } else if (looksLikePptxUrl(url) && links.length < limit) {
+    const direct = looksLikePptxUrl(url);
+    if (isAllowedSongPptUrl(url, env) && (direct || !isNeverFileHost(url))) {
+      results.push({ url, host, title, direct, known: isKnownSongPptHost(url, env) });
+    } else if (direct && links.length < limit) {
       // A .pptx this deployment may not relay is still worth showing.
       links.push({ url, host, title });
     }
   }
 
-  return { results, links };
+  // A file beats a post, and a host we know beats one we do not.
+  const rank = (hit) => (hit.direct ? 0 : 1) + (hit.known ? 0 : 2);
+  return {
+    results: results
+      .map((hit, index) => ({ hit, index }))
+      .sort((a, b) => rank(a.hit) - rank(b.hit) || a.index - b.index)
+      .slice(0, limit)
+      .map(({ hit }) => hit),
+    links,
+  };
 }
 
-/** Find a .pptx attachment link inside a page, on a host we may fetch. */
+function absoluteUrl(rawUrl, pageUrl) {
+  let url = decodeEntities(rawUrl);
+  if (url.startsWith('//')) url = `https:${url}`;
+  try {
+    return new URL(url, pageUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find the .pptx attachment on a post.
+ *
+ * Two shapes cover what the Korean blog platforms do. 네이버 and 티스토리 link
+ * the file itself, so the address ends in .pptx. 갓피플 and most 자료실 boards
+ * link a download script instead, and the only place the file name appears is
+ * the link's own text — so a link labelled `찬양.pptx` is taken as the
+ * attachment even when its address says nothing. Either way the bytes that
+ * come back are still checked, so a wrong guess fails loudly rather than
+ * putting a stray file on a slide.
+ */
 export function findSongPptAttachment(html, pageUrl, env = {}) {
   const text = String(html || '');
+  const found = [];
   for (const match of text.matchAll(/(?:href|src|data-src)="([^"]+)"/gi)) {
-    let url = decodeEntities(match[1]);
-    if (url.startsWith('//')) url = `https:${url}`;
-    if (url.startsWith('/')) {
-      try {
-        url = new URL(url, pageUrl).toString();
-      } catch {
-        continue;
-      }
-    }
-    if (!looksLikePptxUrl(url)) continue;
+    const url = absoluteUrl(match[1], pageUrl);
+    if (!url || !looksLikePptxUrl(url)) continue;
     if (!isAllowedSongPptUrl(url, env)) continue;
+    found.push(url);
+  }
+  if (found.length > 0) {
+    // A post links out to other sites too, so the attachment is the one on a
+    // file host we know or on the post's own domain, before anything else.
+    const pageHost = (() => {
+      try {
+        return new URL(pageUrl).hostname.toLowerCase();
+      } catch {
+        return '';
+      }
+    })();
+    const rank = (url) => {
+      if (isKnownSongPptHost(url, env)) return 0;
+      try {
+        return sameSite(new URL(url).hostname, pageHost) ? 1 : 2;
+      } catch {
+        return 2;
+      }
+    };
+    return found.reduce((best, url) => (rank(url) < rank(best) ? url : best), found[0]);
+  }
+
+  // No address gave it away; try the one a person would click.
+  for (const match of text.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]{0,200}?)<\/a>/gi)) {
+    const label = decodeEntities(match[2].replace(/<[^>]*>/g, ' '));
+    if (!/\.pptx?\b/i.test(label)) continue;
+    const url = absoluteUrl(match[1], pageUrl);
+    if (!url || !isAllowedSongPptUrl(url, env)) continue;
     return url;
   }
   return null;
