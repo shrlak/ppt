@@ -31,6 +31,16 @@ export const WEDNESDAY_SLIDES = {
   closing: 11,
 } as const;
 
+/**
+ * Carrier slide for 악보 사진 slides.
+ *
+ * buildImageDeck replaces a cloned slide's shapes with the image, so what the
+ * carrier contributes is its layout, master and theme — here the plain one
+ * whose master paints a solid background, the same one the church's own 악보
+ * slides sit on.
+ */
+export const WEDNESDAY_IMAGE_CARRIER = WEDNESDAY_SLIDES.wordDivider;
+
 /** Placeholder tokens carried by the template's text. */
 export const WEDNESDAY_TOKENS = {
   dateKo: '{{DATE_KO}}',

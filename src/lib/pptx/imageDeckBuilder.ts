@@ -1,9 +1,27 @@
 import JSZip from 'jszip';
 import { ensureDefaultExtension } from './contentTypes';
+import { pruneToSlides } from './pptxPackage';
 import { extractSlideSubset } from './pptxSlices';
 
 const SLIDE_WIDTH = 9_144_000;
 const SLIDE_HEIGHT = 6_858_000;
+
+export interface SlideCanvas {
+  cx: number;
+  cy: number;
+}
+
+export interface ImageDeckOptions {
+  /**
+   * Template slide to clone as the carrier, 1-based. Its shapes are replaced
+   * by the image, so what it contributes is its layout, master and theme —
+   * the background the image sits on.
+   */
+  slideNumber?: number;
+  /** The template's own canvas. Images are centred on it without cropping. */
+  canvas?: SlideCanvas;
+  compression?: 'STORE' | 'DEFLATE';
+}
 
 export interface ImageSlideSource {
   data: Uint8Array;
@@ -59,17 +77,29 @@ function replaceVisibleShapes(slideXml: string, picture: string): string {
   );
 }
 
+/**
+ * One slide per image, each centred on the template's canvas.
+ *
+ * Defaults match the 주일예배 lyrics template (slide 2, 4:3); the 수요예배
+ * 악보 사진 path passes its own carrier slide and canvas, which is the whole
+ * reason these are options rather than constants.
+ */
 export async function buildImageDeck(
   templateData: ArrayBuffer | Uint8Array,
   images: ImageSlideSource[],
+  options: ImageDeckOptions = {},
 ): Promise<Uint8Array> {
   if (images.length === 0) throw new Error('추가할 이미지가 없습니다.');
+  const canvas = options.canvas ?? { cx: SLIDE_WIDTH, cy: SLIDE_HEIGHT };
+  const carrier = options.slideNumber ?? 2;
   for (const image of images) {
     if (image.data.byteLength === 0) throw new Error('빈 이미지는 슬라이드로 만들 수 없습니다.');
-    containRect(image.width, image.height);
+    containRect(image.width, image.height, canvas.cx, canvas.cy);
   }
 
-  const zip = await JSZip.loadAsync(await extractSlideSubset(templateData, images.map(() => 2)));
+  const zip = await JSZip.loadAsync(
+    await extractSlideSubset(templateData, images.map(() => carrier), 'STORE'),
+  );
   let contentTypes = await zip.file('[Content_Types].xml')!.async('string');
 
   for (const [index, image] of images.entries()) {
@@ -81,7 +111,7 @@ export async function buildImageDeck(
     const relsPath = `ppt/slides/_rels/slide${slideNumber}.xml.rels`;
     const slideXml = await zip.file(slidePath)!.async('string');
     const relsXml = await zip.file(relsPath)!.async('string');
-    const picture = imagePicture(index, imageRid, containRect(image.width, image.height));
+    const picture = imagePicture(index, imageRid, containRect(image.width, image.height, canvas.cx, canvas.cy));
 
     zip.file(slidePath, replaceVisibleShapes(slideXml, picture));
     zip.file(
@@ -96,5 +126,9 @@ export async function buildImageDeck(
   }
 
   zip.file('[Content_Types].xml', contentTypes);
-  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  // The carrier came out of a template with all of its media attached, and the
+  // images replaced every shape that used any of it. Whatever is left unused
+  // would otherwise be copied into the deck this is merged into.
+  await pruneToSlides(zip);
+  return zip.generateAsync({ type: 'uint8array', compression: options.compression ?? 'DEFLATE' });
 }

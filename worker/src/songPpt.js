@@ -197,6 +197,61 @@ export function findSongPptAttachment(html, pageUrl, env = {}) {
   return null;
 }
 
+/**
+ * How well a hit's title matches the song, 0..1.
+ *
+ * This is what lets the app attach a result by itself: the operator typed the
+ * title, so a hit whose own title carries it is the song, and one that shares
+ * only a word or two is a guess worth showing rather than acting on.
+ */
+export function scoreSongMatch(title, text) {
+  const wanted = normalizeForMatch(title);
+  const found = normalizeForMatch(text);
+  if (!wanted || !found) return 0;
+  if (found.includes(wanted)) return 1;
+
+  // Fall back to how much of the title's words the hit carries, so
+  // "나의 반석이신 하나님 (D키)" still scores well against the plain title.
+  const words = String(title || '')
+    .split(/\s+/)
+    .map(normalizeForMatch)
+    .filter((word) => word.length > 0);
+  if (words.length === 0) return 0;
+  const hits = words.filter((word) => found.includes(word)).length;
+  return hits / words.length;
+}
+
+function normalizeForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^0-9a-z\uac00-\ud7a3]+/g, '');
+}
+
+/** At or above this, a hit is the song and the app may attach it unasked. */
+export const AUTO_ATTACH_SCORE = 0.8;
+
+/** Score a list of hits against the title, best first. */
+export function rankSongMatches(title, hits) {
+  return hits
+    .map((hit) => {
+      const score = Math.max(
+        scoreSongMatch(title, hit.title ?? ''),
+        // The file name is often the only place the title appears in full.
+        scoreSongMatch(title, decodeURIComponent(fileNameOf(hit.url ?? ''))),
+      );
+      return { ...hit, score, decision: score >= AUTO_ATTACH_SCORE ? 'auto' : 'review' };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+function fileNameOf(rawUrl) {
+  try {
+    return new URL(rawUrl).pathname.split('/').filter(Boolean).pop() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 // ---- tokens -------------------------------------------------------------
 //
 // A search hit is handed to the browser as a signed token, so the download
@@ -267,7 +322,7 @@ export async function verifySongPptToken(token, secret, { now = Date.now() } = {
 
 // ---- fetching -----------------------------------------------------------
 
-async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {} } = {}) {
+export async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {} } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -285,7 +340,7 @@ async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = 
   }
 }
 
-async function readBoundedText(response) {
+export async function readBoundedText(response) {
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MAX_HTML_BYTES) return '';
   const text = await response.text();
@@ -337,7 +392,7 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
   }
 
   const candidates = [];
-  for (const hit of results.slice(0, MAX_SONG_PPT_CANDIDATES)) {
+  for (const hit of rankSongMatches(title, results.slice(0, MAX_SONG_PPT_CANDIDATES))) {
     candidates.push({ ...hit, token: await signSongPptToken(hit.url, secret) });
   }
   return { candidates, links: links.slice(0, MAX_SONG_PPT_CANDIDATES) };

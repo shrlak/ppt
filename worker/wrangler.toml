@@ -35,6 +35,11 @@ BUGS_SCRAPING_ALLOWED = "false"
 # A host that is not listed is still shown to the operator as a link to open
 # and download by hand.
 WEDNESDAY_PPT_HOSTS = ""
+# 악보 사진 are fetched from any https host by default and judged on what comes
+# back (PNG/JPEG magic bytes, 8MB cap, no address that resolves inside), because
+# sheet-music images live on whatever CDN their blog uses. Set this to "true" to
+# apply WEDNESDAY_PPT_HOSTS to images as well.
+WEDNESDAY_IMAGE_HOSTS_ONLY = "false"
 PURGE_TIMEZONE = "America/New_York"
 PURGE_HOUR = "17"
 

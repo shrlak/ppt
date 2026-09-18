@@ -13,6 +13,15 @@ const DRAFT_KEY = 'wednesday-draft-v1';
 const DB_NAME = 'kccp-wednesday';
 const STORE = 'song-decks';
 
+interface StoredSongImage {
+  id: string;
+  name: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  width: number;
+  height: number;
+  sourceUrl?: string;
+}
+
 interface StoredSong {
   id: string;
   title: string;
@@ -21,6 +30,8 @@ interface StoredSong {
   sourceUrl?: string;
   sourceHost?: string;
   fileName?: string;
+  /** 악보 사진 metadata; the bytes live in IndexedDB beside the song's deck. */
+  images?: StoredSongImage[];
 }
 
 interface StoredDraft {
@@ -74,16 +85,29 @@ async function withStore<T>(
   }
 }
 
-async function putDeck(id: string, deck: ArrayBuffer): Promise<void> {
-  await withStore('readwrite', (store) => store.put(deck, id) as IDBRequest<unknown>);
+async function putBlob(key: string, data: ArrayBuffer): Promise<void> {
+  await withStore('readwrite', (store) => store.put(data, key) as IDBRequest<unknown>);
 }
 
-async function getDeck(id: string): Promise<ArrayBuffer | null> {
-  return withStore('readonly', (store) => store.get(id) as IDBRequest<ArrayBuffer>);
+async function getBlob(key: string): Promise<ArrayBuffer | null> {
+  return withStore('readonly', (store) => store.get(key) as IDBRequest<ArrayBuffer>);
 }
 
-async function deleteDeck(id: string): Promise<void> {
-  await withStore('readwrite', (store) => store.delete(id) as IDBRequest<undefined>);
+async function deleteBlob(key: string): Promise<void> {
+  await withStore('readwrite', (store) => store.delete(key) as IDBRequest<undefined>);
+}
+
+/** A song's .pptx is stored under its own id; each 악보 사진 under a sub-key. */
+function imageKey(songId: string, imageId: string): string {
+  return `${songId}:image:${imageId}`;
+}
+
+/** Every key a song owns, for cleaning up when it leaves the list. */
+async function songKeys(songId: string): Promise<string[]> {
+  const keys = await withStore('readonly', (store) => store.getAllKeys() as IDBRequest<IDBValidKey[]>);
+  return (keys ?? [])
+    .filter((key): key is string => typeof key === 'string')
+    .filter((key) => key === songId || key.startsWith(`${songId}:`));
 }
 
 /** Save the draft, including each attached song's file. */
@@ -99,6 +123,14 @@ export async function saveWednesdayDraft(draft: WednesdayDraft): Promise<void> {
       sourceUrl: song.sourceUrl,
       sourceHost: song.sourceHost,
       fileName: song.fileName,
+      images: song.images?.map((image) => ({
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        width: image.width,
+        height: image.height,
+        sourceUrl: image.sourceUrl,
+      })),
     })),
     deckId: draft.deckId,
     fileNameOverride: draft.fileNameOverride,
@@ -111,7 +143,8 @@ export async function saveWednesdayDraft(draft: WednesdayDraft): Promise<void> {
   }
 
   for (const song of draft.songs) {
-    if (song.deck) await putDeck(song.id, song.deck);
+    if (song.deck) await putBlob(song.id, song.deck);
+    for (const image of song.images ?? []) await putBlob(imageKey(song.id, image.id), image.data);
   }
 }
 
@@ -128,12 +161,19 @@ export async function loadWednesdayDraft(): Promise<WednesdayDraft | null> {
 
   const songs: WednesdaySong[] = [];
   for (const song of stored.songs ?? []) {
-    const deck = (await getDeck(song.id)) ?? undefined;
+    const deck = (await getBlob(song.id)) ?? undefined;
+    const images = [];
+    for (const image of song.images ?? []) {
+      const data = await getBlob(imageKey(song.id, image.id));
+      // An image whose bytes are gone cannot contribute a slide.
+      if (data) images.push({ ...image, data });
+    }
     songs.push({
       ...song,
       deck,
-      // A deck that did not come back cannot contribute slides.
+      // A deck that did not come back cannot contribute slides either.
       slideCount: deck ? song.slideCount : undefined,
+      images: images.length > 0 ? images : undefined,
     });
   }
 
@@ -145,9 +185,9 @@ export async function loadWednesdayDraft(): Promise<WednesdayDraft | null> {
   };
 }
 
-/** Forget a song's stored file — called when the song leaves the list. */
+/** Forget a song's stored files — called when the song leaves the list. */
 export async function forgetWednesdaySongDeck(id: string): Promise<void> {
-  await deleteDeck(id);
+  for (const key of await songKeys(id)) await deleteBlob(key);
 }
 
 export async function clearWednesdayDraft(songIds: string[]): Promise<void> {
@@ -156,5 +196,5 @@ export async function clearWednesdayDraft(songIds: string[]): Promise<void> {
   } catch {
     // Nothing to clean up if it was never written.
   }
-  for (const id of songIds) await deleteDeck(id);
+  for (const id of songIds) await forgetWednesdaySongDeck(id);
 }

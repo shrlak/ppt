@@ -9,6 +9,10 @@ export interface SongPptHit {
 export interface SongPptCandidate extends SongPptHit {
   /** Signed stand-in for `url`, so the browser never chooses an address. */
   token: string;
+  /** How well the hit's own title matches the song, 0..1. */
+  score?: number;
+  /** 'auto' when it is confidently this song, 'review' when it is a guess. */
+  decision?: 'auto' | 'review';
 }
 
 export interface SongPptLink {
@@ -32,6 +36,17 @@ export const SONG_PPT_TOKEN_TTL_MS: number;
 export const MAX_WEDNESDAY_SONG_ENTRIES: number;
 
 export function buildSongPptQueries(title: string): string[];
+export function scoreSongMatch(title: string, text: string): number;
+export const AUTO_ATTACH_SCORE: number;
+export function rankSongMatches<T extends { title?: string; url?: string }>(
+  title: string,
+  hits: T[],
+): (T & { score: number; decision: 'auto' | 'review' })[];
+export function fetchWithTimeout(
+  url: string,
+  options?: { timeoutMs?: number; headers?: Record<string, string> },
+): Promise<Response>;
+export function readBoundedText(response: Response): Promise<string>;
 export function songPptHosts(env?: Record<string, string | undefined>): string[];
 export function isAllowedSongPptUrl(rawUrl: string, env?: Record<string, string | undefined>): boolean;
 export function looksLikePptxUrl(rawUrl: string): boolean;
