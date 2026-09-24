@@ -524,6 +524,20 @@ export default function LyricsGenerator({
        */
       const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
 
+      /** Songs neither the models nor the web could fill, with the reason. */
+      const failures = new Map<string, string>();
+      const reportFailures = () => {
+        if (failures.size === 0) return;
+        for (const id of failures.keys()) resolvedIds.add(id);
+        setRecog((current) => {
+          const next = { ...current };
+          for (const [id, message] of failures) {
+            if (!isCancelled(id)) next[id] = { status: 'error', message };
+          }
+          return next;
+        });
+      };
+
       // Everything recognition learns about each song is kept on the component
       // (see evidenceRef): an explicit save happens long after this function
       // has returned, and that save is the only thing that turns evidence into
@@ -562,13 +576,14 @@ export default function LyricsGenerator({
       };
 
       /**
-       * Last stage: look each new song's published lyrics up on the web and
-       * reconcile them with the score (see mergeWebLyrics — the score keeps
-       * the part labels and 진행 순서, the web supplies the wording). Songs
-       * that came from the library never get here, so a saved song is never
-       * rewritten. A line taken from the page goes in exactly as published;
-       * only the score's own reading is normalized to 한국어 띄어쓰기·맞춤법,
-       * and a failed lookup simply leaves that normalized reading in place.
+       * Last stage: look each new song up on the web by the title read off
+       * the conti, and put its published lyrics into the song part by part
+       * (see mergeWebLyrics — the score keeps the part labels and 진행 순서,
+       * the web supplies the words). Songs that came from the library never
+       * get here, so a saved song is never rewritten. Published lyrics go in
+       * exactly as the page printed them; only parts the page has no match
+       * for keep the score's reading, normalized to 한국어 띄어쓰기·맞춤법,
+       * and a failed lookup leaves that normalized reading in place.
        */
       const runWebLyricsPass = async () => {
         const pending = [...webQueue.entries()].filter(([id]) => !isCancelled(id));
@@ -576,7 +591,8 @@ export default function LyricsGenerator({
 
         if (!hasWebLyricsLookup()) {
           for (const [id, { score, engine }] of pending) {
-            applyRecognizedScore(id, mergeWebLyrics(score, null).score, engine);
+            if (score.sections.length === 0) failures.set(id, '가사를 읽지 못했습니다.');
+            else applyRecognizedScore(id, mergeWebLyrics(score, null).score, engine);
           }
           return;
         }
@@ -624,6 +640,10 @@ export default function LyricsGenerator({
             }
 
             const merged = mergeRankedWebLyrics(score, auto);
+            if (merged.score.sections.length === 0) {
+              failures.set(id, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
+              return;
+            }
             applyRecognizedScore(id, merged.score, engine, {
               source: auto ? 'web' : 'models',
               webSourceUrl: auto?.sourceUrl,
@@ -632,7 +652,7 @@ export default function LyricsGenerator({
               showToast(
                 merged.outcome === 'filled'
                   ? `'${title}' 가사를 ${auto.sourceHost}에서 가져왔습니다.`
-                  : `'${title}' 가사를 ${auto.sourceHost}와 대조해 ${merged.correctedParts}개 파트를 고쳤습니다.`,
+                  : `'${title}' 가사를 ${auto.sourceHost}에서 찾아 ${merged.correctedParts}개 파트에 나눠 넣었습니다.`,
               );
             }
           }),
@@ -941,11 +961,11 @@ export default function LyricsGenerator({
         );
         if (needRescue.length === 0) {
           await runWebLyricsPass();
+          reportFailures();
           return;
         }
 
         enterPhase('rescue', needRescue.map(({ song }) => song.id));
-        const failures = new Map<string, string>();
         await Promise.all(
           needRescue.map(async ({ song, image, identity }) => {
             try {
@@ -984,19 +1004,22 @@ export default function LyricsGenerator({
                 fillFromLibrary(song, saved);
                 return;
               }
+              const lookupTitle = (merged.title || song.title).trim();
               if (merged.sections.length === 0) {
-                failures.set(song.id, '가사를 읽지 못했습니다.');
+                // No lyrics off the page, but a title is enough to look the
+                // song up — the web pass fills it or reports the failure.
+                if (lookupTitle && !/^새 찬양/.test(lookupTitle)) {
+                  webQueue.set(song.id, { score: merged, engine: single.engine, title: lookupTitle });
+                } else {
+                  failures.set(song.id, '가사를 읽지 못했습니다.');
+                }
                 return;
               }
               // Same as the batch path: show it now, finish it in the web pass.
               setSongs((current) =>
                 current.map((s) => (s.id === song.id && !isCancelled(song.id) ? applyScoreToSong(s, merged) : s)),
               );
-              webQueue.set(song.id, {
-                score: merged,
-                engine: single.engine,
-                title: (merged.title || song.title).trim(),
-              });
+              webQueue.set(song.id, { score: merged, engine: single.engine, title: lookupTitle });
             } catch (error) {
               failures.set(song.id, error instanceof Error ? error.message : String(error));
             }
@@ -1004,16 +1027,7 @@ export default function LyricsGenerator({
         );
 
         await runWebLyricsPass();
-
-        if (failures.size > 0) {
-          setRecog((current) => {
-            const next = { ...current };
-            for (const [id, message] of failures) {
-              if (!isCancelled(id)) next[id] = { status: 'error', message };
-            }
-            return next;
-          });
-        }
+        reportFailures();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setRecog((current) => {

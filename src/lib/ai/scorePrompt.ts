@@ -67,6 +67,23 @@ const STACKED_ROW_RULES = [
   '절의 개수와 같아졌다면 축을 반대로 잡은 것이니, 행 기준으로 다시 모으세요.',
 ];
 
+/**
+ * Read the Korean lyrics and nothing else.
+ *
+ * Many 콘티 scores print an English translation as an extra row under the
+ * Korean one. The deck only shows the Korean, and a model that reads the
+ * English row either files it as another verse or splices it into the Korean
+ * lines — both of which cost more accuracy than anything else on those pages.
+ */
+const KOREAN_ONLY_RULES = [
+  '【한국어 가사만 읽으세요】',
+  '가사는 한국어(한글)로 된 줄만 읽습니다. 한국어 가사 아래·위에 영어 번역 가사 줄이 함께 인쇄되어',
+  '있으면 그 영어 줄은 통째로 건너뛰세요. 영어 줄을 lines에 넣거나, 영어 줄로 새 파트(V2 등)를',
+  '만들거나, 한국어로 번역해 넣지 마세요. 절이 여러 개인지 셀 때도 영어 줄은 세지 않습니다.',
+  '제목도 한국어 제목을 쓰세요 (한국어와 영어 제목이 함께 있으면 한국어 제목).',
+  '한국어 가사는 표준 맞춤법과 띄어쓰기에 맞춰 적으세요.',
+];
+
 /** The shared instruction block, as individual lines so callers can extend it. */
 export const BASE_PROMPT_LINES: string[] = [
   '이 이미지는 한국어 찬양 콘티 PDF의 한 페이지이며, 악보가 아닐 수도 있습니다.',
@@ -85,7 +102,8 @@ export const BASE_PROMPT_LINES: string[] = [
   '  두 번 다 넣고, 임의로 한 번으로 줄이거나 없는 파트를 끼워 넣지 마세요.',
   '  order에 적은 라벨은 반드시 sections에도 같은 이름으로 있어야 하고, 그 반대도 같습니다',
   '  (I는 예외 — 간주는 가사가 없으므로 sections에 넣지 않습니다).',
-  '- lyricRowCount: 한 오선 아래에 가사 줄이 가장 많이 쌓여 있는 개수(1, 2, 3…). 악보가 아니면 0.',
+  '- lyricRowCount: 한 오선 아래에 한국어 가사 줄이 가장 많이 쌓여 있는 개수(1, 2, 3…). 영어 가사 줄은',
+  '  세지 않습니다. 악보가 아니면 0.',
   '- sections: 가사를 파트별로 나눈 배열. 각 원소는 {label, lines}.',
   '  label은 V(절), PC(프리코러스), C(후렴), B(브릿지), O(아웃트로) 등입니다.',
   '  같은 파트가 한 번뿐이면 번호 없이 그대로 쓰고(V, PC, C, B, O), 여러 번 있을 때만 두 번째부터',
@@ -95,7 +113,8 @@ export const BASE_PROMPT_LINES: string[] = [
   '  절(V), 곡에서 여러 번 되풀이되며 가사가 같은 묶음은 후렴(C), 절과 후렴 사이를 잇는 짧은',
   '  묶음은 프리코러스(PC), 후렴과 멜로디가 다르고 한 번만 나오는 묶음은 브릿지(B)입니다.',
   '  lines는 그 파트의 가사를 한 줄씩 담은 문자열 배열입니다.',
-  '악보에 보이는 가사를 빠짐없이 모두 읽으세요. 도돌이표와 1., 2. 괄호(볼타) 안의 가사도 포함하세요.',
+  ...KOREAN_ONLY_RULES,
+  '악보에 보이는 한국어 가사를 빠짐없이 모두 읽으세요. 도돌이표와 1., 2. 괄호(볼타) 안의 가사도 포함하세요.',
   '악보의 코드 기호(C, G, Am7, G/B 등)와 반복 기호는 가사가 아닙니다. lines에 절대 포함하지 마세요.',
   ...STACKED_ROW_RULES,
   '가사는 음절을 나누는 하이픈(-)이나 붙임표 없이 단어를 자연스럽게 이어서 적으세요',

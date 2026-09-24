@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  crossReferenceLines,
-  mergeRankedWebLyrics,
-  mergeWebLyrics,
-} from '../../src/lib/lyrics/mergeWebLyrics';
+import { mergeRankedWebLyrics, mergeWebLyrics, partSimilarity } from '../../src/lib/lyrics/mergeWebLyrics';
 import type { ScoredLyricsCandidate } from '../../src/lib/lyrics/webLyrics';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
@@ -36,58 +32,15 @@ function web(
   };
 }
 
-describe('crossReferenceLines', () => {
-  it('takes the published spelling of a line the models misread', () => {
-    const { lines, corrected } = crossReferenceLines(
-      ['가나다라 마바사 아자차', '카타파하 그 이음 높이'],
-      ['가나다라 마바사 아자차', '카타파하 그 이름 높이'],
-    );
-    expect(lines).toEqual(['가나다라 마바사 아자차', '카타파하 그 이름 높이']);
-    expect(corrected).toBe(1);
+describe('partSimilarity', () => {
+  it('sees through the spacing a score opens between syllables', () => {
+    const recognized = { label: 'V', lines: ['주 님 을 찬 양 해', '영 원 히 노 래 해'] };
+    const published = { label: 'V', lines: ['주님을 찬양해', '영원히 노래해'] };
+    expect(partSimilarity(recognized, published)).toBe(1);
   });
 
-  it('keeps a recognized line the page has no counterpart for', () => {
-    // The score sings a line this arrangement of the song does not print.
-    const { lines } = crossReferenceLines(
-      ['가나다라 마바사 아자차', '악보에만 있는 완전히 다른 줄'],
-      ['가나다라 마바사 아자차'],
-    );
-    expect(lines).toEqual(['가나다라 마바사 아자차', '악보에만 있는 완전히 다른 줄']);
-  });
-
-  it('recovers a tail the models cut short', () => {
-    const { lines } = crossReferenceLines(
-      ['가나다라 마바사 아자차', '카타파하 그 이름 높이'],
-      ['가나다라 마바사 아자차', '카타파하 그 이름 높이', '영원토록 노래해'],
-    );
-    expect(lines).toEqual([
-      '가나다라 마바사 아자차',
-      '카타파하 그 이름 높이',
-      '영원토록 노래해',
-    ]);
-  });
-
-  it('will not append a tail off the back of one incidental match', () => {
-    const { lines } = crossReferenceLines(
-      ['가나다라 마바사 아자차'],
-      ['가나다라 마바사 아자차', '전혀 다른 절의 첫 줄', '전혀 다른 절의 둘째 줄'],
-    );
-    expect(lines).toEqual(['가나다라 마바사 아자차']);
-  });
-
-  it('stays in order when the page repeats a line later', () => {
-    // The hook appears twice on the page; the first recognized line must not
-    // bind to the second copy and swallow everything in between.
-    const { lines } = crossReferenceLines(
-      ['높이 노래해', '잔잔한 강물처럼', '높이 노래해'],
-      ['높이 노래해', '잔잔한 강물처럼', '높이 노래해'],
-    );
-    expect(lines).toEqual(['높이 노래해', '잔잔한 강물처럼', '높이 노래해']);
-  });
-
-  it('reports nothing corrected when the two already agree', () => {
-    const { corrected } = crossReferenceLines(['같은 줄'], ['같은 줄']);
-    expect(corrected).toBe(0);
+  it('tells two different parts of the same song apart', () => {
+    expect(partSimilarity({ label: 'V', lines: V_TRUE }, { label: 'C', lines: C_TRUE })).toBeLessThan(0.3);
   });
 });
 
@@ -133,7 +86,7 @@ describe('mergeWebLyrics', () => {
     expect(merged.score.order).toEqual(['I', 'V', 'C', 'C']);
   });
 
-  it('does not import a published part the conti never asks for', () => {
+  it('puts the page’s other parts in the editor without adding them to 진행 순서', () => {
     // The page prints a bridge; the score neither read one nor orders one.
     const score: ParsedScore = {
       order: ['I', 'V', 'C'],
@@ -144,7 +97,18 @@ describe('mergeWebLyrics', () => {
       { label: 'C', lines: C_TRUE },
       { label: 'B', lines: B_TRUE },
     ]));
-    expect(merged.score.sections.map((s) => s.label)).toEqual(['V', 'C']);
+    expect(merged.score.sections.map((s) => s.label)).toEqual(['V', 'C', 'B']);
+    expect(merged.score.order).toEqual(['I', 'V', 'C']);
+  });
+
+  it('replaces a whole recognized part with the published one, not line by line', () => {
+    // The models dropped a line and garbled another; the page's part wins whole.
+    const score: ParsedScore = {
+      order: ['I', 'V'],
+      sections: [{ label: 'V', lines: ['가나다라 마바사 아자차', '카타 그 이'] }],
+    };
+    const merged = mergeWebLyrics(score, web([{ label: 'V', lines: [...V_TRUE, '셋째 줄도 있습니다'] }]));
+    expect(merged.score.sections[0].lines).toEqual([...V_TRUE, '셋째 줄도 있습니다']);
   });
 
   it('fills a part the 진행 순서 calls for but no model managed to read', () => {
@@ -161,14 +125,32 @@ describe('mergeWebLyrics', () => {
     expect(merged.score.sections[2].lines).toEqual(B_TRUE);
   });
 
-  it('leaves the score alone when the page is a different song', () => {
+  it('falls back to the label when the OCR was too poor to match by text', () => {
     const score: ParsedScore = {
-      order: ['I', 'V'],
-      sections: [{ label: 'V', lines: V_OCR }],
+      order: ['I', 'V', 'T'],
+      sections: [
+        { label: 'V', lines: ['읽기 어려운 글자들'] },
+        { label: 'T', lines: ['이 편곡에만 있는 태그'] },
+      ],
     };
-    const merged = mergeWebLyrics(score, web([{ label: 'V', lines: ['전혀 다른 노래의 가사입니다'] }]));
-    expect(merged.outcome).toBe('unused');
-    expect(merged.score.sections[0].lines).toEqual(V_OCR);
+    const merged = mergeWebLyrics(score, web([{ label: 'V', lines: V_TRUE }]));
+    expect(merged.outcome).toBe('corrected');
+    expect(merged.score.sections[0]).toEqual({ label: 'V', lines: V_TRUE });
+    // A part the page does not have is this arrangement's own, and stays.
+    expect(merged.score.sections[1]).toEqual({ label: 'T', lines: ['이 편곡에만 있는 태그'] });
+  });
+
+  it('renumbers a page part whose label a recognized part already uses', () => {
+    const score: ParsedScore = {
+      order: ['I', 'V', 'C'],
+      sections: [{ label: 'V', lines: V_OCR }, { label: 'C', lines: C_OCR }],
+    };
+    const merged = mergeWebLyrics(score, web([
+      { label: 'V', lines: V_TRUE },
+      { label: 'C', lines: C_TRUE },
+      { label: 'C', lines: B_TRUE },
+    ]));
+    expect(merged.score.sections.map((s) => s.label)).toEqual(['V', 'C', 'C2']);
   });
 
   it('still normalizes the recognized lyrics when there is no web result', () => {

@@ -363,7 +363,7 @@ Sunday could never train anything; see `wrangler.toml`.
 | `OPENROUTER_API_KEY` | secret | OpenRouter key, used only for `:free` vision models |
 | `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
 | `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
-| `BUGS_SCRAPING_ALLOWED` | var | `"false"` by default. Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
+| `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD

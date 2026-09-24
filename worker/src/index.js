@@ -1384,8 +1384,10 @@ export default {
 
       // Published lyrics do not change, and a conti is opened repeatedly while
       // a deck is built — serve repeats from the edge instead of re-scraping.
+      // `v` changes whenever the scoring does, so a cached decision made by
+      // older rules is never served under the new ones.
       const cacheKey = new Request(
-        `${url.origin}/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}` +
+        `${url.origin}/lyrics?v=2&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}` +
           `&sample=${encodeURIComponent(sample)}`,
         { method: 'GET' },
       );

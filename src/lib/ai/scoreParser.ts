@@ -82,7 +82,35 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
     sections.push(...splitNumberedVerses({ label, lines }));
   }
 
-  return { pageType, sermonTitle, scripture, title, artist, key, order, lyricRowCount, sections };
+  return {
+    pageType,
+    sermonTitle,
+    scripture,
+    title,
+    artist,
+    key,
+    order,
+    lyricRowCount,
+    sections: keepKoreanLyrics(sections),
+  };
+}
+
+const HANGUL = /[가-힣]/;
+
+/**
+ * Keep only the Korean lyrics of a Korean song.
+ *
+ * Many scores print an English translation as an extra row under the Korean
+ * one. The deck only ever shows the Korean, and a model that reads the English
+ * row files it as another verse (V2) or splices it into the Korean lines — so
+ * any line with no Hangul in it is dropped, and a part left empty goes with it.
+ * A song with no Hangul at all is an English song and is left as read.
+ */
+export function keepKoreanLyrics(sections: Section[]): Section[] {
+  if (!sections.some((section) => section.lines.some((line) => HANGUL.test(line)))) return sections;
+  return sections
+    .map((section) => ({ label: section.label, lines: section.lines.filter((line) => HANGUL.test(line)) }))
+    .filter((section) => section.lines.length > 0);
 }
 
 /** A verse number printed at the start of a lyric row: "1.", "2)", "3 ". */
