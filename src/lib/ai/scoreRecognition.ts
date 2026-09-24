@@ -482,13 +482,16 @@ export function applyScoreToSong(song: Song, parsed: ParsedScore): Song {
   // Only fill sections/order if the user hasn't started writing lyrics.
   if (!hasLyrics(song) && parsed.sections.length > 0) {
     const recognized = parsed.sections.map((s) => ({ label: s.label, lines: [...s.lines] }));
-    const order =
-      parsed.order.length > 0
+    // The order the conti wrote for this song beats the one printed on the
+    // 악보: the score shows every part, the conti says which ones we sing.
+    const order = song.orderFromConti
+      ? song.order
+      : parsed.order.length > 0
         ? parsed.order
         : ['I', ...recognized.map((s) => s.label)]; // no printed order: derive one (title slide is "I")
     next.sections = sortSectionsByOrder(recognized, order);
     next.order = [...order];
-  } else if (parsed.order.length > 0 && song.order.join('-') === 'I') {
+  } else if (!song.orderFromConti && parsed.order.length > 0 && song.order.join('-') === 'I') {
     // Lyrics already present but order is still the default — accept the order.
     next.order = [...parsed.order];
   }

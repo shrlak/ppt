@@ -402,3 +402,39 @@ describe('splitLyricsAndConfessionSongs', () => {
     expect(splitLyricsAndConfessionSongs([])).toEqual({ lyricsSongs: [] });
   });
 });
+
+describe('parseCoverText 진행 순서', () => {
+  it('takes the part order written in a song description', () => {
+    const info = parseCoverText(
+      ['7/11/26', '본문: 로마서 5장 1-11절', '주님의 사랑 (E): 고백의 찬양 I-V1-C-V2-C-B-C', '주 은혜임을 (F): 은혜의 찬양'].join('\n'),
+    );
+    expect(info?.songs[0].order).toEqual(['I', 'V1', 'C', 'V2', 'C', 'B', 'C']);
+    expect(info?.songs[1].order).toBeUndefined();
+  });
+
+  it('takes an order written on the line under the song', () => {
+    const info = parseCoverText(
+      ['7/11/26', '본문: 로마서 5장 1-11절', '주님의 사랑 (E): 고백의 찬양', '진행: V1-PC-C-B-C'].join('\n'),
+    );
+    expect(info?.songs[0].order).toEqual(['V1', 'PC', 'C', 'B', 'C']);
+  });
+
+  it('reads the order under a table cover bullet', () => {
+    const info = parseCoverText(
+      [
+        '본문 | 전도서 12 장 1-8 절',
+        '날짜 | 2026.08.09',
+        '2. 찬양 콘티',
+        '순서 찬양 키',
+        '1 매일매일 A',
+        '• 매일매일 (A Key)',
+        'o 결단의 찬양입니다. I-V-C-V-C-B-C',
+      ].join('\n'),
+    );
+    expect(info?.songs[0].order).toEqual(['I', 'V', 'C', 'V', 'C', 'B', 'C']);
+  });
+
+  it('leaves the fixture covers without an order', () => {
+    expect(parseCoverText(coverText)?.songs.every((song) => song.order === undefined)).toBe(true);
+  });
+});

@@ -67,6 +67,13 @@ export interface Song {
    * song title slide again. Example: ["I","V1","V2","PC","C","I","C","C"]
    */
   order: string[];
+  /**
+   * The 진행 순서 came from the conti itself (e.g. `I-V1-C-V2-C-B-C` written
+   * next to the song on the cover). This week's arrangement is the conti's to
+   * decide, so recognition and the library fill in the words but never
+   * replace this order.
+   */
+  orderFromConti?: boolean;
   /** Max lyric lines per generated slide (template default: 4) */
   linesPerSlide: number;
   /** 1-based page number of this song's score in the uploaded conti PDF */
@@ -90,6 +97,8 @@ export interface ContiSongEntry {
   title: string;
   key?: string;
   description?: string;
+  /** 진행 순서 written on the cover for this song, e.g. ["I","V1","C","B","C"]. */
+  order?: string[];
   /** 1-based PDF page this song's score was matched to (if found) */
   pageIndex?: number;
 }

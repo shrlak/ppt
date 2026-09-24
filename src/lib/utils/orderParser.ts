@@ -71,3 +71,28 @@ export function parseOrder(input: string): string[] {
 export function formatOrder(order: string[]): string {
   return order.join('-');
 }
+
+/** One part token as a conti writes it: V1, PC, C, B, I, 간주, 후렴, Cx2… */
+const PART_TOKEN = String.raw`(?:PC\d?|TAG|V\d?|C\d?|B\d?|I|O|T|간주|전주|후렴|브릿지)(?:\s*[xX×*]\s*\d)?`;
+/**
+ * A 진행 순서 inside running text: three or more part tokens joined by dashes
+ * or arrows. Requiring the joiners (and at least three tokens) is what keeps
+ * ordinary prose — "C 코드로", "B 파트" — from reading as an order.
+ */
+const ORDER_RUN = new RegExp(
+  String.raw`(?<![0-9A-Za-z가-힣])(${PART_TOKEN}(?:\s*[-–—~→]\s*${PART_TOKEN}){2,})(?![0-9A-Za-z가-힣])`,
+  'i',
+);
+
+/**
+ * Find the 진행 순서 a conti wrote for a song, anywhere in a line of text —
+ * "주님의 사랑 (E): I-V1-C-V2-C-B-C 로 부릅니다" gives
+ * ["I","V1","C","V2","C","B","C"]. Undefined when the text carries none.
+ */
+export function extractPartOrder(text: string | undefined): string[] | undefined {
+  if (!text) return undefined;
+  const match = ORDER_RUN.exec(text);
+  if (!match) return undefined;
+  const order = parseOrder(match[1]);
+  return order.length >= 3 ? order : undefined;
+}

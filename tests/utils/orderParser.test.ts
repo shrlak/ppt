@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatOrder, normalizeToken, parseOrder } from '../../src/lib/utils/orderParser';
+import { extractPartOrder, formatOrder, normalizeToken, parseOrder } from '../../src/lib/utils/orderParser';
 
 describe('normalizeToken', () => {
   it('uppercases plain tokens', () => {
@@ -65,5 +65,22 @@ describe('formatOrder', () => {
   it('round-trips with parseOrder', () => {
     const order = parseOrder('I-V1-PC-C');
     expect(formatOrder(order)).toBe('I-V1-PC-C');
+  });
+});
+
+describe('extractPartOrder', () => {
+  it('finds an order written inside a sentence', () => {
+    expect(extractPartOrder('주님의 사랑을 표현하는 노래입니다. I-V1-C-V2-C-B-Cx2')).toEqual([
+      'I', 'V1', 'C', 'V2', 'C', 'B', 'C', 'C',
+    ]);
+  });
+
+  it('reads Korean part names and arrows', () => {
+    expect(extractPartOrder('진행: 전주 → V → 후렴 → 브릿지 → 후렴')).toEqual(['I', 'V', 'C', 'B', 'C']);
+  });
+
+  it('ignores prose that only mentions a part', () => {
+    expect(extractPartOrder('C 코드로 시작해서 B 파트에서 조를 바꿉니다.')).toBeUndefined();
+    expect(extractPartOrder(undefined)).toBeUndefined();
   });
 });

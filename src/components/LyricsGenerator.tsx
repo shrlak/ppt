@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
+import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
 import {
   fetchBundledLibrary,
   findEntry,
@@ -424,7 +425,9 @@ export default function LyricsGenerator({
               title: entry.title,
               key: s.key ?? entry.key,
               sections: structuredClone(entry.sections),
-              order: [...entry.order],
+              // The saved order is last time's arrangement; one the conti
+              // wrote is this week's.
+              order: s.orderFromConti ? s.order : [...entry.order],
             }
           : s,
       ),
@@ -467,7 +470,7 @@ export default function LyricsGenerator({
   const recognizeSongsBatch = useCallback(
     async (targets: Song[]) => {
       const doc = docRef.current;
-      const active = targets.filter((song) => song.pageIndex != null);
+      let active = targets.filter((song) => song.pageIndex != null);
       if (!doc || active.length === 0) return;
 
       const isCancelled = (id: string) => scanCancelledRef.current.has(id);
@@ -667,7 +670,7 @@ export default function LyricsGenerator({
       try {
         // Rendering and recognition are both batched: no per-song request loop.
         let renderedPages = 0;
-        const images = await Promise.all(
+        let images = await Promise.all(
           active.map(async (song) => {
             // PNG: lossless line art reads far better than JPEG for OCR.
             const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH, 'png');
@@ -694,7 +697,7 @@ export default function LyricsGenerator({
         const corrector = await loadActiveCorrectionRunner();
         // Page hashes tie this run's evidence to the page it came from, so a
         // correction saved next week still knows which reading it corrected.
-        const pageHashes = await Promise.all(
+        let pageHashes = await Promise.all(
           images.map((image) => hashPageImage(image).catch(() => undefined)),
         );
         active.forEach((song, index) => {
@@ -737,9 +740,42 @@ export default function LyricsGenerator({
         // A title the models are known to misread is resolved BEFORE the
         // library and the web are searched, so a page whose title never comes
         // back right still finds its saved lyrics.
-        const aliasedTitles = titleScores.map((identity) =>
+        let aliasedTitles = titleScores.map((identity) =>
           identity.title ? { ...identity, title: resolveTitleAlias(identity.title, memory) } : identity,
         );
+
+        // 콘티 순서대로 악보 배치: the cards follow the conti's song order, but
+        // scanned pages could only be handed out in PDF order. Now that each
+        // page's title is known, give every song the page that carries it.
+        const slots = alignPagesToConti(
+          active.map((song) => song.title),
+          aliasedTitles.map((identity) => identity.title),
+        );
+        if (slots.some((slot, index) => slot !== index)) {
+          const pages = active.map((song) => song.pageIndex);
+          const permute = <T,>(values: T[]) => slots.map((slot) => values[slot]);
+          active = active.map((song, index) => ({ ...song, pageIndex: pages[slots[index]] }));
+          images = permute(images);
+          pageHashes = permute(pageHashes);
+          aliasedTitles = permute(aliasedTitles);
+          titleConfidence = permute(titleConfidence);
+          active.forEach((song, index) => {
+            const found = evidence.get(song.id);
+            if (found) evidence.set(song.id, { ...found, pageHash: pageHashes[index], image: images[index] });
+          });
+          const pageById = new Map(active.map((song) => [song.id, song.pageIndex]));
+          setSongs((current) =>
+            current.map((song) =>
+              pageById.has(song.id) ? { ...song, pageIndex: pageById.get(song.id) } : song,
+            ),
+          );
+          const moved = active.filter((song, index) => slots[index] !== index && !isPlaceholderTitle(song.title));
+          if (moved.length > 0) {
+            showToast(
+              `악보 제목을 읽어 ${moved.map((song) => `'${song.title}'`).join(', ')}의 악보 페이지를 콘티 순서에 맞게 다시 짝지었습니다.`,
+            );
+          }
+        }
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
         // The saved entry a page might turn out to be, where the title behind
@@ -943,11 +979,11 @@ export default function LyricsGenerator({
             }),
           );
           for (const [id, score] of recognized) {
-            const fallback = remaining.find(({ song }) => song.id === id)?.song.title ?? '';
+            const printed = remaining.find(({ song }) => song.id === id)?.song.title;
             webQueue.set(id, {
               score,
               engine: lyricEngine,
-              title: (score.title || fallback).trim(),
+              title: lyricsLookupTitle(printed, score.title),
             });
           }
         }
@@ -1004,7 +1040,7 @@ export default function LyricsGenerator({
                 fillFromLibrary(song, saved);
                 return;
               }
-              const lookupTitle = (merged.title || song.title).trim();
+              const lookupTitle = lyricsLookupTitle(song.title, merged.title);
               if (merged.sections.length === 0) {
                 // No lyrics off the page, but a title is enough to look the
                 // song up — the web pass fills it or reports the failure.
@@ -1419,6 +1455,12 @@ export default function LyricsGenerator({
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;
+        // The 진행 순서 written on the conti is this week's arrangement: the
+        // parts are filled from the score or the web, in exactly this order.
+        if (entry.order && entry.order.length > 0) {
+          song.order = [...entry.order];
+          song.orderFromConti = true;
+        }
         // 콘티 order: the song right after the 공동체 고백송 is sung after the
         // sermon, so its slides go after the post-sermon 기도 slide.
         if (postSermonSong && entry === postSermonSong) song.postSermon = true;
