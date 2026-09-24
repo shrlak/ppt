@@ -77,3 +77,11 @@ describe('the shared score prompt', () => {
     expect(basePrompt('JSON만')).toContain('절대로 하면 안 되는 결과');
   });
 });
+
+describe('Korean-only reading', () => {
+  it('tells every model to skip English lyric rows', () => {
+    const prompt = BASE_PROMPT_LINES.join('\n');
+    expect(prompt).toContain('한국어 가사만 읽으세요');
+    expect(prompt).toContain('영어 줄은 통째로 건너뛰세요');
+  });
+});

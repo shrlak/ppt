@@ -101,13 +101,31 @@ describe('rankLyricsCandidates', () => {
     expect(ranked[0].score - ranked[1].score).toBeGreaterThanOrEqual(AUTO_MARGIN);
   });
 
-  it('leaves two near-identical candidates for the user to choose between', () => {
-    // Within the margin at least one of them is probably the wrong song.
+  it('lets two sites printing the same words back each other up', () => {
+    // Same lyrics on two hosts is the same song twice, not a rival.
     const first = candidate();
     const second = candidate({ id: 'ccmpia:x', url: 'https://ccmpia.com/x', host: 'ccmpia.com', source: 'ccmpia' });
     const ranked = rankLyricsCandidates(query, [first, second]);
+    expect(ranked[0].decision).toBe('auto');
+  });
+
+  it('leaves two close candidates of different songs for the user to choose between', () => {
+    // Both open with the line the models read; after that they are different songs.
+    const recognized = ['빛으로 인도하시네'];
+    const first = candidate({ lines: [...recognized, '주님의 크신 사랑 안에서 우리 모두 함께 기뻐 찬양하네'] });
+    const second = candidate({
+      id: 'ccmpia:x',
+      lines: [...recognized, '어두운 밤 지나 새벽이 오면 새 노래로 그 이름 높이리라'],
+      url: 'https://ccmpia.com/x',
+      host: 'ccmpia.com',
+    });
+    const ranked = rankLyricsCandidates({ ...query, sample: normalizeSample(recognized.join('')) }, [first, second]);
     expect(ranked[0].decision).toBe('review');
-    expect(ranked[1].decision).toBe('review');
+  });
+
+  it('fills by title alone when nothing could be read off the score', () => {
+    const ranked = rankLyricsCandidates({ title: '은혜의 노래' }, [candidate()]);
+    expect(ranked[0].decision).toBe('auto');
   });
 
   it('caps the list at three and orders it best first', () => {

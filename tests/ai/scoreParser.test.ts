@@ -3,6 +3,7 @@ import {
   cleanLyricLine,
   coerceParsedScore,
   coerceParsedScoreBatch,
+  keepKoreanLyrics,
   parseScoreText,
   splitNumberedVerses,
 } from '../../src/lib/ai/scoreParser';
@@ -207,5 +208,31 @@ describe('artist recognition', () => {
     const parsed = parseScoreText(['은혜의 노래 (E)', 'I-V-C', 'V', '빛으로 인도하시네'].join('\n'));
     expect(parsed.title).toBe('은혜의 노래');
     expect(parsed.artist).toBeUndefined();
+  });
+});
+
+describe('keepKoreanLyrics', () => {
+  it('drops an English translation row a model read as its own verse', () => {
+    const score = coerceParsedScore({
+      pageType: 'score',
+      title: '주 사랑이',
+      order: ['I', 'V', 'V2'],
+      sections: [
+        { label: 'V', lines: ['주 사랑이 나를 숨쉬게 해'] },
+        { label: 'V2', lines: ['Your love makes me breathe'] },
+      ],
+    });
+    expect(score.sections).toEqual([{ label: 'V', lines: ['주 사랑이 나를 숨쉬게 해'] }]);
+  });
+
+  it('drops English lines spliced in between Korean ones', () => {
+    expect(
+      keepKoreanLyrics([{ label: 'C', lines: ['주님만이', 'Only You', '내 아픔 아시며'] }]),
+    ).toEqual([{ label: 'C', lines: ['주님만이', '내 아픔 아시며'] }]);
+  });
+
+  it('leaves an all-English song as read', () => {
+    const sections = [{ label: 'V', lines: ['Celebrate the light'] }];
+    expect(keepKoreanLyrics(sections)).toBe(sections);
   });
 });

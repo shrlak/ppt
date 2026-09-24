@@ -1,45 +1,37 @@
 // Reconcile what the models read off the 악보 with what the song's published
 // lyrics say.
 //
-// The two sources know different things, and the merge keeps each one doing
-// what it is good at:
+// The lookup is title-first: once a title is read off the conti, its published
+// lyrics are fetched and — when the proxy is sure the page is this song, or the
+// user picked it — they become the song's lyrics, split into parts. The two
+// sources still each do what they are good at:
 //
-//   · The score decides the SHAPE — which parts are sung, what they are
-//     labeled, and the 진행 순서 that repeats them. Only the conti knows that,
-//     and a published lyric page never does.
+//   · The score decides the SHAPE — which label each part carries and the
+//     진행 순서 that repeats them. Only the conti knows that, and a published
+//     lyric page never does.
 //   · The web decides the WORDS — a page of type beats OCR of small lyric
 //     type under a staff, and it comes already spelled correctly. A published
-//     line therefore goes in exactly as the page printed it; only the
-//     recognized lines that the page has no counterpart for are normalized.
+//     part therefore replaces the recognized part it matches wholesale, exactly
+//     as the page printed it; only recognized parts the page has no
+//     counterpart for keep the models' (normalized) reading.
 //
-// So a recognized part keeps its label and its place in the order, and gets
-// the published wording when the two are clearly the same part. A part the
-// score never read is only added when 진행 순서 asks for it, because a page
-// printing extra verses is not a reason to sing them.
+// Parts the page prints that the score never read are added to the editor too,
+// so the whole song is there to work with. They only become slides when the
+// 진행 순서 calls for them (see planSlides), because a page printing extra
+// verses is not a reason to sing them.
 import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from '../utils/types';
 import { normalizeRecognizedLyricLines } from './koreanSpelling';
-import { lineSimilarity, sectionSimilarity } from './textSimilarity';
+import { lineKey } from './textSimilarity';
 import type { LyricsSourceLink, ScoredLyricsCandidate } from './webLyrics';
 
 /**
- * How alike a recognized part and a published part must read before the
- * published wording replaces the recognized wording. Deliberately lower than
- * the model-vs-model threshold: OCR of a whole verse drifts further from the
- * truth than two models drift from each other, and the title match already
- * established that this is the right song.
+ * How alike a recognized part and a published part must read to be the same
+ * part, as character-pair overlap. Pairs rather than single characters or
+ * words: a score's spacing follows its noteheads, so its words never line up
+ * with the page's, and single syllables are shared by every part of a song.
  */
-const SAME_PART_THRESHOLD = 0.45;
-
-/** Two lines must look like the same line before the published one wins. */
-const SAME_LINE_THRESHOLD = 0.6;
-
-/**
- * How far ahead in the published part to look for a recognized line's match.
- * A small window keeps the alignment monotonic: a line the page also prints
- * later (a repeated hook) must not drag the cursor past everything between.
- */
-const ALIGN_LOOKAHEAD = 3;
+const SAME_PART_THRESHOLD = 0.3;
 
 /**
  * What the editor is showing the user about the web lookup for one song.
@@ -62,78 +54,51 @@ export interface WebReviewState {
 export interface WebLyricsMerge {
   score: ParsedScore;
   /** 'filled' — the web supplied lyrics the score had none of.
-   *  'corrected' — the score's parts kept their shape, with published wording.
-   *  'unused' — nothing on the page matched; the score's reading stands. */
+   *  'corrected' — the score's parts kept their labels, with published wording.
+   *  'unused' — no candidate was applied; the score's reading stands. */
   outcome: 'filled' | 'corrected' | 'unused';
-  /** Parts whose text the published version replaced. */
+  /** Parts whose text came from the published version. */
   correctedParts: number;
 }
 
-/**
- * Cross-reference one recognized part against the published one, line by line.
- *
- * Swapping the whole part for the published text is too blunt: a page can
- * print an arrangement this score does not use, and the score is what is
- * actually being sung. So each recognized line is matched against the
- * published lines in order, and a published line only replaces a recognized
- * one when the two read as the same line — a spelling correction, not a
- * substitution. A recognized line the page has no counterpart for is kept
- * exactly as the models read it.
- *
- * Published lines left over after the last match are appended, but only once
- * enough of the part has matched to be sure it is the same part: dropping the
- * final line or two is a routine OCR failure, and that tail is the single
- * most common thing missing from a recognized part.
- */
-export function crossReferenceLines(
-  recognized: string[],
-  published: string[],
-): { lines: string[]; corrected: number } {
-  const lines: string[] = [];
-  let cursor = 0;
-  let matched = 0;
-  let corrected = 0;
-
-  for (const line of recognized) {
-    let bestIndex = -1;
-    let bestScore = 0;
-    for (let index = cursor; index < Math.min(published.length, cursor + ALIGN_LOOKAHEAD); index += 1) {
-      const score = lineSimilarity(line, published[index]);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    }
-    if (bestIndex === -1 || bestScore < SAME_LINE_THRESHOLD) {
-      // Nothing on the page reads like this line — the score keeps its own.
-      lines.push(line);
-      continue;
-    }
-    matched += 1;
-    if (published[bestIndex] !== line) corrected += 1;
-    lines.push(published[bestIndex]);
-    cursor = bestIndex + 1;
+function pairCounts(section: Section): Map<string, number> {
+  const text = section.lines.map(lineKey).join('');
+  const counts = new Map<string, number>();
+  for (let index = 0; index < text.length - 1; index += 1) {
+    const pair = text.slice(index, index + 2);
+    counts.set(pair, (counts.get(pair) ?? 0) + 1);
   }
-
-  // Only a part that genuinely lined up may contribute a tail, so an
-  // incidental single-line match can't append a stranger's verse.
-  const tail = published.slice(cursor);
-  if (tail.length > 0 && matched >= 2 && matched >= recognized.length / 2) {
-    lines.push(...tail);
-    corrected += tail.length;
-  }
-
-  return { lines, corrected };
+  return counts;
 }
 
-/** Pair each recognized part with the published part that reads like it. A
- * published part is claimed at most once, best match first, so two similar
- * verses can't both collapse onto the same one. */
+/** Character-pair overlap (Dice, 0–1) of two parts. */
+export function partSimilarity(a: Section, b: Section): number {
+  const left = pairCounts(a);
+  const right = pairCounts(b);
+  let shared = 0;
+  for (const [pair, count] of left) shared += Math.min(count, right.get(pair) ?? 0);
+  const total = [...left.values(), ...right.values()].reduce((sum, n) => sum + n, 0);
+  return total === 0 ? 0 : (2 * shared) / total;
+}
+
+/** "V1" and "V" name the same part. */
+function canonicalLabel(label: string): string {
+  return label.trim().toUpperCase().replace(/^([A-Z]+)1$/, '$1');
+}
+
+/**
+ * Pair each recognized part with the published part that reads like it.
+ *
+ * Best match first, and a published part is claimed at most once, so two
+ * similar verses can't both collapse onto the same one. A part whose OCR was
+ * too poor to match by text then falls back to the published part carrying
+ * the same label — the page and the score both number verses in order.
+ */
 function pairParts(recognized: Section[], published: Section[]): Map<number, number> {
   const pairs: { score: number; recognizedIndex: number; publishedIndex: number }[] = [];
   recognized.forEach((part, recognizedIndex) => {
     published.forEach((candidate, publishedIndex) => {
-      const score = sectionSimilarity(part, candidate);
+      const score = partSimilarity(part, candidate);
       if (score >= SAME_PART_THRESHOLD) pairs.push({ score, recognizedIndex, publishedIndex });
     });
   });
@@ -146,24 +111,43 @@ function pairParts(recognized: Section[], published: Section[]): Map<number, num
     chosen.set(pair.recognizedIndex, pair.publishedIndex);
     takenPublished.add(pair.publishedIndex);
   }
+
+  recognized.forEach((part, recognizedIndex) => {
+    if (chosen.has(recognizedIndex)) return;
+    const publishedIndex = published.findIndex(
+      (candidate, index) =>
+        !takenPublished.has(index) && canonicalLabel(candidate.label) === canonicalLabel(part.label),
+    );
+    if (publishedIndex === -1) return;
+    chosen.set(recognizedIndex, publishedIndex);
+    takenPublished.add(publishedIndex);
+  });
   return chosen;
+}
+
+/** A label of the same family that no section uses yet (C taken → C2). */
+function freeLabel(label: string, used: Set<string>): string {
+  if (!used.has(canonicalLabel(label))) return label;
+  const family = canonicalLabel(label).replace(/\d+$/, '');
+  let n = 2;
+  while (used.has(`${family}${n}`)) n += 1;
+  return `${family}${n}`;
 }
 
 /**
  * Merge a web lookup into a recognized score.
  *
- * Never mutates its inputs. Always safe to call: with no lookup result, or
- * one that matches nothing, the score comes back unchanged apart from having
- * its own reading normalized to 한국어 띄어쓰기·맞춤법.
+ * Never mutates its inputs. Always safe to call: with no lookup result the
+ * score comes back unchanged apart from having its own reading normalized to
+ * 한국어 띄어쓰기·맞춤법.
  */
 export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | null): WebLyricsMerge {
   // The recognized reading gets its 띄어쓰기·맞춤법 pass either way, web hit or
   // not — a score's spacing follows its noteheads, so it always needs one.
   // This whole path only runs for songs that are new to the library.
-  const normalized: Section[] = score.sections.map((section) => ({
-    label: section.label,
-    lines: normalizeRecognizedLyricLines(section.lines),
-  }));
+  const normalized: Section[] = score.sections
+    .map((section) => ({ label: section.label, lines: normalizeRecognizedLyricLines(section.lines) }))
+    .filter((section) => section.lines.length > 0);
 
   if (!web || web.sections.length === 0) {
     return { score: { ...score, sections: normalized }, outcome: 'unused', correctedParts: 0 };
@@ -189,27 +173,22 @@ export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | 
   const sections = normalized.map((section, index) => {
     const publishedIndex = pairs.get(index);
     if (publishedIndex === undefined) return section;
-    const published = web.sections[publishedIndex];
-    const { lines, corrected } = crossReferenceLines(section.lines, published.lines);
-    if (corrected === 0) return section;
     correctedParts += 1;
-    // The score's label and position are kept; only the words change.
-    return { label: section.label, lines };
+    // The score's label and position are kept; the words are the page's.
+    return { label: section.label, lines: [...web.sections[publishedIndex].lines] };
   });
 
-  // A part the 진행 순서 calls for but no model managed to read is a real gap
-  // in the deck — fill it from the published lyrics when one is left over.
-  const present = new Set(sections.map((section) => section.label.toUpperCase()));
-  const leftovers = web.sections.filter((_, index) => ![...pairs.values()].includes(index));
-  for (const token of score.order) {
-    const label = token.toUpperCase();
-    if (label === 'I' || present.has(label)) continue;
-    const match = leftovers.find((section) => section.label.toUpperCase() === label);
-    if (!match) continue;
-    sections.push({ label: match.label, lines: [...match.lines] });
-    present.add(label);
+  // Everything else the page prints goes into the editor as well, under a
+  // label no recognized part already uses.
+  const used = new Set(sections.map((section) => canonicalLabel(section.label)));
+  const claimed = new Set(pairs.values());
+  web.sections.forEach((section, index) => {
+    if (claimed.has(index)) return;
+    const label = freeLabel(section.label, used);
+    used.add(canonicalLabel(label));
+    sections.push({ label, lines: [...section.lines] });
     correctedParts += 1;
-  }
+  });
 
   return {
     score: { ...score, sections },

@@ -145,6 +145,7 @@ export function buildGeminiBatchBody(
       ? [
           '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
           'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
+          '제목은 한국어 제목을 맞춤법·띄어쓰기에 맞게 적으세요. 영어 제목이 함께 있으면 한국어 제목만 적습니다.',
           'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
           '가사, 파트, 진행 순서는 인식하지 마세요.',
           'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
