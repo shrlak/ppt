@@ -1,6 +1,7 @@
 import type { ContiInfo, ContiSongEntry, LibraryEntry } from './types';
 import { normalizeTitle } from '../storage/library';
 import { DEFAULT_CONFESSION_SONG } from '../ai/aiSettings';
+import { extractPartOrder } from './orderParser';
 
 /** `주님의 사랑 (E): 설명...` — title, musical key, description. */
 const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:：]\s*(.*)$/;
@@ -218,6 +219,7 @@ export function parseCoverText(text: string): ContiInfo | null {
   const labeledInfo = parseSermonInfoText(text);
   let sermonTitle = labeledInfo.sermonTitle;
   let scripture = labeledInfo.scripture;
+  let lastSong: ContiSongEntry | undefined;
 
   for (const line of lines) {
     if (!line) continue;
@@ -228,11 +230,18 @@ export function parseCoverText(text: string): ContiInfo | null {
     }
     const songMatch = line.match(SONG_LINE);
     if (songMatch && !songMatch[1].trim().startsWith('본문')) {
-      songs.push({
+      lastSong = {
         title: songMatch[1].trim(),
         key: normalizeKey(songMatch[2]),
         description: songMatch[3].trim() || undefined,
-      });
+      };
+      songs.push(lastSong);
+      continue;
+    }
+    // "진행: I-V1-C-B-C" on its own line belongs to the song just above it.
+    const orderLine = lastSong ? extractPartOrder(line) : undefined;
+    if (lastSong && orderLine) {
+      lastSong.order ??= orderLine;
       continue;
     }
     if (!date) {
@@ -253,6 +262,13 @@ export function parseCoverText(text: string): ContiInfo | null {
   // Covers that lay the conti out as a 순서/찬양/키 table carry no
   // "제목 (Key): 설명" lines at all — read the table instead.
   if (songs.length === 0) songs.push(...parseSongTable(lines));
+
+  // A 진행 순서 written with the song ("I-V1-C-V2-C-B-C") is how the conti
+  // says which parts to sing; it goes with the song to the lyric editor.
+  for (const song of songs) {
+    const order = song.order ?? extractPartOrder(song.description);
+    if (order) song.order = order;
+  }
 
   // A real cover has service context beyond the bare song list.
   if (songs.length === 0 || (!date && !sermonTitle && !scripture)) return null;

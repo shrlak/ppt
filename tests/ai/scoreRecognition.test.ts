@@ -459,6 +459,13 @@ describe('applyScoreToSong', () => {
     expect(next.sections).toEqual([{ label: 'V1', lines: ['이미 쓴 가사'] }]);
   });
 
+  it('keeps the 진행 순서 the conti wrote over the one printed on the score', () => {
+    const fromConti: Song = { ...stub, order: ['I', 'C', 'V1', 'C'], orderFromConti: true };
+    const next = applyScoreToSong(fromConti, parsed);
+    expect(next.order).toEqual(['I', 'C', 'V1', 'C']);
+    expect(next.sections.map((s) => s.label)).toEqual(['C', 'V1']);
+  });
+
   it('derives an order from sections when the result has none', () => {
     const next = applyScoreToSong(stub, { ...parsed, order: [] });
     expect(next.order).toEqual(['I', 'V1', 'C']);
