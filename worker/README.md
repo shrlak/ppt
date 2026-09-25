@@ -153,7 +153,7 @@ deletes **every saved PPT entry and all of its files** each Sunday at 5 PM
 from an empty library. Half-finished uploads go with them. The 곡 (lyrics)
 library, the 찬양집회 English-lyrics library (`/libraries/praise-english`), shared
 settings, and usage counters are never touched — and neither is any deck saved with
-`keep: true` (every 찬양집회 deck), which stays until someone deletes it by hand. The
+`keep: true` (every 찬양집회 and 수련회 deck), which stays until someone deletes it by hand. The
 purge record counts those as `kept`.
 
 Cron triggers are UTC-only, so `wrangler.toml` fires the Worker at **both**

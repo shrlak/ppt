@@ -27,11 +27,13 @@ async function addLibrarySong(page: Page, title: string): Promise<void> {
 }
 
 test.describe('service picker', () => {
-  test('offers 주일예배, 찬양집회 and a not-yet-ready 수련회', async ({ page }) => {
+  test('offers 주일예배, 찬양집회 and 수련회', async ({ page }) => {
     await page.goto('./');
     await expect(page.getByTestId('service-picker')).toBeVisible();
-    await expect(page.getByTestId('service-retreat')).toBeDisabled();
-    await expect(page.getByTestId('service-retreat')).toContainText('준비 중');
+    await page.getByTestId('service-retreat').click();
+    await expect(page.getByTestId('retreat-panel-info')).toBeVisible();
+    await page.getByTestId('retreat-to-home').click();
+    await expect(page.getByTestId('service-picker')).toBeVisible();
 
     await page.getByTestId('service-sunday').click();
     await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();

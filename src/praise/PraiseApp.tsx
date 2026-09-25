@@ -24,6 +24,7 @@ import { convertAdditionalFile } from '../lib/additionalFiles/convert';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from '../lib/pptx/pptxRenderer';
 import { getSavedDeck, saveDeckToLibrary, type SavedDeck } from '../lib/storage/pptLibrary';
 import { isWednesdaySource } from '../wednesday/source';
+import { isRetreatSource } from '../retreat/source';
 import {
   AUTO_SAVE_BUSY_POLL_MS,
   AUTO_SAVE_DEBOUNCE_MS,
@@ -375,6 +376,10 @@ export default function PraiseApp() {
       }
       if (isWednesdaySource(deck.source)) {
         window.location.href = `${BASE}wednesday.html?deck=${encodeURIComponent(deck.id)}`;
+        return;
+      }
+      if (isRetreatSource(deck.source)) {
+        window.location.href = `${BASE}retreat.html?deck=${encodeURIComponent(deck.id)}`;
         return;
       }
       window.location.href = `${BASE}index.html?service=sunday&deck=${encodeURIComponent(deck.id)}`;

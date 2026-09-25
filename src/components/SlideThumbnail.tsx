@@ -59,7 +59,19 @@ function ShapeView({ shape, pxPerEmu }: { shape: RenderedShape; pxPerEmu: number
   }
 
   return (
-    <div className="slide-thumb-text" style={{ ...style, background: shape.fill }}>
+    <div
+      className="slide-thumb-text"
+      style={{
+        ...style,
+        background: shape.fill,
+        ...(shape.outline
+          ? {
+              border: `${Math.max(1, emuToPx(shape.outline.widthEmu, pxPerEmu))}px solid ${shape.outline.color}`,
+              boxSizing: 'border-box',
+            }
+          : {}),
+      }}
+    >
       {shape.paragraphs.map((p, pi) => (
         <p
           key={pi}

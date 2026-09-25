@@ -49,6 +49,8 @@ interface ShapeBase {
 export interface RenderedTextShape extends ShapeBase {
   kind: 'text';
   fill?: string;
+  /** The shape's outline (`a:ln`), when it draws one. */
+  outline?: { color: string; widthEmu: number };
   paragraphs: RenderedParagraph[];
 }
 
@@ -164,18 +166,43 @@ function findMatchingPlaceholder(spTree: Element | null, key: PlaceholderKey): E
   return null;
 }
 
-/** Read a shape's <a:solidFill> as a CSS color, from srgbClr or (approximately) schemeClr. */
+function childEl(parent: Element, tag: string): Element | null {
+  return Array.from(parent.children).find((child) => child.tagName === tag) ?? null;
+}
+
+/** "#RRGGBB" with an <a:alpha> applied, as a CSS colour. */
+function withAlpha(hex: string, colorEl: Element): string {
+  const alpha = childEl(colorEl, 'a:alpha')?.getAttribute('val');
+  if (!alpha || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, Number(alpha) / 100000))})`;
+}
+
+/**
+ * Read a container's OWN <a:solidFill> (a direct child — never the one
+ * inside its <a:ln>, which is the outline's colour) as a CSS color, from
+ * srgbClr or (approximately) schemeClr, with its alpha.
+ */
 function readSolidFill(container: Element | null): string | undefined {
-  const fill = container && firstEl(container, 'a:solidFill');
+  const fill = container && childEl(container, 'a:solidFill');
   if (!fill) return undefined;
-  const srgb = firstEl(fill, 'a:srgbClr');
+  const srgb = childEl(fill, 'a:srgbClr');
   if (srgb) {
     const val = srgb.getAttribute('val');
-    return val ? `#${val}` : undefined;
+    return val ? withAlpha(`#${val}`, srgb) : undefined;
   }
-  const scheme = firstEl(fill, 'a:schemeClr');
+  const scheme = childEl(fill, 'a:schemeClr');
   const val = scheme?.getAttribute('val');
-  return val ? SCHEME_COLOR_FALLBACK[val] : undefined;
+  const color = val ? SCHEME_COLOR_FALLBACK[val] : undefined;
+  return color && scheme ? withAlpha(color, scheme) : color;
+}
+
+/** A shape's drawn outline, when its <a:ln> has a colour (not <a:noFill/>). */
+function readOutline(spPr: Element | null): RenderedTextShape['outline'] {
+  const ln = spPr && childEl(spPr, 'a:ln');
+  const color = ln ? readSolidFill(ln) : undefined;
+  if (!ln || !color) return undefined;
+  return { color, widthEmu: Number(ln.getAttribute('w')) || 12700 };
 }
 
 function readXfrm(spPr: Element | null): ShapeBase | null {
@@ -268,7 +295,8 @@ function readTextShape(sp: Element, box: ShapeBase, ctx: TextInheritContext): Re
   const spPr = firstEl(sp, 'p:spPr');
   const txBody = firstEl(sp, 'p:txBody');
   const fill = readSolidFill(spPr);
-  if (!txBody) return fill ? { kind: 'text', ...box, fill, paragraphs: [] } : null;
+  const outline = readOutline(spPr);
+  if (!txBody) return fill || outline ? { kind: 'text', ...box, fill, outline, paragraphs: [] } : null;
 
   const paragraphs: RenderedParagraph[] = [];
   for (const p of allEls(txBody, 'a:p')) {
@@ -297,8 +325,8 @@ function readTextShape(sp: Element, box: ShapeBase, ctx: TextInheritContext): Re
     }
     if (runs.length > 0 || paragraphs.length > 0) paragraphs.push({ align, runs });
   }
-  if (paragraphs.length === 0 && !fill) return null;
-  return { kind: 'text', ...box, fill, paragraphs };
+  if (paragraphs.length === 0 && !fill && !outline) return null;
+  return { kind: 'text', ...box, fill, outline, paragraphs };
 }
 
 /** Map a slide's r:embed relationship id to the actual (possibly renamed) media part path. */
