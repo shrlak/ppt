@@ -916,8 +916,8 @@ export default function App() {
           <div className="header-brand">
             <img
               className="header-logo"
-              src={`${BASE}favicon.svg`}
-              alt="Korean Central Church of Pittsburgh 대학·청년부 로고"
+              src={`${BASE}logo.png`}
+              alt="KCCP 빛주사랑 대학청년부 Media Team 로고"
             />
             <div className="header-text">
               <h1>KCCP PPT Generator</h1>
