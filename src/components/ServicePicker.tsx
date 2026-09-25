@@ -68,7 +68,7 @@ export default function ServicePicker({ onChoose }: Props) {
             const body = (
               <>
                 <span className="service-option-number" aria-hidden="true">
-                  {index + 1}
+                  {String(index + 1).padStart(2, '0')}
                 </span>
                 <Icon name={option.icon} />
                 <span className="service-option-text">
