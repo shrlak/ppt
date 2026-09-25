@@ -1083,6 +1083,27 @@ test('puts the NASB text on the verse slide when NASB is the English translation
   expect(allText).not.toContain('whoever believes in him should not perish'); // ESV
 });
 
+test('shows a verse 개역개정 prints as "18-19" on one slide beside both English verses', async ({ page }, testInfo) => {
+  await page.goto('./?service=sunday');
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('bible-verse-input').fill('신6:17-20');
+
+  await moveFromBibleToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('bible-joined.pptx'));
+  const verseSlides = (await slideTexts(zip)).filter((xml) => xml.includes('신명기 6장'));
+  expect(verseSlides.map((xml) => /신명기 6장 ([\d-]+)절/.exec(xml)?.[1])).toEqual(['17', '18-19', '20']);
+  const joined = verseSlides[1];
+  expect(joined).toContain('여호와께서 보시기에 정직하고 선량한 일을 행하라');
+  expect(joined).toContain('Deuteronomy 6:18-19');
+  expect(joined).toContain('And you shall do what is right and good in the sight of the LORD'); // ESV 6:18
+  expect(joined).toContain('by thrusting out all your enemies from before you'); // ESV 6:19
+});
+
 test('generates one combined deck from lyrics, bible verses, and announcements together', async ({
   page,
 }, testInfo) => {

@@ -33,7 +33,7 @@ export interface WednesdayDeckInput {
   template: ArrayBuffer | Uint8Array;
   service: WednesdayService;
   songs: WednesdaySong[];
-  /** 개역개정 본문, already resolved by the caller (bibleData.getVerseRange). */
+  /** 개역개정 본문, already resolved by the caller (bibleData.getVerseUnits). */
   verses: Verse[];
   /** The passage as the deck spells it, e.g. "시편 18편 1-12절". */
   rangeKo: string;

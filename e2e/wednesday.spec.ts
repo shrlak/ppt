@@ -115,6 +115,28 @@ test.describe('수요예배 generator', () => {
     );
   });
 
+  test('numbers a verse 개역개정 prints together as "18-19"', async ({ page }, testInfo) => {
+    await page.getByTestId('wednesday-date').fill('2026-09-16');
+    await page.getByTestId('wednesday-verse-input').fill('신6:18-20');
+    // 18-19 is one verse on the slide, but the count covers both of its numbers.
+    const preview = page.getByTestId('wednesday-passage-preview');
+    await expect(preview).toContainText('신명기 6장 18-20절 · 3절', { timeout: BUILD_TIMEOUT });
+    await expect(preview).toContainText('18-19 여호와께서 보시기에 정직하고 선량한 일을 행하라');
+
+    await page.getByTestId('wednesday-next-service').click();
+    await page.getByTestId('wednesday-next-songs').click();
+    const download = await Promise.race([
+      page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
+      page.getByTestId('wednesday-download').click().then(() => page.waitForEvent('download')),
+    ]);
+    const saved = testInfo.outputPath('wednesday-joined.pptx');
+    await download.saveAs(saved);
+    const texts = (await textOfSlides(await JSZip.loadAsync(await fs.readFile(saved)))).join('\n');
+    expect(texts).toContain('18-19 여호와께서 보시기에');
+    expect(texts).toContain('20 후일에 네 아들이');
+    expect(texts).not.toMatch(/(^|\s)19 (\s|$)/);
+  });
+
   test('downloads the 썸네일 as its own 16:9 file', async ({ page }, testInfo) => {
     await fillServiceInfo(page);
     await page.getByTestId('wednesday-tab-download').click();

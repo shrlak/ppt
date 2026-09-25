@@ -4,7 +4,7 @@
 // operator types only a range ("시18:1-12" or "시편 18편 1-12절"), so the
 // whole job is parsing the reference and pulling the verses out of the
 // translation file the Sunday flow already ships and caches.
-import { getVerseRange, loadTranslation } from '../bible/bibleData';
+import { getVerseUnits, lastVerseOf, loadTranslation } from '../bible/bibleData';
 import { normalizeContiScripture, parseVerseInput } from '../bible/refParser';
 import type { BibleRef, Verse } from '../bible/types';
 import { formatRangeFromVerses } from './fields';
@@ -39,10 +39,15 @@ export async function resolvePassage(input: string, baseUrl: string): Promise<Re
   const verses: Verse[] = [];
   for (const ref of refs) {
     verses.push(
-      ...getVerseRange(bible, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse),
+      ...getVerseUnits(bible, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse),
     );
   }
   if (verses.length === 0) throw new Error('해당 구절을 찾을 수 없습니다.');
 
   return { refs, verses, rangeKo: formatRangeFromVerses(refs, verses), invalidTokens };
+}
+
+/** How many verse numbers the passage covers — a joined "18-19" counts as two. */
+export function countVerses(verses: Verse[]): number {
+  return verses.reduce((count, verse) => count + lastVerseOf(verse) - verse.verse + 1, 0);
 }

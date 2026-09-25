@@ -75,6 +75,49 @@ describe('buildVerseSlidePlan', () => {
     expect(plan.verseSlides[0].body3).toBe('');
   });
 
+  describe('a Korean verse printed together with the next one', () => {
+    // 개역개정 신6:18-19 is one verse; the file keeps its text at 18 and an empty slot at 19.
+    const deuteronomy = (texts: string[]) =>
+      new Map<number, BookChapters>([[5, [[], [], [], [], [], [...Array(16).fill('(unused)'), ...texts]]]]);
+    const deutRef: BibleRef = { bookId: 5, ko: '신명기', en: 'Deuteronomy', startChapter: 6, startVerse: 17, endChapter: 6, endVerse: 20 };
+    const bibles = new Map([
+      ['nkrv', deuteronomy(['k17', 'k18-19', '', 'k20'])],
+      ['esv', deuteronomy(['e17', 'e18', 'e19', 'e20'])],
+    ]);
+
+    it('gets one slide labelled 18-19 with both English verses', () => {
+      const plan = buildVerseSlidePlan([deutRef], ['nkrv', 'esv'], bibles, '', 1);
+      expect(plan.verseSlides.map((s) => [s.verse, s.body, s.body2])).toEqual([
+        ['17', 'k17', 'e17'],
+        ['18-19', 'k18-19', 'e18 e19'],
+        ['20', 'k20', 'e20'],
+      ]);
+    });
+
+    it('counts as one verse toward versesPerSlide and is never split', () => {
+      const plan = buildVerseSlidePlan([deutRef], ['nkrv', 'esv'], bibles, '', 2);
+      expect(plan.verseSlides.map((s) => [s.verse, s.body2])).toEqual([
+        ['17-19', 'e17 e18 e19'],
+        ['20', 'e20'],
+      ]);
+    });
+
+    it('widens a range that ends inside it to the whole verse', () => {
+      const plan = buildVerseSlidePlan([{ ...deutRef, endVerse: 18 }], ['nkrv', 'esv'], bibles, '', 1);
+      expect(plan.globalData.rangeKo).toBe('신명기 6:17-19');
+      expect(plan.verseSlides.at(-1)?.body2).toBe('e18 e19');
+    });
+  });
+
+  it('skips an English verse the translation leaves out instead of leaving a double space', () => {
+    const bibles = new Map([
+      ['nkrv', johnBook(KO_VERSES)],
+      ['esv', johnBook(['v14-en', '', 'v16-en', 'v17-en'])],
+    ]);
+    const plan = buildVerseSlidePlan([ref], ['nkrv', 'esv'], bibles, '', 4);
+    expect(plan.verseSlides[0].body2).toBe('v14-en v16-en v17-en');
+  });
+
   it('throws when no refs are given', () => {
     expect(() => buildVerseSlidePlan([], ['nkrv'], new Map(), '', 1)).toThrow();
   });

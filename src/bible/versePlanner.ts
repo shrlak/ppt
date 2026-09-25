@@ -1,23 +1,32 @@
 // Turns parsed BibleRef entries + loaded translations into the flat slide-data
 // list consumed by pptxBuilder.ts. Ported from kccp-bible-slide's
 // src/app/api/generate/route.ts (steps 1-3 of the POST handler).
-import { getVerseRange } from './bibleData';
+import { getVerseRange, getVerseUnits, lastVerseOf } from './bibleData';
 import type { BibleRef, BookChapters, Verse, VerseSlideData } from './types';
 
 function formatRange(ko: string, en: string, first: Verse, last: Verse) {
-  if (first.chapter === last.chapter && first.verse === last.verse) {
+  const lastVerse = lastVerseOf(last);
+  if (first.chapter === last.chapter && first.verse === lastVerse) {
     return { rangeKo: `${ko} ${first.chapter}:${first.verse}`, rangeEn: `${en} ${first.chapter}:${first.verse}` };
   }
   if (first.chapter === last.chapter) {
     return {
-      rangeKo: `${ko} ${first.chapter}:${first.verse}-${last.verse}`,
-      rangeEn: `${en} ${first.chapter}:${first.verse}-${last.verse}`,
+      rangeKo: `${ko} ${first.chapter}:${first.verse}-${lastVerse}`,
+      rangeEn: `${en} ${first.chapter}:${first.verse}-${lastVerse}`,
     };
   }
   return {
-    rangeKo: `${ko} ${first.chapter}:${first.verse}-${last.chapter}:${last.verse}`,
-    rangeEn: `${en} ${first.chapter}:${first.verse}-${last.chapter}:${last.verse}`,
+    rangeKo: `${ko} ${first.chapter}:${first.verse}-${last.chapter}:${lastVerse}`,
+    rangeEn: `${en} ${first.chapter}:${first.verse}-${last.chapter}:${lastVerse}`,
   };
+}
+
+/** Verse texts joined for one slide; an empty slot (a verse left out of the translation) adds nothing. */
+function joinTexts(verses: Verse[]): string {
+  return verses
+    .map((v) => v.text)
+    .filter(Boolean)
+    .join(' ');
 }
 
 export interface VerseSlidePlan {
@@ -28,6 +37,7 @@ export interface VerseSlidePlan {
 /**
  * Build the slide-data plan for a set of refs.
  * @param translations ordered list of translation ids; translations[0] drives which verses exist (chapter/verse bounds)
+ *   and how they group: a verse it prints together with the next ones ("18-19") is one unit, never split across slides
  * @param bibles loaded translation data, keyed by translation id (see bibleData.loadTranslation)
  */
 export function buildVerseSlidePlan(
@@ -43,7 +53,7 @@ export function buildVerseSlidePlan(
 
   const allVerses: Verse[] = [];
   for (const ref of refs) {
-    allVerses.push(...getVerseRange(primary, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse));
+    allVerses.push(...getVerseUnits(primary, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse));
   }
   if (allVerses.length === 0) throw new Error('해당 구절을 찾을 수 없습니다.');
 
@@ -55,13 +65,14 @@ export function buildVerseSlidePlan(
   const verseSlides: VerseSlideData[] = [];
   const perSlide = Math.max(1, versesPerSlide);
   for (const ref of refs) {
-    const verses = getVerseRange(primary, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse);
+    const verses = getVerseUnits(primary, ref.bookId, ref.startChapter, ref.startVerse, ref.endChapter, ref.endVerse);
     for (let i = 0; i < verses.length; i += perSlide) {
       const group = verses.slice(i, i + perSlide);
       if (group.length === 0) continue;
       const f = group[0];
       const l = group[group.length - 1];
-      const verseLabel = group.length === 1 ? String(f.verse) : `${f.verse}-${l.verse}`;
+      const lastVerse = lastVerseOf(l);
+      const verseLabel = group.length === 1 && f.verse === lastVerse ? String(f.verse) : `${f.verse}-${lastVerse}`;
       const slide: VerseSlideData = {
         title: ref.ko,
         etitle: ref.en,
@@ -69,8 +80,8 @@ export function buildVerseSlidePlan(
         verse: verseLabel,
         rangeKo,
         rangeEn,
-        body: group.map((v) => v.text).join(' '),
-        body1: group.map((v) => v.text).join(' '),
+        body: joinTexts(group),
+        body1: joinTexts(group),
         // The template's verse slide always has {{BODY2}}/{{BODY3}} slots for a
         // 2nd/3rd translation; default them to '' so deselecting a translation
         // clears the placeholder instead of leaving it literal on the slide.
@@ -80,8 +91,8 @@ export function buildVerseSlidePlan(
       for (let t = 1; t < translations.length; t++) {
         const other = bibles.get(translations[t]);
         if (!other) continue;
-        const otherVerses = getVerseRange(other, ref.bookId, f.chapter, f.verse, l.chapter, l.verse);
-        slide[`body${t + 1}`] = otherVerses.map((v) => v.text).join(' ');
+        const otherVerses = getVerseRange(other, ref.bookId, f.chapter, f.verse, l.chapter, lastVerse);
+        slide[`body${t + 1}`] = joinTexts(otherVerses);
       }
       verseSlides.push(slide);
     }
