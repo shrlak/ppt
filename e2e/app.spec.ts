@@ -328,9 +328,9 @@ test('appends image and PPTX uploads after the final Back/End slide in chosen or
   await page.getByTestId('generate-pptx').click();
   const zip = await loadPptx(await downloadPromise, testInfo.outputPath('post-end-order.pptx'));
 
-  expect(slideFileNames(zip)).toHaveLength(34);
-  expect(await zip.file('ppt/slides/slide28.xml')!.async('string')).toContain('<p:pic>');
-  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('주님의 사랑');
+  expect(slideFileNames(zip)).toHaveLength(35);
+  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('<p:pic>');
+  expect(await zip.file('ppt/slides/slide30.xml')!.async('string')).toContain('주님의 사랑');
 });
 
 test('editor view shows slides and all five content editors together', async ({ page }) => {
@@ -1060,6 +1060,27 @@ test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   const allText = (await Promise.all(slides.map((f) => zip.file(f)!.async('string')))).join('\n');
   expect(allText).toContain('요한복음 3:16');
   expect(allText).not.toContain('{{BODY}}');
+});
+
+test('puts the NASB text on the verse slide when NASB is the English translation', async ({ page }, testInfo) => {
+  await page.goto('./?service=sunday');
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  const nasb = page.getByRole('button', { name: 'NASB', exact: true });
+  await nasb.click();
+  await expect(nasb).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'ESV', exact: true })).toHaveAttribute('aria-pressed', 'false');
+
+  await moveFromBibleToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('bible-nasb.pptx'));
+  const allText = (await slideTexts(zip)).join('\n');
+  expect(allText).toContain('so that everyone who believes in Him will not perish');
+  expect(allText).not.toContain('whoever believes in him should not perish'); // ESV
 });
 
 test('generates one combined deck from lyrics, bible verses, and announcements together', async ({

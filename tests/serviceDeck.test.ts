@@ -152,11 +152,18 @@ describe('complete service deck', () => {
     expect(await zip.file('[Content_Types].xml')!.async('string')).not.toContain('/ppt/metadata');
 
     const slides = slideFiles(zip);
-    expect(slides.length).toBeGreaterThanOrEqual(4 + 5 + 1 + 1 + 1 + 1 + 2 + 1 + 1 + 20);
+    expect(slides.length).toBeGreaterThanOrEqual(5 + 5 + 1 + 1 + 1 + 1 + 2 + 1 + 1 + 20);
 
+    // The deck opens on the 기도 준비 slide, then the 빛주사랑 cover.
     const first = await zip.file('ppt/slides/slide1.xml')!.async('string');
-    expect(first).toContain('빛주사랑');
-    const firstLyricsSlide = await zip.file('ppt/slides/slide5.xml')!.async('string');
+    expect(first).toContain('지금은 기도로 예배를 준비하는');
+    expect(first).toContain('기도제목 1');
+    expect(first).toContain('<a:buChar char="●"/>');
+    // No layout logo on this slide: it is plain black, like the design.
+    expect(first).toContain('showMasterSp="0"');
+    const cover = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    expect(cover).toContain('빛주사랑');
+    const firstLyricsSlide = await zip.file('ppt/slides/slide6.xml')!.async('string');
     expect(firstLyricsSlide).toContain('주님의 사랑');
     // The confession song is one slide shorter than the bundled Celebrate the
     // Light block, so the rewritten back deck is 20 slides rather than 21.

@@ -573,7 +573,7 @@ export default function PraiseApp() {
       <header className="header">
         <div className="header-inner">
           <div className="header-brand">
-            <img className="header-logo" src={`${BASE}favicon.svg`} alt="Korean Central Church of Pittsburgh 로고" />
+            <img className="header-logo" src={`${BASE}logo.png`} alt="KCCP 빛주사랑 대학청년부 Media Team 로고" />
             <div className="header-text">
               <h1>찬양집회 PPT Generator</h1>
               <p>콘티를 올리면 한글·영어 제목과 가사가 함께 들어간 찬양집회 PPT를 만들어 드립니다.</p>

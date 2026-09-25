@@ -723,15 +723,16 @@ a.btn {
      rather than as chrome. */
   flex: 1 1 320px;
 }
-/* The mark keeps its own white plate so the church logo never sits directly
-   on the violet ramp. Squared to match the rest of the geometry. */
+/* The Media Team mark brings its own black plate; a hairline edge keeps that
+   square distinct from the dark end of the ramp. Squared to match the rest
+   of the geometry. */
 .header-logo {
   flex: none;
   width: 46px;
   height: 46px;
-  padding: 3px;
+  border: 1px solid var(--chrome-line);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: #000000;
   box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.5);
 }
 .header-text {

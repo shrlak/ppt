@@ -76,6 +76,7 @@ export const TRANSLATIONS = [
   { id: 'saenew', name: '새번역', language: 'ko' },
   { id: 'esv', name: 'ESV', language: 'en' },
   { id: 'niv', name: 'NIV', language: 'en' },
+  { id: 'nasb', name: 'NASB', language: 'en' },
   { id: 'kjv', name: 'KJV', language: 'en' },
 ] as const;
 
