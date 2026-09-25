@@ -554,7 +554,13 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 - 찬양 슬라이드 템플릿: `public/template.pptx` (교체 가능)
 - 기본 곡 라이브러리: `public/library.json` (교체 가능)
 - 성경 슬라이드 템플릿: `public/bible-template.pptx` (교체 가능, 앱에서 세션별 업로드도 지원)
-- 성경 본문 데이터: `public/bible-text/*.json` (번역본별 전체 본문, 실제 사용 시에만 지연 로드)
+- 성경 본문 데이터: `public/bible-text/*.json` (번역본별 전체 본문, 실제 사용 시에만 지연 로드).
+  `chapters[장-1][절-1]`에 그 절의 본문이 들어가므로, 모든 절이 자기 번호 자리에 있어야 합니다.
+  - 한국어(개역개정·새번역·개역한글)는 대한성서공회(bskorea.or.kr) 본문을 절 번호 기준으로 옮긴 것입니다.
+    두 절을 한 절로 묶어 인쇄한 곳(신6:18-19)은 첫 번호 자리에 본문, 나머지 번호 자리에 빈 문자열을 둡니다
+    (`bibleData.getVerseUnits`가 이것을 "18-19" 한 절로 읽습니다). 빠진 절은 번역본이 인쇄한 대로
+    개역개정·개역한글은 "(없음)"이고, 새번역은 앞 절 끝에 "(21절 없음)"이라고 적으므로 그 앞 절에 묶습니다.
+  - 영어(ESV·NIV 2011·NASB 2020·KJV)는 번역본이 본문에서 뺀 절(마17:21 등)을 빈 문자열로 둡니다.
 - 수요예배 고정 슬라이드: `public/wednesday-template.pptx` (11장), 썸네일:
   `public/wednesday-thumbnail.pptx` (16:9 한 장). 실제 수요예배 PPT에서
   `scripts/prepare-wednesday-template.mjs`가 뽑아낸 파일로, 그 주의 문구를 `{{...}}`로 바꾸고
