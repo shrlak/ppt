@@ -19,7 +19,7 @@ export interface ServiceInfo {
 }
 
 export const SERVICES: readonly ServiceInfo[] = [
-  { id: 'sunday', title: '주일예배', english: 'Sunday Service', icon: 'bible', href: `${BASE}index.html?service=sunday` },
+  { id: 'sunday', title: '주일예배 (대청부)', english: 'Sunday Service', icon: 'bible', href: `${BASE}index.html?service=sunday` },
   { id: 'wednesday', title: '수요예배', english: 'Wednesday Service', icon: 'calendar', href: `${BASE}wednesday.html` },
   { id: 'praise', title: '찬양집회', english: 'Praise Night', icon: 'music', href: `${BASE}praise.html` },
   { id: 'retreat', title: '수련회', english: 'Retreat', icon: 'tent', href: `${BASE}retreat.html` },
