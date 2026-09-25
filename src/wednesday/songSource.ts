@@ -22,8 +22,11 @@
 import { cloudLibraryBaseUrl, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { inspectDeckBytes } from '../lib/storage/pptLibrary';
 
-/** How long a search or a download may take before the page stops waiting. */
-const SEARCH_TIMEOUT_MS = 15_000;
+/**
+ * How long a search or a download may take before the page stops waiting. A
+ * search asks several engines and may try a second phrasing, so it gets longer.
+ */
+const SEARCH_TIMEOUT_MS = 25_000;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 
 /** The largest 찬양 PPT the proxy will hand over (it caps this too). */
@@ -57,6 +60,9 @@ export interface SheetImageCandidate {
   title: string;
   /** The page the image was found on, for the card's 출처 link. */
   pageUrl?: string;
+  /** The original's pixel size, when the search reports it. */
+  width?: number;
+  height?: number;
   score?: number;
   decision?: 'auto' | 'review';
 }
@@ -305,6 +311,9 @@ export function hostOf(url: string): string {
 /** How many 악보 사진 the app attaches by itself — a 찬양 악보 is usually 1-2 pages. */
 export const MAX_AUTO_SHEET_IMAGES = 2;
 
+/** How many sure 악보 사진 are tried before giving up on attaching one unasked. */
+export const MAX_AUTO_SHEET_TRIES = 3;
+
 /** How many sure 찬양 PPT hits are tried before falling back to 악보 사진. */
 export const MAX_AUTO_DECK_TRIES = 3;
 
@@ -326,11 +335,17 @@ export type AutoAttachResult =
  * about are downloaded, since most songs are shared as sheet-music images.
  * When nothing is certain, nothing is attached: the hits come back for the
  * operator to choose from, next to the upload button that always works.
+ *
+ * Only pages of one post are put together. Two sure images from two blogs are
+ * two arrangements, often in two keys, not the two pages of one 악보.
  */
 export async function autoAttachSong(title: string, signal?: AbortSignal): Promise<AutoAttachResult> {
   const trimmed = title.trim();
   if (!trimmed) return { kind: 'none', pptCandidates: [], sheetCandidates: [] };
 
+  // Both searches start at once; the 악보 사진 one is simply not read when a
+  // 찬양 PPT turns up. Neither throws.
+  const sheetSearch = searchSheetImages(trimmed, signal);
   const ppt = await searchSongPpt(trimmed, signal);
   // Most hits are a post rather than the file, and a post does not always
   // still have its attachment — so try the next sure hit down, the way a
@@ -347,14 +362,28 @@ export async function autoAttachSong(title: string, signal?: AbortSignal): Promi
     }
   }
 
-  const sheets = await searchSheetImages(trimmed, signal);
+  const sheets = await sheetSearch;
   const confident = sheets.candidates.filter((candidate) => candidate.decision === 'auto');
   const images: LoadedSheetImage[] = [];
-  for (const candidate of confident.slice(0, MAX_AUTO_SHEET_IMAGES)) {
+  // The proxy lists the best post's pages first, in page order. The first sure
+  // image that arrives picks the post; the next sure pages of that same post
+  // follow it, up to the usual 1-2 pages of a 찬양 악보.
+  let post: string | undefined;
+  let tries = 0;
+  for (const candidate of confident) {
+    if (images.length >= MAX_AUTO_SHEET_IMAGES) break;
+    if (images.length === 0) {
+      if (tries >= MAX_AUTO_SHEET_TRIES) break;
+      tries++;
+    } else if (!post || candidate.pageUrl !== post) {
+      continue;
+    }
     try {
       images.push(await downloadSheetImage(candidate, signal));
+      post ??= candidate.pageUrl;
     } catch {
-      // One unreachable image does not spoil the rest.
+      // An unreachable image does not spoil the rest.
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
     }
   }
   if (images.length > 0) {

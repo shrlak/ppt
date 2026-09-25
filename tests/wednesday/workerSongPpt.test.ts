@@ -2,15 +2,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_SONG_PPT_HOSTS,
   MAX_SONG_PPT_BYTES,
+  attachmentKind,
   buildSongPptQueries,
+  extractDaumBlogResults,
+  extractNaverBlogResults,
   extractSongPptResults,
+  fetchSongPptCandidates,
   fetchSongPptFile,
   findSongPptAttachment,
+  hasLegacyPptAttachment,
   isAllowedSongPptUrl,
   isKnownSongPptHost,
   isNeverFileHost,
   isPptxBytes,
+  looksLikeModernPptxUrl,
   looksLikePptxUrl,
+  mobileNaverBlogUrl,
+  rankSongPptHits,
   sanitizeWednesdaySongEntries,
   sanitizeWednesdaySongEntry,
   signSongPptToken,
@@ -191,6 +199,155 @@ describe('search result parsing', () => {
     );
     expect(findSongPptAttachment('<a href="/bbs/download.php?no=44">첨부파일</a>', BLOG)).toBeNull();
   });
+
+  it('takes the .pptx when a post offers the old .ppt beside it', () => {
+    // 티스토리 posts often attach the 4:3 and the wide version, one of them
+    // still in the binary .ppt format no slide can be made from.
+    const legacy = 'https://blog.kakaocdn.net/dna/a/%EC%9D%80%ED%98%9C.ppt?credential=x&knm=tfile.ppt';
+    const modern = 'https://blog.kakaocdn.net/dna/b/%EC%9D%80%ED%98%9C.pptx?credential=x&knm=tfile.pptx';
+    const html = `<a href="${legacy}">은혜.ppt</a><a href="${modern}">은혜.pptx</a>`;
+    expect(findSongPptAttachment(html, TISTORY)).toBe(modern);
+    expect(hasLegacyPptAttachment(html, TISTORY)).toBe(true);
+
+    expect(findSongPptAttachment(`<a href="${legacy}">은혜.ppt</a>`, TISTORY)).toBeNull();
+    expect(findSongPptAttachment('<a href="/bbs/download.php?no=1">은혜.ppt</a>', TISTORY)).toBeNull();
+    expect(looksLikeModernPptxUrl(modern)).toBe(true);
+    expect(looksLikeModernPptxUrl(legacy)).toBe(false);
+  });
+});
+
+describe('블로그 검색 parsing', () => {
+  it('reads each 다음 블로그 result: its post, title and snippet', () => {
+    // Trimmed from a real 다음 블로그 검색 page.
+    const html = `
+      <c-card data-docid="tstory-1_714">
+        <c-header-item data-href="https://colordiary.tistory.com/"><c-frag>colordiary.tistory.com</c-frag></c-header-item>
+        <c-doc-web>
+          <c-title slot="title" data-href="https://colordiary.tistory.com/714">[찬양<b>PPT</b>,가사] <b>나의</b> <b>반석이신</b> <b>하나님</b> <b>PPT</b></c-title>
+          <c-contents-desc slot="contents" data-href="https://colordiary.tistory.com/714">나의 반석이신 하나님 행하신 모든 것…</c-contents-desc>
+        </c-doc-web>
+      </c-card>
+      <c-card>
+        <c-title data-href="https://akkbo.tistory.com/1379">새 찬송가 386장 &lt;만세 반석 열린 곳에&gt;</c-title>
+        <c-contents-desc data-href="https://akkbo.tistory.com/1379">PPT 다운로드 새찬송가 386장_만세 반석 열린 곳에.pptx 3.55MB</c-contents-desc>
+      </c-card>
+      <c-title data-href="https://search.daum.net/search?w=tot&q=x">관련 검색어</c-title>`;
+    const { results, links } = extractDaumBlogResults(html);
+
+    expect(results.map((hit) => hit.url)).toEqual([
+      'https://colordiary.tistory.com/714',
+      'https://akkbo.tistory.com/1379',
+    ]);
+    expect(results[0]).toMatchObject({
+      host: 'colordiary.tistory.com',
+      title: '[찬양PPT,가사] 나의 반석이신 하나님 PPT',
+      known: true,
+      direct: false,
+    });
+    expect(results[0].attachment).toBeUndefined();
+    // The snippet names the attachment, which is what puts a post first.
+    expect(results[1].title).toBe('새 찬송가 386장 <만세 반석 열린 곳에>');
+    expect(results[1].attachment).toBe('pptx');
+    expect(links).toEqual([]);
+  });
+
+  it('reads each 네이버 블로그 result from the links to its post', () => {
+    const post = 'https://blog.naver.com/ihrkja/224319609047';
+    const html = `
+      <a href="https://blog.naver.com/ihrkja">프로필</a>
+      <a class="title" href="${post}" target="_blank"><span>E key 찬양콘티 + 가사 <mark>ppt</mark></span><span class="blind">새 창 열림</span></a>
+      <a class="dsc" href="${post}"><span>보라 하나님 구원을 첨부파일 1_악보틀.png 첨부파일 찬양예배.pptx</span></a>
+      <a href="${post}"><img src="https://search.pstatic.net/common/?src=x" alt=""></a>
+      <a href="https://blog.naver.com/sweetvoice3/223034650901"><span>[악보] 나의 반석이신 하나님 F Major</span></a>`;
+    const { results } = extractNaverBlogResults(html);
+
+    expect(results.map((hit) => hit.url)).toEqual([post, 'https://blog.naver.com/sweetvoice3/223034650901']);
+    expect(results[0].title).toBe('E key 찬양콘티 + 가사 ppt');
+    expect(results[0].attachment).toBe('pptx');
+    expect(results[1].attachment).toBeUndefined();
+  });
+
+  it('knows a .pptx attachment from an old .ppt one in a snippet', () => {
+    expect(attachmentKind('첨부파일 찬양예배.pptx')).toBe('pptx');
+    expect(attachmentKind('은혜(보통).ppt 다운로드')).toBe('ppt');
+    expect(attachmentKind('찬양 PPT, 악보 PPT')).toBeUndefined();
+  });
+
+  it('turns a 네이버 블로그 address into the page the post is really on', () => {
+    expect(mobileNaverBlogUrl('https://blog.naver.com/church/12345')).toBe('https://m.blog.naver.com/church/12345');
+    expect(mobileNaverBlogUrl('https://blog.naver.com/PostView.naver?blogId=church&logNo=12345')).toBe(
+      'https://m.blog.naver.com/church/12345',
+    );
+    expect(mobileNaverBlogUrl('https://blog.naver.com/church?Redirect=Log&logNo=12345')).toBe(
+      'https://m.blog.naver.com/church/12345',
+    );
+    expect(mobileNaverBlogUrl('https://m.blog.naver.com/church/12345')).toBeNull();
+    expect(mobileNaverBlogUrl(TISTORY)).toBeNull();
+  });
+
+  it('tries the posts most likely to hold the song\'s own .pptx first', () => {
+    const hit = (url: string, title: string, extra: object = {}) => ({
+      url,
+      host: new URL(url).hostname,
+      title,
+      direct: false,
+      known: true,
+      ...extra,
+    });
+    const ranked = rankSongPptHits('나의 반석이신 하나님', [
+      hit('https://a.tistory.com/1', '나의 반석이신 하나님 ppt', { attachment: 'ppt' }),
+      hit('https://b.tistory.com/2', '나의 반석이신 하나님 ppt'),
+      hit('https://c.tistory.com/3', '다른 찬양 ppt'),
+      hit('https://blog.naver.com/d/4', '찬양콘티 ppt (나의 반석이신 하나님, 나는 믿네)', { attachment: 'pptx' }),
+      hit('https://blog.naver.com/e/5', '나의 반석이신 하나님 PPT', { attachment: 'pptx' }),
+    ]);
+
+    expect(ranked.map((entry) => [entry.url, entry.decision])).toEqual([
+      // Named .pptx attachment, then a post on a site we know, then a post
+      // whose only file is the old .ppt.
+      ['https://blog.naver.com/e/5', 'auto'],
+      ['https://b.tistory.com/2', 'auto'],
+      ['https://a.tistory.com/1', 'auto'],
+      // A week's 콘티 carries every song of that week, so it is only offered.
+      ['https://blog.naver.com/d/4', 'review'],
+      ['https://c.tistory.com/3', 'review'],
+    ]);
+  });
+});
+
+describe('searching for a song PPT', () => {
+  it('asks the blog searches and the web search together and merges what they find', async () => {
+    const naverPost = 'https://blog.naver.com/church/12345';
+    const asked: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request) => {
+        const url = typeof input === 'string' ? input : input.url;
+        asked.push(new URL(url).hostname);
+        if (url.startsWith('https://search.daum.net/')) {
+          return new Response(`
+            <c-title data-href="https://m.blog.naver.com/church/12345">나의 반석이신 하나님 PPT</c-title>
+            <c-title data-href="https://praise.tistory.com/7">나의 반석이신 하나님 ppt</c-title>`);
+        }
+        if (url.startsWith('https://search.naver.com/')) {
+          return new Response(
+            `<a href="${naverPost}">나의 반석이신 하나님 PPT</a><a href="${naverPost}">첨부파일 반석.pptx</a>`,
+          );
+        }
+        // DuckDuckGo turning the Worker away costs nothing.
+        return new Response('', { status: 403 });
+      }),
+    );
+
+    const { candidates } = await fetchSongPptCandidates('나의 반석이신 하나님', {}, 'secret');
+    expect(asked).toEqual(expect.arrayContaining(['search.daum.net', 'search.naver.com', 'html.duckduckgo.com']));
+    // One post found by both searches is one hit.
+    expect(candidates.map((candidate) => candidate.url)).toEqual([
+      'https://m.blog.naver.com/church/12345',
+      'https://praise.tistory.com/7',
+    ]);
+    expect(candidates.every((candidate) => candidate.decision === 'auto' && candidate.token)).toBe(true);
+  });
 });
 
 describe('search result tokens', () => {
@@ -228,7 +385,7 @@ describe('downloading a song deck', () => {
   it('follows a post to its attachment and returns the bytes', async () => {
     const bytes = pptxBytes();
     const calls = stubFetch((url) => {
-      if (url === BLOG) {
+      if (url === TISTORY) {
         return new Response(`<a href="${FILE}">찬양.pptx</a>`, {
           status: 200,
           headers: { 'Content-Type': 'text/html' },
@@ -237,9 +394,43 @@ describe('downloading a song deck', () => {
       return new Response(bodyOf(bytes), { status: 200 });
     });
 
+    const file = await fetchSongPptFile(TISTORY);
+    expect(file.bytes.length).toBe(bytes.length);
+    expect(calls).toEqual([TISTORY, FILE]);
+  });
+
+  it('reads a 네이버 블로그 post on its mobile page, where the attachment is', async () => {
+    // blog.naver.com/<blog>/<number> is only a frame; the post and its
+    // download link are on m.blog.naver.com.
+    const bytes = pptxBytes();
+    const attachment = 'https://download.blog.naver.com/open/abc/PPT-%EC%9D%80%ED%98%9C.pptx';
+    const calls = stubFetch((url) => {
+      if (url === 'https://m.blog.naver.com/church/12345') {
+        return new Response(`<a href="${attachment}" class="se-file-save-button">PPT-은혜.pptx</a>`, {
+          status: 200,
+        });
+      }
+      if (url === BLOG) return new Response('<iframe id="mainFrame" src="/PostView.naver"></iframe>');
+      return new Response(bodyOf(bytes), { status: 200 });
+    });
+
     const file = await fetchSongPptFile(BLOG);
     expect(file.bytes.length).toBe(bytes.length);
-    expect(calls).toEqual([BLOG, FILE]);
+    expect(calls).toEqual(['https://m.blog.naver.com/church/12345', attachment]);
+  });
+
+  it('says so when the post only has the old .ppt format', async () => {
+    const legacy = 'https://blog.kakaocdn.net/dna/x/%EC%9D%80%ED%98%9C.ppt?credential=a&knm=tfile.ppt';
+    stubFetch(() => new Response(`<figure class="fileblock"><a href="${legacy}">은혜.ppt</a></figure>`));
+    await expect(fetchSongPptFile(TISTORY)).rejects.toThrow('옛 형식(.ppt)');
+
+    // A direct link to one says the same, from the bytes rather than the name.
+    const ole = new Uint8Array(64);
+    ole.set([0xd0, 0xcf, 0x11, 0xe0]);
+    stubFetch(() => new Response(bodyOf(ole), { status: 200 }));
+    await expect(fetchSongPptFile('https://blog.kakaocdn.net/dna/x/song.ppt')).rejects.toThrow(
+      '옛 형식(.ppt)',
+    );
   });
 
   it('downloads from a site it has never seen, and checks what arrives', async () => {

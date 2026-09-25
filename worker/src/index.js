@@ -106,7 +106,6 @@ import {
   fetchSongPptCandidates,
   fetchSongPptFile,
   isAllowedSongPptUrl,
-  rankSongMatches,
   sanitizeWednesdaySongEntries,
   sanitizeWednesdaySongEntry,
   signSongPptToken,
@@ -1574,8 +1573,9 @@ export default {
       } catch (error) {
         console.warn('sheet image search failed:', error instanceof Error ? error.message : error);
       }
-      // Ranked so the browser can attach a confident match without asking.
-      const candidates = rankSongMatches(title, found.candidates);
+      // Already ranked, so the browser can attach a confident match without
+      // asking: the song's title and a page that looks like its 악보.
+      const candidates = found.candidates;
       return jsonResponse(
         {
           title,

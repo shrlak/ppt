@@ -97,6 +97,21 @@ const SEARCH_ENDPOINTS = [
   (query) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
 ];
 
+/**
+ * 블로그 검색, asked alongside the web search above. A 찬양 PPT is nearly
+ * always an attachment on a 티스토리 or 네이버 블로그 post, and these two
+ * answer a server's plain fetch — DuckDuckGo increasingly turns one away —
+ * with each post's title and a snippet that often names its attachment
+ * ("첨부파일 은혜.pptx").
+ */
+export function daumBlogSearchUrl(query) {
+  return `https://search.daum.net/search?w=fusion&col=blog&q=${encodeURIComponent(query)}`;
+}
+
+export function naverBlogSearchUrl(query) {
+  return `https://search.naver.com/search.naver?ssc=tab.blog.all&query=${encodeURIComponent(query)}`;
+}
+
 /** Search phrasings, most specific first. */
 export function buildSongPptQueries(title) {
   const clean = String(title || '').trim();
@@ -207,6 +222,16 @@ export function looksLikePptxUrl(rawUrl) {
   }
 }
 
+/** True when a URL names a .pptx — not the old .ppt, which a slide cannot be made from. */
+export function looksLikeModernPptxUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return /\.pptx(?:$|[?#&])/i.test(parsed.pathname + parsed.search);
+  } catch {
+    return false;
+  }
+}
+
 function decodeEntities(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
@@ -293,6 +318,157 @@ export function extractSongPptResults(html, env = {}, limit = MAX_SONG_PPT_CANDI
   };
 }
 
+/** Every link on a results page with all the text shown for it, in page order. */
+function collectLabelledLinks(html, tagNames) {
+  const labels = new Map();
+  const pattern = new RegExp(`<(${tagNames.join('|')})\\b([^>]*)>([\\s\\S]*?)</\\1>`, 'gi');
+  for (const match of String(html || '').matchAll(pattern)) {
+    const href = match[2].match(/\s(?:data-)?href="([^"]+)"/i);
+    if (!href) continue;
+    const url = decodeEntities(href[1]).split('#')[0];
+    // The search's own highlighting sits inside words: [찬양<b>PPT</b>,가사]
+    const label = decodeEntities(
+      match[3].replace(/<\/?(?:b|mark|strong|em)\b[^>]*>/gi, '').replace(/<[^>]*>/g, ' '),
+    )
+      // 네이버 appends this for screen readers to every result link.
+      .replace(/새 창 열림/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!labels.has(url)) labels.set(url, []);
+    if (label) labels.get(url).push(label);
+  }
+  return labels;
+}
+
+/** What a result's snippet says the post has attached, when it says. */
+export function attachmentKind(text) {
+  const value = String(text || '');
+  if (/\.pptx\b/i.test(value)) return 'pptx';
+  if (/\.ppt\b/i.test(value)) return 'ppt';
+  return undefined;
+}
+
+function blogPostHits(labels, isPost, env, limit) {
+  const results = [];
+  for (const [url, texts] of labels) {
+    if (results.length >= limit) break;
+    if (texts.length === 0 || !isPost(url)) continue;
+    if (!isAllowedSongPptUrl(url, env) || isNeverFileHost(url)) continue;
+    results.push({
+      url,
+      host: new URL(url).hostname.toLowerCase(),
+      title: texts[0].slice(0, 160),
+      direct: looksLikePptxUrl(url),
+      known: isKnownSongPptHost(url, env),
+      attachment: attachmentKind(texts.join(' ')),
+    });
+  }
+  return { results, links: [] };
+}
+
+/**
+ * Pull posts out of a 다음 블로그 검색 page. Each result is a `<c-title>`
+ * carrying the post's address in data-href, and a `<c-contents-desc>`
+ * snippet for the same address.
+ */
+export function extractDaumBlogResults(html, env = {}, limit = MAX_SONG_PPT_CANDIDATES * 2) {
+  const isPost = (url) => {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      if (/(^|\.)(daum\.net|kakao\.com|daumcdn\.net|kakaocdn\.net)$/.test(host)) return false;
+      return parsed.pathname.replace(/\/+$/, '') !== '';
+    } catch {
+      return false;
+    }
+  };
+  return blogPostHits(collectLabelledLinks(html, ['c-title', 'c-contents-desc']), isPost, env, limit);
+}
+
+/** A 네이버 블로그 post's address: blog.naver.com/<blog>/<number>. */
+const NAVER_POST = /^https:\/\/(?:m\.)?blog\.naver\.com\/[A-Za-z0-9_-]+\/\d+(?:[?#]|$)/;
+
+/**
+ * Pull posts out of a 네이버 블로그 검색 page: every link to a post, with the
+ * title and snippet shown for it.
+ */
+export function extractNaverBlogResults(html, env = {}, limit = MAX_SONG_PPT_CANDIDATES * 2) {
+  return blogPostHits(collectLabelledLinks(html, ['a']), (url) => NAVER_POST.test(url), env, limit);
+}
+
+/**
+ * The address a 네이버 블로그 post can actually be read at.
+ *
+ * blog.naver.com/<blog>/<number> is only a frame around the post, so the
+ * attachment is nowhere in it; m.blog.naver.com serves the post itself.
+ * Returns null for anything that is not a 네이버 블로그 post.
+ */
+export function mobileNaverBlogUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname.toLowerCase() !== 'blog.naver.com') return null;
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  const logNo = parsed.searchParams.get('logNo') ?? '';
+  // PostView.naver?blogId=<blog>&logNo=<number>, and <blog>?Redirect=Log&logNo=<number>
+  const blogId = parsed.searchParams.get('blogId') || (segments.length === 1 ? segments[0] : '');
+  if (blogId && /^\d+$/.test(logNo) && /^[A-Za-z0-9_-]+$/.test(blogId)) {
+    return `https://m.blog.naver.com/${blogId}/${logNo}`;
+  }
+  if (segments.length >= 2 && /^[A-Za-z0-9_-]+$/.test(segments[0]) && /^\d+$/.test(segments[1])) {
+    return `https://m.blog.naver.com/${segments[0]}/${segments[1]}`;
+  }
+  return null;
+}
+
+/** One post found by two searches is one hit, whichever address each gave. */
+function postKey(url) {
+  return (mobileNaverBlogUrl(url) ?? url)
+    .replace(/^https:\/\/m\.blog\.naver\.com\//, 'https://blog.naver.com/')
+    .replace(/\/$/, '');
+}
+
+/**
+ * Titles of posts that carry several songs at once — a week's 콘티, a
+ * 모음 — whose PPT would put every one of them on the slides.
+ */
+export const SET_LIST_TITLE = /(콘티|모음|메들리|medley|셋리스트|set\s*list)/i;
+
+/**
+ * Rank 찬양 PPT hits for a song, and mark the ones the app may try unasked.
+ *
+ * Sure hits come first. Among them a link straight to the file beats a post
+ * whose snippet names a .pptx attachment, which beats a post on a 자료실 we
+ * know, which beats the rest — and a post whose only attachment is the old
+ * .ppt format comes last, because a slide cannot be made from one.
+ */
+export function rankSongPptHits(title, hits) {
+  const order = new Map(hits.map((hit, index) => [hit.url, index]));
+  const fileRank = (hit) => {
+    if (hit.direct) return 0;
+    if (hit.attachment === 'pptx') return 1;
+    if (hit.attachment === 'ppt') return 4;
+    return hit.known ? 2 : 3;
+  };
+  return rankSongMatches(title, hits)
+    .map((hit) => ({
+      ...hit,
+      decision: hit.decision === 'auto' && !SET_LIST_TITLE.test(hit.title ?? '') ? 'auto' : 'review',
+    }))
+    .sort((a, b) => {
+      const sure = (hit) => (hit.decision === 'auto' ? 0 : 1);
+      return (
+        sure(a) - sure(b) ||
+        b.score - a.score ||
+        fileRank(a) - fileRank(b) ||
+        order.get(a.url) - order.get(b.url)
+      );
+    });
+}
+
 function absoluteUrl(rawUrl, pageUrl) {
   let url = decodeEntities(rawUrl);
   if (url.startsWith('//')) url = `https:${url}`;
@@ -313,13 +489,17 @@ function absoluteUrl(rawUrl, pageUrl) {
  * attachment even when its address says nothing. Either way the bytes that
  * come back are still checked, so a wrong guess fails loudly rather than
  * putting a stray file on a slide.
+ *
+ * Only a .pptx counts. A post that offers the old .ppt format beside it
+ * (티스토리 often has both, 4:3 and wide) gets its .pptx taken; one that only
+ * has a .ppt has nothing a slide can be made from — see hasLegacyPptAttachment.
  */
 export function findSongPptAttachment(html, pageUrl, env = {}) {
   const text = String(html || '');
   const found = [];
   for (const match of text.matchAll(/(?:href|src|data-src)="([^"]+)"/gi)) {
     const url = absoluteUrl(match[1], pageUrl);
-    if (!url || !looksLikePptxUrl(url)) continue;
+    if (!url || !looksLikeModernPptxUrl(url)) continue;
     if (!isAllowedSongPptUrl(url, env)) continue;
     found.push(url);
   }
@@ -347,7 +527,7 @@ export function findSongPptAttachment(html, pageUrl, env = {}) {
   // No address gave it away; try the one a person would click.
   for (const match of text.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]{0,200}?)<\/a>/gi)) {
     const label = decodeEntities(match[2].replace(/<[^>]*>/g, ' '));
-    if (!/\.pptx?\b/i.test(label)) continue;
+    if (!/\.pptx\b/i.test(label)) continue;
     const url = absoluteUrl(match[1], pageUrl);
     if (!url || !isAllowedSongPptUrl(url, env)) continue;
     return url;
@@ -355,18 +535,36 @@ export function findSongPptAttachment(html, pageUrl, env = {}) {
   return null;
 }
 
+/** True when a post's only PowerPoint attachment is the old binary .ppt. */
+export function hasLegacyPptAttachment(html, pageUrl) {
+  for (const match of String(html || '').matchAll(/(?:href|src|data-src)="([^"]+)"/gi)) {
+    const url = absoluteUrl(match[1], pageUrl);
+    if (url && looksLikePptxUrl(url) && !looksLikeModernPptxUrl(url)) return true;
+  }
+  return false;
+}
+
 /**
  * How well a hit's title matches the song, 0..1.
  *
  * This is what lets the app attach a result by itself: the operator typed the
- * title, so a hit whose own title carries it is the song, and one that shares
- * only a word or two is a guess worth showing rather than acting on.
+ * title, so a hit that names it is the song, and one that shares only a word
+ * or two is a guess worth showing rather than acting on.
+ *
+ * "Names it" means one part of the hit's title — between its brackets,
+ * quotes, dashes and slashes — is the title and nothing else but words every
+ * 찬양 post adds (악보, 가사, ppt, a key). That is what tells 은혜 from
+ * 하나님의 은혜 and 은혜 아니면, which merely contain it. A longer title is
+ * specific enough that containing it still counts, a little lower; a short
+ * one that is only contained is a guess.
  */
 export function scoreSongMatch(title, text) {
   const wanted = normalizeForMatch(title);
   const found = normalizeForMatch(text);
   if (!wanted || !found) return 0;
-  if (found.includes(wanted)) return 1;
+  if (namesTitle(wanted, text)) return 1;
+  const short = wanted.length <= SHORT_TITLE_LENGTH;
+  if (found.includes(wanted)) return short ? UNSURE_SCORE : CONTAINS_SCORE;
 
   // Fall back to how much of the title's words the hit carries, so
   // "나의 반석이신 하나님 (D키)" still scores well against the plain title.
@@ -376,7 +574,62 @@ export function scoreSongMatch(title, text) {
     .filter((word) => word.length > 0);
   if (words.length === 0) return 0;
   const hits = words.filter((word) => found.includes(word)).length;
-  return hits / words.length;
+  return short ? Math.min(hits / words.length, UNSURE_SCORE) : Math.min(hits / words.length, CONTAINS_SCORE);
+}
+
+/** Titles this short (in letters, spaces aside) must be named, not just contained. */
+const SHORT_TITLE_LENGTH = 4;
+/** A longer title the hit contains inside a longer phrase: still the song. */
+const CONTAINS_SCORE = 0.9;
+/** A short title the hit merely contains: worth showing, not attaching. */
+const UNSURE_SCORE = 0.5;
+
+/**
+ * Words a 찬양 post puts around a song's name — none of them make the name a
+ * different song's. A key (C, Bb, Am) counts too; see isPostWords.
+ */
+const POST_WORDS = [
+  '찬양', '찬송가', '복음성가', 'ccm', 'ppt', '피피티', '악보', '가사', '코드', '무배경',
+  '다운로드', '다운', '공유', '추천', '듣기', '키', 'key', 'ver', '버전',
+];
+
+/**
+ * True when `rest` (normalized) is nothing but POST_WORDS and keys, run
+ * together. Walked position by position rather than with one big regex, whose
+ * overlapping alternatives could backtrack for ever on a crafted title.
+ */
+function isPostWords(rest) {
+  const reachable = new Array(rest.length + 1).fill(false);
+  reachable[0] = true;
+  for (let i = 0; i < rest.length; i++) {
+    if (!reachable[i]) continue;
+    for (const word of POST_WORDS) {
+      if (rest.startsWith(word, i)) reachable[i + word.length] = true;
+    }
+    if ('abcdefg'.includes(rest[i])) {
+      reachable[i + 1] = true;
+      if (rest[i + 1] === 'm') reachable[i + 2] = true;
+    }
+  }
+  return reachable[rest.length];
+}
+
+/**
+ * True when some part of `text` — split at its brackets, quotes, dashes and
+ * slashes — is the song's name (`wanted`, normalized) with nothing but
+ * POST_WORDS around it.
+ */
+function namesTitle(wanted, text) {
+  const parts = String(text || '')
+    .toLowerCase()
+    .split(/[^\s0-9a-z\uac00-\ud7a3#♭♯]+/)
+    .map(normalizeForMatch);
+  return parts.some((part) => {
+    for (let at = part.indexOf(wanted); at !== -1; at = part.indexOf(wanted, at + 1)) {
+      if (isPostWords(part.slice(0, at)) && isPostWords(part.slice(at + wanted.length))) return true;
+    }
+    return false;
+  });
 }
 
 function normalizeForMatch(value) {
@@ -395,18 +648,28 @@ export function rankSongMatches(title, hits) {
       const score = Math.max(
         scoreSongMatch(title, hit.title ?? ''),
         // The file name is often the only place the title appears in full.
-        scoreSongMatch(title, decodeURIComponent(fileNameOf(hit.url ?? ''))),
+        scoreSongMatch(title, fileNameOf(hit.url ?? '')),
       );
       return { ...hit, score, decision: score >= AUTO_ATTACH_SCORE ? 'auto' : 'review' };
     })
     .sort((a, b) => b.score - a.score);
 }
 
+/**
+ * A URL's file name, decoded when it is UTF-8. 네이버's older files are
+ * named in EUC-KR (`%B3%AA…`), which decodeURIComponent throws on.
+ */
 function fileNameOf(rawUrl) {
+  let name;
   try {
-    return new URL(rawUrl).pathname.split('/').filter(Boolean).pop() ?? '';
+    name = new URL(rawUrl).pathname.split('/').filter(Boolean).pop() ?? '';
   } catch {
     return '';
+  }
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
   }
 }
 
@@ -527,34 +790,65 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
   const queries = buildSongPptQueries(title);
   if (queries.length === 0) return { candidates: [], links: [] };
 
-  const results = [];
-  const links = [];
-  for (const query of queries) {
-    for (const endpoint of SEARCH_ENDPOINTS) {
+  // Each search is its own list of addresses, tried in order until one
+  // answers with hits; the searches themselves run side by side, so one
+  // engine being slow or turning the Worker away costs nothing.
+  const searches = [
+    { urls: [daumBlogSearchUrl], extract: extractDaumBlogResults },
+    { urls: [naverBlogSearchUrl], extract: extractNaverBlogResults },
+    { urls: SEARCH_ENDPOINTS, extract: extractSongPptResults },
+  ];
+  const runSearch = async (search, query) => {
+    for (const url of search.urls) {
       try {
-        const response = await fetchWithTimeout(endpoint(query));
+        const response = await fetchWithTimeout(url(query));
         if (!response.ok) continue;
-        const found = extractSongPptResults(await readBoundedText(response), env);
-        for (const hit of found.results) {
-          if (!results.some((existing) => existing.url === hit.url)) results.push(hit);
-        }
-        for (const link of found.links) {
-          if (!links.some((existing) => existing.url === link.url)) links.push(link);
-        }
-        if (results.length > 0) break;
+        const found = search.extract(await readBoundedText(response), env);
+        if (found.results.length > 0 || found.links.length > 0) return found;
       } catch {
         // A search engine being unreachable just means trying the next one.
+      }
+    }
+    return { results: [], links: [] };
+  };
+
+  const results = [];
+  const links = [];
+  const seen = new Map();
+  for (const query of queries) {
+    for (const found of await Promise.all(searches.map((search) => runSearch(search, query)))) {
+      for (const hit of found.results) {
+        const key = postKey(hit.url);
+        const existing = seen.get(key);
+        if (existing) {
+          // The other search may have seen the snippet that names the file.
+          existing.attachment ??= hit.attachment;
+          continue;
+        }
+        seen.set(key, hit);
+        results.push(hit);
+      }
+      for (const link of found.links) {
+        if (!links.some((existing) => existing.url === link.url)) links.push(link);
       }
     }
     if (results.length >= MAX_SONG_PPT_CANDIDATES) break;
   }
 
   const candidates = [];
-  for (const hit of rankSongMatches(title, results.slice(0, MAX_SONG_PPT_CANDIDATES))) {
+  for (const hit of rankSongPptHits(title, results).slice(0, MAX_SONG_PPT_CANDIDATES)) {
     candidates.push({ ...hit, token: await signSongPptToken(hit.url, secret) });
   }
   return { candidates, links: links.slice(0, MAX_SONG_PPT_CANDIDATES) };
 }
+
+/** True when these bytes are an OLE compound file — the old binary .ppt. */
+function isLegacyOfficeBytes(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0;
+}
+
+const LEGACY_PPT_MESSAGE =
+  '이 게시글의 PPT는 옛 형식(.ppt)이라 넣을 수 없습니다. PowerPoint에서 .pptx로 저장해 직접 올려 주세요.';
 
 /**
  * Download one 찬양 PPT. A page URL is followed one step to its .pptx
@@ -568,14 +862,19 @@ export async function fetchSongPptFile(rawUrl, env = {}) {
 
   let fileUrl = rawUrl;
   if (!looksLikePptxUrl(fileUrl)) {
-    const page = await fetchWithTimeout(fileUrl);
+    // A 네이버 블로그 address is a frame; the post, and its attachment, are
+    // on the mobile page.
+    const pageUrl = mobileNaverBlogUrl(fileUrl) ?? fileUrl;
+    const page = await fetchWithTimeout(pageUrl);
     if (!page.ok) throw new Error(`게시글을 열지 못했습니다 (HTTP ${page.status}).`);
-    const finalPageUrl = page.url || fileUrl;
+    const finalPageUrl = page.url || pageUrl;
     if (!isAllowedSongPptUrl(finalPageUrl, env)) {
       throw new Error('허용되지 않은 주소로 이동했습니다.');
     }
-    const attachment = findSongPptAttachment(await readBoundedText(page), finalPageUrl, env);
+    const html = await readBoundedText(page);
+    const attachment = findSongPptAttachment(html, finalPageUrl, env);
     if (!attachment) {
+      if (hasLegacyPptAttachment(html, finalPageUrl)) throw new Error(LEGACY_PPT_MESSAGE);
       throw new Error('이 게시글에서 PPT 첨부를 찾지 못했습니다. 파일을 직접 올려 주세요.');
     }
     fileUrl = attachment;
@@ -595,6 +894,7 @@ export async function fetchSongPptFile(rawUrl, env = {}) {
 
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length > MAX_SONG_PPT_BYTES) throw new Error('찬양 PPT가 너무 큽니다 (25MB 초과).');
+  if (isLegacyOfficeBytes(bytes)) throw new Error(LEGACY_PPT_MESSAGE);
   if (!isPptxBytes(bytes)) throw new Error('받은 파일이 PowerPoint(.pptx) 파일이 아닙니다.');
 
   return { bytes, url: finalUrl };
