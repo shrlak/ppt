@@ -1084,7 +1084,7 @@ test('puts the NASB text on the verse slide when NASB is the English translation
 });
 
 test('shows a verse 개역개정 prints as "18-19" on one slide beside both English verses', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
 
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('bible-verse-input').fill('신6:17-20');
