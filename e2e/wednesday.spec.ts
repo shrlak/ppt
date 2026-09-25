@@ -422,9 +422,9 @@ test.describe('수요예배 generator', () => {
   });
 
   test('links both generators to each other', async ({ page }) => {
-    await page.getByTestId('wednesday-to-sunday').click();
+    await page.getByTestId('nav-sunday').click();
     await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
-    await page.getByTestId('wednesday-link').click();
+    await page.getByTestId('nav-wednesday').click();
     await expect(page.getByTestId('wednesday-panel-service')).toBeVisible();
   });
 });

@@ -433,21 +433,22 @@ test('editor view keeps balanced gutters and stacks before the editing column ge
 
   const wide = await page.evaluate(() => {
     const app = document.querySelector<HTMLElement>('.app')!.getBoundingClientRect();
-    const header = document.querySelector<HTMLElement>('.header-inner')!.getBoundingClientRect();
+    const workspace = document.querySelector<HTMLElement>('.shell-main')!.getBoundingClientRect();
+    const rail = document.querySelector<HTMLElement>('.shell-nav')!.getBoundingClientRect();
     const overview = document.querySelector<HTMLElement>('.slide-overview')!.getBoundingClientRect();
     const main = document.querySelector<HTMLElement>('#main-content')!.getBoundingClientRect();
     return {
-      appLeft: app.left,
-      appRight: app.right,
-      headerLeft: header.left,
-      headerRight: header.right,
+      leftGutter: app.left - workspace.left,
+      rightGutter: workspace.right - app.right,
+      railWidth: rail.width,
       overviewWidth: overview.width,
       mainWidth: main.width,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
-  expect(Math.abs(wide.appLeft - wide.headerLeft)).toBeLessThan(1);
-  expect(Math.abs(wide.appRight - wide.headerRight)).toBeLessThan(1);
+  // The editing view folds the rail down to its icons to make the room.
+  expect(wide.railWidth).toBeLessThan(100);
+  expect(Math.abs(wide.leftGutter - wide.rightGutter)).toBeLessThan(1);
   expect(wide.overviewWidth).toBe(312);
   expect(wide.mainWidth).toBeGreaterThanOrEqual(900);
   expect(wide.overflow).toBe(0);
@@ -480,6 +481,23 @@ test('jumps directly between steps via the progress tabs', async ({ page }) => {
   // And back to the first step.
   await page.getByTestId('wizard-tab-lyrics').click();
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+});
+
+test('keeps the way to the next step in view however long the step gets', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('./?service=sunday');
+  for (let i = 0; i < 4; i++) await page.getByTestId('add-song').click();
+  await expect(page.getByTestId('song-card')).toHaveCount(4);
+
+  // The step now runs well past the window, and 다음 still rides its foot.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+  expect(pageHeight).toBeGreaterThan(720 * 2);
+  await expect(page.getByTestId('wizard-next-lyrics')).toBeInViewport();
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await expect(page.getByTestId('wizard-panel-bible')).toBeVisible();
+  await expect(page.getByTestId('wizard-back-bible')).toBeInViewport();
 });
 
 test('admin panel replaces the front deck and restores the default', async ({ page }) => {
@@ -569,7 +587,7 @@ test('PPT library saves a generated deck with its source files and can re-downlo
 
   await page.getByTestId('wizard-tab-download').click();
   await page.getByTestId('save-to-library').click();
-  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible();
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible({ timeout: PARSE_TIMEOUT });
 
   await page.getByTestId('library-open').click();
   const entry = page.getByTestId('library-entry');
@@ -606,15 +624,16 @@ test('saving the same file name twice overwrites the library entry instead of ad
   await moveFromLyricsToDownload(page);
 
   // The file name comes from the conti date, so a second save reuses it.
+  // A save builds and stores the whole deck, so its toast gets the same budget as a parse.
   await page.getByTestId('save-to-library').click();
-  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible();
+  await expect(page.getByText(/라이브러리에 저장했습니다/)).toBeVisible({ timeout: PARSE_TIMEOUT });
 
   await page.getByTestId('library-open').click();
   const savedName = (await page.getByTestId('library-entry').locator('.library-entry-name').innerText()).trim();
   await page.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
 
   await page.getByTestId('save-to-library').click();
-  await expect(page.getByText(/같은 이름의 기존 PPT를 덮어쓰고/)).toBeVisible();
+  await expect(page.getByText(/같은 이름의 기존 PPT를 덮어쓰고/)).toBeVisible({ timeout: PARSE_TIMEOUT });
 
   await page.getByTestId('library-open').click();
   await expect(page.getByTestId('library-entry')).toHaveCount(1);

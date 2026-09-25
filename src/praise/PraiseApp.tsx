@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon, { type IconName } from '../components/Icon';
 import ToastHost from '../components/ToastHost';
+import AppShell, { StepNav } from '../components/AppShell';
 import AutoSaveIndicator from '../components/AutoSaveIndicator';
 import LyricsGenerator from '../components/LyricsGenerator';
 import AdditionalFilesSection from '../components/AdditionalFilesSection';
@@ -546,365 +547,302 @@ export default function PraiseApp() {
   const setPlacement = (fileId: string, placement: AdditionalPlacement) =>
     setPlacements((current) => [...current.filter((item) => item.fileId !== fileId), { fileId, placement }]);
 
-  const stepNav = (index: number) => (
-    <nav className="wizard-nav" aria-label="단계 이동">
-      {index > 0 ? (
-        <button type="button" className="btn" onClick={() => setStep(index - 1)}>
-          <Icon name="back" />
-          이전
-        </button>
-      ) : (
-        <span />
-      )}
-      {index < STEPS.length - 1 && (
+  return (
+    <AppShell
+      service="praise"
+      steps={STEPS}
+      activeStep={step}
+      onStepSelect={setStep}
+      testIdPrefix="praise"
+      tools={
         <button
           type="button"
-          className="btn btn-primary"
-          data-testid={`praise-next-${STEPS[index].id}`}
-          onClick={() => setStep(index + 1)}
+          className="btn library-open"
+          data-testid="praise-library-open"
+          onClick={() => setLibraryOpen(true)}
         >
-          다음: {STEPS[index + 1].label}
-          <Icon name="next" />
+          <Icon name="library" />
+          <span className="btn-label">라이브러리</span>
         </button>
-      )}
-    </nav>
-  );
-
-  return (
-    <>
-      <a className="skip-link" href="#main-content">
-        본문으로 건너뛰기
-      </a>
-      <header className="header">
-        <div className="header-inner">
-          <div className="header-brand">
-            <img className="header-logo" src={`${BASE}logo.png`} alt="KCCP 빛주사랑 대학청년부 Media Team 로고" />
-            <div className="header-text">
-              <h1>찬양집회 PPT Generator</h1>
-              <p>콘티를 올리면 한글·영어 제목과 가사가 함께 들어간 찬양집회 PPT를 만들어 드립니다.</p>
-            </div>
-          </div>
-          <nav className="header-actions" aria-label="도구">
-            <a className="btn" href={`${BASE}index.html`} data-testid="praise-to-home">
-              <Icon name="steps" />
-              <span className="btn-label">예배 선택</span>
-            </a>
-            <button
-              type="button"
-              className="btn library-open"
-              data-testid="praise-library-open"
-              onClick={() => setLibraryOpen(true)}
-            >
-              <Icon name="library" />
-              <span className="btn-label">라이브러리</span>
-            </button>
-          </nav>
-        </div>
-      </header>
-
+      }
+    >
       {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} onEdit={openFromLibrary} />}
 
-      <div className="app">
-        <ol
-          className="wizard-progress"
-          aria-label="찬양집회 PPT 생성 단계"
-          style={{ '--active-index': step } as React.CSSProperties}
-        >
-          {STEPS.map((item, index) => (
-            <li
-              key={item.id}
-              className={`wizard-step${index === step ? ' current' : ''}${index < step ? ' complete' : ''}`}
-            >
-              <button
-                type="button"
-                className="wizard-step-button"
-                data-testid={`praise-tab-${item.id}`}
-                aria-current={index === step ? 'step' : undefined}
-                onClick={() => setStep(index)}
-              >
-                <span className="wizard-step-dot">{index < step ? <Icon name="check" /> : index + 1}</span>
-                <span className="wizard-step-label">{item.label}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
+      <div className="app-body">
+        <main id="main-content">
+          <section
+            className={`wizard-panel${step === 0 ? ' active' : ''}`}
+            aria-hidden={step !== 0}
+            data-testid="praise-panel-songs"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">1 / 4</p>
+              <h2>찬양</h2>
+              <p>찬양집회 콘티를 올리고 각 곡의 한글 가사와 순서를 확인하세요. 주일예배와 같은 방법으로 읽습니다.</p>
+            </div>
+            <LyricsGenerator
+              service="praise"
+              onSongsChange={handleSongsChange}
+              onDateDetected={handleDateDetected}
+              onContiFileLoaded={setContiFile}
+              restoreVersion={restore.version}
+              restoreSongs={restore.songs}
+              restoreConti={restore.conti}
+              replaceSong={replaceSong}
+              preferredSongs={preferredSongs}
+              onContiDropAnywhere={showSongsStep}
+            />
+            <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="praise" />
+          </section>
 
-        <div className="app-body">
-          <main id="main-content">
-            <section
-              className={`wizard-panel${step === 0 ? ' active' : ''}`}
-              aria-hidden={step !== 0}
-              data-testid="praise-panel-songs"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">1 / 4</p>
-                <h2>찬양</h2>
-                <p>찬양집회 콘티를 올리고 각 곡의 한글 가사와 순서를 확인하세요. 주일예배와 같은 방법으로 읽습니다.</p>
-              </div>
-              <LyricsGenerator
-                service="praise"
-                onSongsChange={handleSongsChange}
-                onDateDetected={handleDateDetected}
-                onContiFileLoaded={setContiFile}
-                restoreVersion={restore.version}
-                restoreSongs={restore.songs}
-                restoreConti={restore.conti}
-                replaceSong={replaceSong}
-                preferredSongs={preferredSongs}
-                onContiDropAnywhere={showSongsStep}
-              />
-              {stepNav(0)}
-            </section>
+          <section
+            className={`wizard-panel${step === 1 ? ' active' : ''}`}
+            aria-hidden={step !== 1}
+            data-testid="praise-panel-english"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">2 / 4</p>
+              <h2>영어 가사</h2>
+              <p>
+                한글 슬라이드마다 아래에 들어갈 영어 가사입니다. 작년 찬양집회에서 부른 곡과 저장한 곡은 자동으로
+                채워지고, 여기서 넣은 영어는 한글 가사와 함께 자동으로 저장됩니다.
+              </p>
+            </div>
+            {songs.length > 0 && (
+              <p className={`banner ${missingEnglish > 0 ? 'banner-warn' : 'banner-notice'}`} data-testid="praise-english-summary">
+                <Icon name={missingEnglish > 0 ? 'warning' : 'check'} />
+                <span className="banner-text">
+                  {missingEnglish > 0
+                    ? `영어 가사가 없는 한글 슬라이드가 ${missingEnglish}장 있습니다. 비워 두면 한글만 나옵니다.`
+                    : '모든 한글 슬라이드에 영어 가사가 있습니다.'}
+                </span>
+              </p>
+            )}
+            <PraiseEnglishStep
+              songs={songs}
+              extras={extras}
+              library={englishLibrary}
+              onExtrasChange={updateExtras}
+              onLoadFromLibrary={loadSongFromLibrary}
+              onSaveToLibrary={(song) => rememberEnglish([song])}
+            />
+            <StepNav steps={STEPS} index={1} onMove={setStep} testIdPrefix="praise" />
+          </section>
 
-            <section
-              className={`wizard-panel${step === 1 ? ' active' : ''}`}
-              aria-hidden={step !== 1}
-              data-testid="praise-panel-english"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">2 / 4</p>
-                <h2>영어 가사</h2>
-                <p>
-                  한글 슬라이드마다 아래에 들어갈 영어 가사입니다. 작년 찬양집회에서 부른 곡과 저장한 곡은 자동으로
-                  채워지고, 여기서 넣은 영어는 한글 가사와 함께 자동으로 저장됩니다.
+          <section
+            className={`wizard-panel${step === 2 ? ' active' : ''}`}
+            aria-hidden={step !== 2}
+            data-testid="praise-panel-additional"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">3 / 4</p>
+              <h2>추가 자료</h2>
+              <p>설교 PPT, 말씀·기도제목 슬라이드 등을 올리고 어느 곡 뒤에 넣을지 고르세요. 없으면 건너뛰어도 됩니다.</p>
+            </div>
+            <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
+            {additionalFiles.length > 0 && (
+              <section className="card praise-placements" data-testid="praise-placements">
+                <h3>넣을 위치</h3>
+                <ul>
+                  {additionalFiles.map((file) => (
+                    <li key={file.id}>
+                      <span className="praise-placement-name">{file.name}</span>
+                      <select
+                        aria-label={`${file.name} 넣을 위치`}
+                        value={placementValue(placementFor(file.id))}
+                        data-testid="praise-placement-select"
+                        onChange={(event) => setPlacement(file.id, placementFromValue(event.target.value))}
+                      >
+                        <option value="start">표지 바로 뒤</option>
+                        {songs.map((song, index) => (
+                          <option key={song.id} value={`song:${song.id}`}>
+                            {index + 1}. {song.title || '(제목 없음)'} 뒤
+                          </option>
+                        ))}
+                        <option value="end">맨 뒤</option>
+                      </select>
+                    </li>
+                  ))}
+                </ul>
+                <p className="field-hint">
+                  곡 뒤에 넣은 자료는 그 곡의 기도 슬라이드보다 앞에 들어갑니다 (예: 찬양 → 설교 → 기도).
                 </p>
-              </div>
-              {songs.length > 0 && (
-                <p className={`banner ${missingEnglish > 0 ? 'banner-warn' : 'banner-notice'}`} data-testid="praise-english-summary">
-                  <Icon name={missingEnglish > 0 ? 'warning' : 'check'} />
-                  <span className="banner-text">
-                    {missingEnglish > 0
-                      ? `영어 가사가 없는 한글 슬라이드가 ${missingEnglish}장 있습니다. 비워 두면 한글만 나옵니다.`
-                      : '모든 한글 슬라이드에 영어 가사가 있습니다.'}
-                  </span>
-                </p>
-              )}
-              <PraiseEnglishStep
-                songs={songs}
-                extras={extras}
-                library={englishLibrary}
-                onExtrasChange={updateExtras}
-                onLoadFromLibrary={loadSongFromLibrary}
-                onSaveToLibrary={(song) => rememberEnglish([song])}
-              />
-              {stepNav(1)}
-            </section>
-
-            <section
-              className={`wizard-panel${step === 2 ? ' active' : ''}`}
-              aria-hidden={step !== 2}
-              data-testid="praise-panel-additional"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">3 / 4</p>
-                <h2>추가 자료</h2>
-                <p>설교 PPT, 말씀·기도제목 슬라이드 등을 올리고 어느 곡 뒤에 넣을지 고르세요. 없으면 건너뛰어도 됩니다.</p>
-              </div>
-              <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
-              {additionalFiles.length > 0 && (
-                <section className="card praise-placements" data-testid="praise-placements">
-                  <h3>넣을 위치</h3>
-                  <ul>
-                    {additionalFiles.map((file) => (
-                      <li key={file.id}>
-                        <span className="praise-placement-name">{file.name}</span>
-                        <select
-                          aria-label={`${file.name} 넣을 위치`}
-                          value={placementValue(placementFor(file.id))}
-                          data-testid="praise-placement-select"
-                          onChange={(event) => setPlacement(file.id, placementFromValue(event.target.value))}
-                        >
-                          <option value="start">표지 바로 뒤</option>
-                          {songs.map((song, index) => (
-                            <option key={song.id} value={`song:${song.id}`}>
-                              {index + 1}. {song.title || '(제목 없음)'} 뒤
-                            </option>
-                          ))}
-                          <option value="end">맨 뒤</option>
-                        </select>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="field-hint">
-                    곡 뒤에 넣은 자료는 그 곡의 기도 슬라이드보다 앞에 들어갑니다 (예: 찬양 → 설교 → 기도).
-                  </p>
-                </section>
-              )}
-              {stepNav(2)}
-            </section>
-
-            <section
-              className={`wizard-panel${step === 3 ? ' active' : ''}`}
-              aria-hidden={step !== 3}
-              data-testid="praise-panel-download"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">4 / 4</p>
-                <h2>표지 및 다운로드</h2>
-                <p>찬양집회 PPT는 라이브러리에 자동 저장되고, 매주 자동 삭제에서 빠져 직접 지울 때까지 남습니다.</p>
-              </div>
-
-              <section className="card download-card">
-                <div className="praise-cover-row">
-                  <label className="field">
-                    <span className="field-label">찬양집회 날짜</span>
-                    <input
-                      type="date"
-                      value={date}
-                      data-testid="praise-date"
-                      onChange={(event) => setDate(event.target.value)}
-                    />
-                    <span className="field-hint">
-                      {coverImage
-                        ? '새 표지 이미지를 쓰므로 날짜는 표지에 따로 쓰지 않습니다.'
-                        : `표지에 ${formatCoverDate(date) || 'MM/DD/YYYY'} 로 들어갑니다.`}
-                    </span>
-                  </label>
-                  <div className="field">
-                    <span className="field-label">표지 이미지</span>
-                    <div className="praise-cover-actions">
-                      <label className="btn">
-                        <Icon name="upload" />
-                        {coverImage ? '다른 이미지로 바꾸기' : '새 표지 이미지 올리기'}
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg"
-                          className="visually-hidden"
-                          data-testid="praise-cover-input"
-                          onChange={(event) => {
-                            void pickCover(event.target.files?.[0]);
-                            event.target.value = '';
-                          }}
-                        />
-                      </label>
-                      {coverImage && (
-                        <button type="button" className="btn btn-ghost" onClick={() => setCoverImage(null)}>
-                          작년 표지로 되돌리기
-                        </button>
-                      )}
-                    </div>
-                    <span className="field-hint">
-                      {coverImage
-                        ? `${coverImage.name}을(를) 표지로 씁니다.`
-                        : '비워 두면 작년 EM&KM Praise Night 표지에 올해 날짜를 넣어 씁니다.'}
-                    </span>
-                  </div>
-                </div>
-
-                <label className="field">
-                  <span className="field-label">파일명</span>
-                  <input
-                    type="text"
-                    value={fileName}
-                    data-testid="praise-file-name"
-                    onChange={(event) => setFileNameOverride(event.target.value)}
-                  />
-                </label>
-
-                <dl className="wednesday-summary" data-testid="praise-summary">
-                  <div>
-                    <dt>찬양</dt>
-                    <dd>{songs.length}곡</dd>
-                  </div>
-                  <div>
-                    <dt>영어 없는 슬라이드</dt>
-                    <dd>{missingEnglish}장</dd>
-                  </div>
-                  <div>
-                    <dt>기도 · 추가 자료</dt>
-                    <dd>
-                      기도 {prayerCount}장 · 자료 {additionalFiles.length}개
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>전체 슬라이드</dt>
-                    <dd data-testid="praise-slide-count">{slideCount}장</dd>
-                  </div>
-                </dl>
-
-                {warnings.length > 0 && (
-                  <ul className="wednesday-warnings">
-                    {warnings.map((warning) => (
-                      <li key={warning} className="banner banner-notice">
-                        <Icon name="info" />
-                        <span className="banner-text">{warning}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                <AutoSaveIndicator status={autoSaveStatus} testId="praise-auto-save-status" />
-
-                <div className="download-actions">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    data-testid="praise-reset"
-                    onClick={startOver}
-                  >
-                    <Icon name="trash" />
-                    새 찬양집회 시작
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={generating}
-                    data-testid="praise-preview"
-                    onClick={() => void renderPreview()}
-                  >
-                    <Icon name="slide" />
-                    미리보기
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-download"
-                    disabled={generating}
-                    data-testid="praise-download"
-                    onClick={() => void downloadDeck()}
-                  >
-                    <Icon name="download" />
-                    {generating ? '만드는 중…' : '찬양집회 PPT 다운로드'}
-                  </button>
-                </div>
               </section>
+            )}
+            <StepNav steps={STEPS} index={2} onMove={setStep} testIdPrefix="praise" />
+          </section>
 
-              {preview && (
-                <section className="card praise-preview" data-testid="praise-preview-grid">
-                  <h3>미리보기 {preview.length}장</h3>
-                  <ol>
-                    {preview.map((slide, index) => (
-                      <li key={index}>
-                        <SlideThumbnail slide={slide} width={220} />
-                        <span className="praise-preview-label">
-                          {index + 1}. {overview?.[index]?.label ?? ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
+          <section
+            className={`wizard-panel${step === 3 ? ' active' : ''}`}
+            aria-hidden={step !== 3}
+            data-testid="praise-panel-download"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">4 / 4</p>
+              <h2>표지 및 다운로드</h2>
+              <p>찬양집회 PPT는 라이브러리에 자동 저장되고, 매주 자동 삭제에서 빠져 직접 지울 때까지 남습니다.</p>
+            </div>
+
+            <section className="card download-card">
+              <div className="praise-cover-row">
+                <label className="field">
+                  <span className="field-label">찬양집회 날짜</span>
+                  <input
+                    type="date"
+                    value={date}
+                    data-testid="praise-date"
+                    onChange={(event) => setDate(event.target.value)}
+                  />
+                  <span className="field-hint">
+                    {coverImage
+                      ? '새 표지 이미지를 쓰므로 날짜는 표지에 따로 쓰지 않습니다.'
+                      : `표지에 ${formatCoverDate(date) || 'MM/DD/YYYY'} 로 들어갑니다.`}
+                  </span>
+                </label>
+                <div className="field">
+                  <span className="field-label">표지 이미지</span>
+                  <div className="praise-cover-actions">
+                    <label className="btn">
+                      <Icon name="upload" />
+                      {coverImage ? '다른 이미지로 바꾸기' : '새 표지 이미지 올리기'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        className="visually-hidden"
+                        data-testid="praise-cover-input"
+                        onChange={(event) => {
+                          void pickCover(event.target.files?.[0]);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                    {coverImage && (
+                      <button type="button" className="btn btn-ghost" onClick={() => setCoverImage(null)}>
+                        작년 표지로 되돌리기
+                      </button>
+                    )}
+                  </div>
+                  <span className="field-hint">
+                    {coverImage
+                      ? `${coverImage.name}을(를) 표지로 씁니다.`
+                      : '비워 두면 작년 EM&KM Praise Night 표지에 올해 날짜를 넣어 씁니다.'}
+                  </span>
+                </div>
+              </div>
+
+              <label className="field">
+                <span className="field-label">파일명</span>
+                <input
+                  type="text"
+                  value={fileName}
+                  data-testid="praise-file-name"
+                  onChange={(event) => setFileNameOverride(event.target.value)}
+                />
+              </label>
+
+              <dl className="wednesday-summary" data-testid="praise-summary">
+                <div>
+                  <dt>찬양</dt>
+                  <dd>{songs.length}곡</dd>
+                </div>
+                <div>
+                  <dt>영어 없는 슬라이드</dt>
+                  <dd>{missingEnglish}장</dd>
+                </div>
+                <div>
+                  <dt>기도 · 추가 자료</dt>
+                  <dd>
+                    기도 {prayerCount}장 · 자료 {additionalFiles.length}개
+                  </dd>
+                </div>
+                <div>
+                  <dt>전체 슬라이드</dt>
+                  <dd data-testid="praise-slide-count">{slideCount}장</dd>
+                </div>
+              </dl>
+
+              {warnings.length > 0 && (
+                <ul className="wednesday-warnings">
+                  {warnings.map((warning) => (
+                    <li key={warning} className="banner banner-notice">
+                      <Icon name="info" />
+                      <span className="banner-text">{warning}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
 
-              {overview && !preview && (
-                <section className="card wednesday-slide-list" data-testid="praise-slide-list">
-                  <h3>만든 슬라이드 {overview.length}장</h3>
-                  <ol>
-                    {overview.map((item, index) => (
-                      <li key={item.id} data-kind={item.kind}>
-                        <span className="wednesday-slide-index">{index + 1}</span>
-                        <Icon name={slideIcon(item.kind)} />
-                        <span className="wednesday-slide-label">{item.label}</span>
-                        {item.subtitle && <span className="wednesday-slide-subtitle">{item.subtitle}</span>}
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-              )}
-              {stepNav(3)}
+              <AutoSaveIndicator status={autoSaveStatus} testId="praise-auto-save-status" />
+
+              <div className="download-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  data-testid="praise-reset"
+                  onClick={startOver}
+                >
+                  <Icon name="trash" />
+                  새 찬양집회 시작
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={generating}
+                  data-testid="praise-preview"
+                  onClick={() => void renderPreview()}
+                >
+                  <Icon name="slide" />
+                  미리보기
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-download"
+                  disabled={generating}
+                  data-testid="praise-download"
+                  onClick={() => void downloadDeck()}
+                >
+                  <Icon name="download" />
+                  {generating ? '만드는 중…' : '찬양집회 PPT 다운로드'}
+                </button>
+              </div>
             </section>
-          </main>
-        </div>
+
+            {preview && (
+              <section className="card praise-preview" data-testid="praise-preview-grid">
+                <h3>미리보기 {preview.length}장</h3>
+                <ol>
+                  {preview.map((slide, index) => (
+                    <li key={index}>
+                      <SlideThumbnail slide={slide} width={220} />
+                      <span className="praise-preview-label">
+                        {index + 1}. {overview?.[index]?.label ?? ''}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+
+            {overview && !preview && (
+              <section className="card wednesday-slide-list" data-testid="praise-slide-list">
+                <h3>만든 슬라이드 {overview.length}장</h3>
+                <ol>
+                  {overview.map((item, index) => (
+                    <li key={item.id} data-kind={item.kind}>
+                      <span className="wednesday-slide-index">{index + 1}</span>
+                      <Icon name={slideIcon(item.kind)} />
+                      <span className="wednesday-slide-label">{item.label}</span>
+                      {item.subtitle && <span className="wednesday-slide-subtitle">{item.subtitle}</span>}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+            <StepNav steps={STEPS} index={3} onMove={setStep} testIdPrefix="praise" />
+          </section>
+        </main>
       </div>
-      <ToastHost />
-    </>
+    <ToastHost />
+    </AppShell>
   );
 }

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon, { type IconName } from '../components/Icon';
 import ToastHost from '../components/ToastHost';
+import AppShell, { StepNav } from '../components/AppShell';
 import PptLibraryPanel from '../components/PptLibraryPanel';
 import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
@@ -397,462 +398,410 @@ export default function RetreatApp() {
   const activeSession = state.sessions.find((session) => session.id === activeSessionId) ?? state.sessions[0];
   const [addKind, setAddKind] = useState<RetreatBlockKind>('songs');
 
-  const stepNav = (index: number) => (
-    <nav className="wizard-nav" aria-label="단계 이동">
-      {index > 0 ? (
-        <button type="button" className="btn" onClick={() => setStep(index - 1)}>
-          <Icon name="back" />
-          이전
-        </button>
-      ) : (
-        <span />
-      )}
-      {index < STEPS.length - 1 && (
+  return (
+    <AppShell
+      service="retreat"
+      steps={STEPS}
+      activeStep={step}
+      onStepSelect={setStep}
+      testIdPrefix="retreat"
+      tools={
         <button
           type="button"
-          className="btn btn-primary"
-          data-testid={`retreat-next-${STEPS[index].id}`}
-          onClick={() => setStep(index + 1)}
+          className="btn library-open"
+          onClick={() => setLibraryOpen(true)}
         >
-          다음: {STEPS[index + 1].label}
-          <Icon name="next" />
+          <Icon name="library" />
+          <span className="btn-label">라이브러리</span>
         </button>
-      )}
-    </nav>
-  );
-
-  return (
-    <>
-      <a className="skip-link" href="#main-content">
-        본문으로 건너뛰기
-      </a>
-      <header className="header">
-        <div className="header-inner">
-          <div className="header-brand">
-            <img className="header-logo" src={`${BASE}logo.png`} alt="KCCP 빛주사랑 대학청년부 Media Team 로고" />
-            <div className="header-text">
-              <h1>수련회 PPT Generator</h1>
-              <p>콘티와 집회 순서를 넣으면 집회마다 수련회 디자인의 PPT를 만들어 드립니다.</p>
-            </div>
-          </div>
-          <nav className="header-actions" aria-label="도구">
-            <a className="btn" href={`${BASE}index.html`} data-testid="retreat-to-home">
-              <Icon name="steps" />
-              <span className="btn-label">예배 선택</span>
-            </a>
-            <button type="button" className="btn library-open" onClick={() => setLibraryOpen(true)}>
-              <Icon name="library" />
-              <span className="btn-label">라이브러리</span>
-            </button>
-          </nav>
-        </div>
-      </header>
-
+      }
+    >
       {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} onEdit={openFromLibrary} />}
 
-      <div className="app">
-        <ol className="wizard-progress" aria-label="수련회 PPT 생성 단계" style={{ '--active-index': step } as React.CSSProperties}>
-          {STEPS.map((item, index) => (
-            <li key={item.id} className={`wizard-step${index === step ? ' current' : ''}${index < step ? ' complete' : ''}`}>
+      <div className="app-body">
+        <main id="main-content">
+          {/* ---- 1. 수련회 정보·콘티 ---- */}
+          <section className={`wizard-panel${step === 0 ? ' active' : ''}`} aria-hidden={step !== 0} data-testid="retreat-panel-info">
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">1 / 3</p>
+              <h2>수련회 정보·콘티</h2>
+              <p>수련회 이름과 콘티를 넣으면 콘티의 칸마다 해당 집회의 찬양으로 들어갑니다.</p>
+            </div>
+            <section className="card wednesday-form">
+              <label className="field">
+                <span className="field-label">수련회 이름</span>
+                <input
+                  type="text"
+                  value={state.info.title}
+                  data-testid="retreat-title"
+                  onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, title: event.target.value } }))}
+                />
+                <span className="field-hint">제목 슬라이드와 광고 슬라이드 아래에 들어갑니다.</span>
+              </label>
+              <label className="field">
+                <span className="field-label">부제</span>
+                <input
+                  type="text"
+                  value={state.info.subtitle}
+                  onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, subtitle: event.target.value } }))}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">주제 (광고 슬라이드 아래)</span>
+                <input
+                  type="text"
+                  value={state.info.theme}
+                  onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, theme: event.target.value } }))}
+                />
+              </label>
+              <div className="field">
+                <span className="field-label">찬양 콘티 (PDF)</span>
+                <div className="retreat-row">
+                  <label className="btn">
+                    <Icon name="upload" />
+                    {readingConti ? '읽는 중…' : contiFile ? '다른 콘티 올리기' : '콘티 올리기'}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="visually-hidden"
+                      data-testid="retreat-conti-input"
+                      disabled={readingConti}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void readContiFile(file);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {contiFile && <span className="field-hint">{contiFile.name}</span>}
+                </div>
+                <span className="field-hint">
+                  첫 장의 표(금요일 오후 예배, 기도회, 토요일 오전 특강 …)를 읽습니다. 곡 앞에 X를 적은 곡은 빼고,
+                  작년 수련회 PPT에 있던 곡과 찬양 라이브러리 곡은 가사까지 채웁니다.
+                </span>
+                {contiSummary && (
+                  <ul className="retreat-conti-summary" data-testid="retreat-conti-summary">
+                    {contiSummary.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+
+            <section className="card retreat-closing" data-testid="retreat-closing">
+              <h3>주일 폐회예배</h3>
+              <p>
+                주일 폐회예배는 주일예배와 같은 디자인이라 <strong>주일예배 생성기</strong>에서 만듭니다.
+                {state.closingSongs.length > 0 ? ' 콘티의 주일 찬양:' : ''}
+              </p>
+              {state.closingSongs.length > 0 && (
+                <ol>
+                  {state.closingSongs.map((title) => (
+                    <li key={title}>{title}</li>
+                  ))}
+                </ol>
+              )}
+              <a className="btn" href={`${BASE}index.html?service=sunday`}>
+                <Icon name="next" />
+                주일예배 생성기 열기
+              </a>
+            </section>
+            <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="retreat" />
+          </section>
+
+          {/* ---- 2. 집회 순서 ---- */}
+          <section
+            className={`wizard-panel${step === 1 ? ' active' : ''}`}
+            aria-hidden={step !== 1}
+            data-testid="retreat-panel-sessions"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">2 / 3</p>
+              <h2>집회 순서</h2>
+              <p>집회마다 포스터와 예배 순서를 정하세요. 순서대로 슬라이드가 만들어집니다.</p>
+            </div>
+
+            <div className="retreat-session-tabs" role="tablist" aria-label="집회">
+              {state.sessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={session.id === activeSession?.id}
+                  className={`btn${session.id === activeSession?.id ? ' btn-primary' : ''}`}
+                  data-testid="retreat-session-tab"
+                  onClick={() => setActiveSessionId(session.id)}
+                >
+                  {session.name || '(이름 없음)'}
+                </button>
+              ))}
               <button
                 type="button"
-                className="wizard-step-button"
-                data-testid={`retreat-tab-${item.id}`}
-                aria-current={index === step ? 'step' : undefined}
-                onClick={() => setStep(index)}
+                className="btn btn-ghost"
+                data-testid="retreat-add-session"
+                onClick={() => {
+                  const session: RetreatSession = {
+                    id: newId(),
+                    name: `집회 ${state.sessions.length + 1}`,
+                    date: '',
+                    poster: null,
+                    blocks: [createBlock('title'), createBlock('songs')],
+                  };
+                  setState((current) => ({ ...current, sessions: [...current.sessions, session] }));
+                  setActiveSessionId(session.id);
+                }}
               >
-                <span className="wizard-step-dot">{index < step ? <Icon name="check" /> : index + 1}</span>
-                <span className="wizard-step-label">{item.label}</span>
+                <Icon name="plus" />
+                집회 추가
               </button>
-            </li>
-          ))}
-        </ol>
+            </div>
 
-        <div className="app-body">
-          <main id="main-content">
-            {/* ---- 1. 수련회 정보·콘티 ---- */}
-            <section className={`wizard-panel${step === 0 ? ' active' : ''}`} aria-hidden={step !== 0} data-testid="retreat-panel-info">
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">1 / 3</p>
-                <h2>수련회 정보·콘티</h2>
-                <p>수련회 이름과 콘티를 넣으면 콘티의 칸마다 해당 집회의 찬양으로 들어갑니다.</p>
-              </div>
-              <section className="card wednesday-form">
-                <label className="field">
-                  <span className="field-label">수련회 이름</span>
-                  <input
-                    type="text"
-                    value={state.info.title}
-                    data-testid="retreat-title"
-                    onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, title: event.target.value } }))}
-                  />
-                  <span className="field-hint">제목 슬라이드와 광고 슬라이드 아래에 들어갑니다.</span>
-                </label>
-                <label className="field">
-                  <span className="field-label">부제</span>
-                  <input
-                    type="text"
-                    value={state.info.subtitle}
-                    onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, subtitle: event.target.value } }))}
-                  />
-                </label>
-                <label className="field">
-                  <span className="field-label">주제 (광고 슬라이드 아래)</span>
-                  <input
-                    type="text"
-                    value={state.info.theme}
-                    onChange={(event) => setState((current) => ({ ...current, info: { ...current.info, theme: event.target.value } }))}
-                  />
-                </label>
-                <div className="field">
-                  <span className="field-label">찬양 콘티 (PDF)</span>
-                  <div className="retreat-row">
-                    <label className="btn">
-                      <Icon name="upload" />
-                      {readingConti ? '읽는 중…' : contiFile ? '다른 콘티 올리기' : '콘티 올리기'}
+            {activeSession && (
+              <div className="retreat-session" data-testid="retreat-session">
+                <section className="card retreat-session-head">
+                  <div className="field-row">
+                    <label className="field">
+                      <span className="field-label">집회 이름</span>
                       <input
-                        type="file"
-                        accept="application/pdf,.pdf"
-                        className="visually-hidden"
-                        data-testid="retreat-conti-input"
-                        disabled={readingConti}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) void readContiFile(file);
-                          event.target.value = '';
-                        }}
+                        type="text"
+                        value={activeSession.name}
+                        data-testid="retreat-session-name"
+                        onChange={(event) => updateSession(activeSession.id, (session) => ({ ...session, name: event.target.value }))}
                       />
                     </label>
-                    {contiFile && <span className="field-hint">{contiFile.name}</span>}
-                  </div>
-                  <span className="field-hint">
-                    첫 장의 표(금요일 오후 예배, 기도회, 토요일 오전 특강 …)를 읽습니다. 곡 앞에 X를 적은 곡은 빼고,
-                    작년 수련회 PPT에 있던 곡과 찬양 라이브러리 곡은 가사까지 채웁니다.
-                  </span>
-                  {contiSummary && (
-                    <ul className="retreat-conti-summary" data-testid="retreat-conti-summary">
-                      {contiSummary.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </section>
-
-              <section className="card retreat-closing" data-testid="retreat-closing">
-                <h3>주일 폐회예배</h3>
-                <p>
-                  주일 폐회예배는 주일예배와 같은 디자인이라 <strong>주일예배 생성기</strong>에서 만듭니다.
-                  {state.closingSongs.length > 0 ? ' 콘티의 주일 찬양:' : ''}
-                </p>
-                {state.closingSongs.length > 0 && (
-                  <ol>
-                    {state.closingSongs.map((title) => (
-                      <li key={title}>{title}</li>
-                    ))}
-                  </ol>
-                )}
-                <a className="btn" href={`${BASE}index.html?service=sunday`}>
-                  <Icon name="next" />
-                  주일예배 생성기 열기
-                </a>
-              </section>
-              {stepNav(0)}
-            </section>
-
-            {/* ---- 2. 집회 순서 ---- */}
-            <section
-              className={`wizard-panel${step === 1 ? ' active' : ''}`}
-              aria-hidden={step !== 1}
-              data-testid="retreat-panel-sessions"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">2 / 3</p>
-                <h2>집회 순서</h2>
-                <p>집회마다 포스터와 예배 순서를 정하세요. 순서대로 슬라이드가 만들어집니다.</p>
-              </div>
-
-              <div className="retreat-session-tabs" role="tablist" aria-label="집회">
-                {state.sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={session.id === activeSession?.id}
-                    className={`btn${session.id === activeSession?.id ? ' btn-primary' : ''}`}
-                    data-testid="retreat-session-tab"
-                    onClick={() => setActiveSessionId(session.id)}
-                  >
-                    {session.name || '(이름 없음)'}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  data-testid="retreat-add-session"
-                  onClick={() => {
-                    const session: RetreatSession = {
-                      id: newId(),
-                      name: `집회 ${state.sessions.length + 1}`,
-                      date: '',
-                      poster: null,
-                      blocks: [createBlock('title'), createBlock('songs')],
-                    };
-                    setState((current) => ({ ...current, sessions: [...current.sessions, session] }));
-                    setActiveSessionId(session.id);
-                  }}
-                >
-                  <Icon name="plus" />
-                  집회 추가
-                </button>
-              </div>
-
-              {activeSession && (
-                <div className="retreat-session" data-testid="retreat-session">
-                  <section className="card retreat-session-head">
-                    <div className="field-row">
-                      <label className="field">
-                        <span className="field-label">집회 이름</span>
-                        <input
-                          type="text"
-                          value={activeSession.name}
-                          data-testid="retreat-session-name"
-                          onChange={(event) => updateSession(activeSession.id, (session) => ({ ...session, name: event.target.value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">날짜</span>
-                        <input
-                          type="date"
-                          value={activeSession.date}
-                          data-testid="retreat-session-date"
-                          onChange={(event) => updateSession(activeSession.id, (session) => ({ ...session, date: event.target.value }))}
-                        />
-                      </label>
-                    </div>
-                    <div className="field">
-                      <span className="field-label">설교 포스터 (표지)</span>
-                      <div className="retreat-row">
-                        {activeSession.poster && <PosterThumb poster={activeSession.poster} alt={`${activeSession.name} 포스터`} />}
-                        <label className="btn">
-                          <Icon name="upload" />
-                          {activeSession.poster ? '다른 포스터로 바꾸기' : '포스터 올리기'}
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg"
-                            className="visually-hidden"
-                            data-testid="retreat-poster-input"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              event.target.value = '';
-                              if (!file) return;
-                              const sessionId = activeSession.id;
-                              readPoster(file)
-                                .then((poster) => updateSession(sessionId, (session) => ({ ...session, poster })))
-                                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
-                            }}
-                          />
-                        </label>
-                        {activeSession.poster && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => updateSession(activeSession.id, (session) => ({ ...session, poster: null }))}
-                          >
-                            포스터 빼기
-                          </button>
-                        )}
-                      </div>
-                      <span className="field-hint">
-                        첫 장에 가운데 맞춰 들어가고, 남는 자리는 포스터 가장자리 색으로 채웁니다. 없으면 표지 없이 제목부터 시작합니다.
-                      </span>
-                    </div>
-                  </section>
-
-                  <ol className="retreat-blocks">
-                    {activeSession.blocks.map((block, index) => (
-                      <RetreatBlockEditor
-                        key={block.id}
-                        block={block}
-                        index={index}
-                        total={activeSession.blocks.length}
-                        passage={passages[block.id]}
-                        passageError={passageErrors[block.id]}
-                        songTitles={songTitles}
-                        resolveSong={resolveSong}
-                        onChange={(next) => updateBlock(activeSession.id, next)}
-                        onMove={(delta) =>
-                          updateSession(activeSession.id, (session) => {
-                            const blocks = [...session.blocks];
-                            const target = index + delta;
-                            [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
-                            return { ...session, blocks };
-                          })
-                        }
-                        onRemove={() =>
-                          updateSession(activeSession.id, (session) => ({
-                            ...session,
-                            blocks: session.blocks.filter((candidate) => candidate.id !== block.id),
-                          }))
-                        }
+                    <label className="field">
+                      <span className="field-label">날짜</span>
+                      <input
+                        type="date"
+                        value={activeSession.date}
+                        data-testid="retreat-session-date"
+                        onChange={(event) => updateSession(activeSession.id, (session) => ({ ...session, date: event.target.value }))}
                       />
-                    ))}
-                  </ol>
-
-                  <div className="retreat-row retreat-add-block">
-                    <select
-                      aria-label="추가할 순서"
-                      value={addKind}
-                      data-testid="retreat-add-block-kind"
-                      onChange={(event) => setAddKind(event.target.value as RetreatBlockKind)}
-                    >
-                      {ADDABLE_BLOCKS.map((kind) => (
-                        <option key={kind} value={kind}>
-                          {BLOCK_LABELS[kind]}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn"
-                      data-testid="retreat-add-block"
-                      onClick={() =>
-                        updateSession(activeSession.id, (session) => ({ ...session, blocks: [...session.blocks, createBlock(addKind)] }))
-                      }
-                    >
-                      <Icon name="plus" />
-                      순서 추가
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-danger"
-                      onClick={() => {
-                        if (state.sessions.length <= 1) return;
-                        if (!window.confirm(`'${activeSession.name}' 집회를 지울까요?`)) return;
-                        const remaining = state.sessions.filter((session) => session.id !== activeSession.id);
-                        setState((current) => ({ ...current, sessions: remaining }));
-                        setActiveSessionId(remaining[0].id);
-                      }}
-                      disabled={state.sessions.length <= 1}
-                    >
-                      <Icon name="trash" />
-                      이 집회 지우기
-                    </button>
+                    </label>
                   </div>
-                </div>
-              )}
-              {stepNav(1)}
-            </section>
-
-            {/* ---- 3. 다운로드 ---- */}
-            <section
-              className={`wizard-panel${step === 2 ? ' active' : ''}`}
-              aria-hidden={step !== 2}
-              data-testid="retreat-panel-download"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">3 / 3</p>
-                <h2>다운로드</h2>
-                <p>집회마다 PPT를 따로 내려받습니다. 내려받은 PPT는 라이브러리에도 저장되고, 매주 자동 삭제되지 않습니다.</p>
-              </div>
-              <ul className="retreat-downloads">
-                {state.sessions.map((session, index) => {
-                  const plans = planRetreatSession(session, passages);
-                  const songCount = session.blocks.reduce((sum, block) => sum + (block.kind === 'songs' ? block.songs.length : 0), 0);
-                  const missing = session.blocks.flatMap((block) =>
-                    block.kind === 'songs' ? block.songs.filter((song) => !song.lyrics.trim()).map((song) => song.title) : [],
-                  );
-                  const overview = overviews[session.id];
-                  return (
-                    <li key={session.id} className="card retreat-download" data-testid="retreat-download-row">
-                      <header className="retreat-block-head">
-                        <strong>{session.name || `집회 ${index + 1}`}</strong>
-                        <span className="retreat-block-meta">
-                          슬라이드 {plans.length}장 · 찬양 {songCount}곡{session.poster ? ' · 포스터' : ''}
-                        </span>
-                      </header>
-                      {missing.length > 0 && (
-                        <p className="banner banner-warn">
-                          <Icon name="warning" />
-                          <span className="banner-text">가사가 없는 곡: {missing.join(', ')} — 제목 슬라이드만 들어갑니다.</span>
-                        </p>
-                      )}
-                      <label className="field">
-                        <span className="field-label">파일명</span>
+                  <div className="field">
+                    <span className="field-label">설교 포스터 (표지)</span>
+                    <div className="retreat-row">
+                      {activeSession.poster && <PosterThumb poster={activeSession.poster} alt={`${activeSession.name} 포스터`} />}
+                      <label className="btn">
+                        <Icon name="upload" />
+                        {activeSession.poster ? '다른 포스터로 바꾸기' : '포스터 올리기'}
                         <input
-                          type="text"
-                          value={fileNameFor(session, index)}
-                          data-testid="retreat-file-name"
-                          onChange={(event) => setFileNames((current) => ({ ...current, [session.id]: event.target.value }))}
+                          type="file"
+                          accept="image/png,image/jpeg"
+                          className="visually-hidden"
+                          data-testid="retreat-poster-input"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = '';
+                            if (!file) return;
+                            const sessionId = activeSession.id;
+                            readPoster(file)
+                              .then((poster) => updateSession(sessionId, (session) => ({ ...session, poster })))
+                              .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+                          }}
                         />
                       </label>
-                      <div className="download-actions">
+                      {activeSession.poster && (
                         <button
                           type="button"
-                          className="btn"
-                          disabled={busySession !== null}
-                          data-testid="retreat-preview"
-                          onClick={() => void previewSession(session)}
+                          className="btn btn-ghost"
+                          onClick={() => updateSession(activeSession.id, (session) => ({ ...session, poster: null }))}
                         >
-                          <Icon name="slide" />
-                          미리보기
+                          포스터 빼기
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-download"
-                          disabled={busySession !== null}
-                          data-testid="retreat-download"
-                          onClick={() => void downloadSession(session, index)}
-                        >
-                          <Icon name="download" />
-                          {busySession === session.id ? '만드는 중…' : 'PPT 다운로드'}
-                        </button>
+                      )}
+                    </div>
+                    <span className="field-hint">
+                      첫 장에 가운데 맞춰 들어가고, 남는 자리는 포스터 가장자리 색으로 채웁니다. 없으면 표지 없이 제목부터 시작합니다.
+                    </span>
+                  </div>
+                </section>
+
+                <ol className="retreat-blocks">
+                  {activeSession.blocks.map((block, index) => (
+                    <RetreatBlockEditor
+                      key={block.id}
+                      block={block}
+                      index={index}
+                      total={activeSession.blocks.length}
+                      passage={passages[block.id]}
+                      passageError={passageErrors[block.id]}
+                      songTitles={songTitles}
+                      resolveSong={resolveSong}
+                      onChange={(next) => updateBlock(activeSession.id, next)}
+                      onMove={(delta) =>
+                        updateSession(activeSession.id, (session) => {
+                          const blocks = [...session.blocks];
+                          const target = index + delta;
+                          [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
+                          return { ...session, blocks };
+                        })
+                      }
+                      onRemove={() =>
+                        updateSession(activeSession.id, (session) => ({
+                          ...session,
+                          blocks: session.blocks.filter((candidate) => candidate.id !== block.id),
+                        }))
+                      }
+                    />
+                  ))}
+                </ol>
+
+                <div className="retreat-row retreat-add-block">
+                  <select
+                    aria-label="추가할 순서"
+                    value={addKind}
+                    data-testid="retreat-add-block-kind"
+                    onChange={(event) => setAddKind(event.target.value as RetreatBlockKind)}
+                  >
+                    {ADDABLE_BLOCKS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {BLOCK_LABELS[kind]}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn"
+                    data-testid="retreat-add-block"
+                    onClick={() =>
+                      updateSession(activeSession.id, (session) => ({ ...session, blocks: [...session.blocks, createBlock(addKind)] }))
+                    }
+                  >
+                    <Icon name="plus" />
+                    순서 추가
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-danger"
+                    onClick={() => {
+                      if (state.sessions.length <= 1) return;
+                      if (!window.confirm(`'${activeSession.name}' 집회를 지울까요?`)) return;
+                      const remaining = state.sessions.filter((session) => session.id !== activeSession.id);
+                      setState((current) => ({ ...current, sessions: remaining }));
+                      setActiveSessionId(remaining[0].id);
+                    }}
+                    disabled={state.sessions.length <= 1}
+                  >
+                    <Icon name="trash" />
+                    이 집회 지우기
+                  </button>
+                </div>
+              </div>
+            )}
+            <StepNav steps={STEPS} index={1} onMove={setStep} testIdPrefix="retreat" />
+          </section>
+
+          {/* ---- 3. 다운로드 ---- */}
+          <section
+            className={`wizard-panel${step === 2 ? ' active' : ''}`}
+            aria-hidden={step !== 2}
+            data-testid="retreat-panel-download"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">3 / 3</p>
+              <h2>다운로드</h2>
+              <p>집회마다 PPT를 따로 내려받습니다. 내려받은 PPT는 라이브러리에도 저장되고, 매주 자동 삭제되지 않습니다.</p>
+            </div>
+            <ul className="retreat-downloads">
+              {state.sessions.map((session, index) => {
+                const plans = planRetreatSession(session, passages);
+                const songCount = session.blocks.reduce((sum, block) => sum + (block.kind === 'songs' ? block.songs.length : 0), 0);
+                const missing = session.blocks.flatMap((block) =>
+                  block.kind === 'songs' ? block.songs.filter((song) => !song.lyrics.trim()).map((song) => song.title) : [],
+                );
+                const overview = overviews[session.id];
+                return (
+                  <li key={session.id} className="card retreat-download" data-testid="retreat-download-row">
+                    <header className="retreat-block-head">
+                      <strong>{session.name || `집회 ${index + 1}`}</strong>
+                      <span className="retreat-block-meta">
+                        슬라이드 {plans.length}장 · 찬양 {songCount}곡{session.poster ? ' · 포스터' : ''}
+                      </span>
+                    </header>
+                    {missing.length > 0 && (
+                      <p className="banner banner-warn">
+                        <Icon name="warning" />
+                        <span className="banner-text">가사가 없는 곡: {missing.join(', ')} — 제목 슬라이드만 들어갑니다.</span>
+                      </p>
+                    )}
+                    <label className="field">
+                      <span className="field-label">파일명</span>
+                      <input
+                        type="text"
+                        value={fileNameFor(session, index)}
+                        data-testid="retreat-file-name"
+                        onChange={(event) => setFileNames((current) => ({ ...current, [session.id]: event.target.value }))}
+                      />
+                    </label>
+                    <div className="download-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busySession !== null}
+                        data-testid="retreat-preview"
+                        onClick={() => void previewSession(session)}
+                      >
+                        <Icon name="slide" />
+                        미리보기
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-download"
+                        disabled={busySession !== null}
+                        data-testid="retreat-download"
+                        onClick={() => void downloadSession(session, index)}
+                      >
+                        <Icon name="download" />
+                        {busySession === session.id ? '만드는 중…' : 'PPT 다운로드'}
+                      </button>
+                    </div>
+                    {preview?.sessionId === session.id ? (
+                      <div className="praise-preview" data-testid="retreat-preview-grid">
+                        <ol>
+                          {preview.slides.map((slide, slideIndex) => (
+                            <li key={slideIndex}>
+                              <SlideThumbnail slide={slide} width={200} />
+                              <span className="praise-preview-label">
+                                {slideIndex + 1}. {overview?.[slideIndex]?.label ?? ''}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
                       </div>
-                      {preview?.sessionId === session.id ? (
-                        <div className="praise-preview" data-testid="retreat-preview-grid">
+                    ) : (
+                      overview && (
+                        <div className="wednesday-slide-list" data-testid="retreat-slide-list">
                           <ol>
-                            {preview.slides.map((slide, slideIndex) => (
-                              <li key={slideIndex}>
-                                <SlideThumbnail slide={slide} width={200} />
-                                <span className="praise-preview-label">
-                                  {slideIndex + 1}. {overview?.[slideIndex]?.label ?? ''}
-                                </span>
+                            {overview.map((item, slideIndex) => (
+                              <li key={item.id}>
+                                <span className="wednesday-slide-index">{slideIndex + 1}</span>
+                                <Icon name={slideIcon(item.kind)} />
+                                <span className="wednesday-slide-label">{item.label}</span>
+                                {item.subtitle && <span className="wednesday-slide-subtitle">{item.subtitle}</span>}
                               </li>
                             ))}
                           </ol>
                         </div>
-                      ) : (
-                        overview && (
-                          <div className="wednesday-slide-list" data-testid="retreat-slide-list">
-                            <ol>
-                              {overview.map((item, slideIndex) => (
-                                <li key={item.id}>
-                                  <span className="wednesday-slide-index">{slideIndex + 1}</span>
-                                  <Icon name={slideIcon(item.kind)} />
-                                  <span className="wednesday-slide-label">{item.label}</span>
-                                  {item.subtitle && <span className="wednesday-slide-subtitle">{item.subtitle}</span>}
-                                </li>
-                              ))}
-                            </ol>
-                          </div>
-                        )
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="download-actions">
-                <button type="button" className="btn btn-ghost" data-testid="retreat-reset" onClick={() => void startOver()}>
-                  <Icon name="trash" />
-                  새 수련회 시작
-                </button>
-              </div>
-              {stepNav(2)}
-            </section>
-          </main>
-        </div>
+                      )
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="download-actions">
+              <button type="button" className="btn btn-ghost" data-testid="retreat-reset" onClick={() => void startOver()}>
+                <Icon name="trash" />
+                새 수련회 시작
+              </button>
+            </div>
+            <StepNav steps={STEPS} index={2} onMove={setStep} testIdPrefix="retreat" />
+          </section>
+        </main>
       </div>
-      <ToastHost />
-    </>
+    <ToastHost />
+    </AppShell>
   );
 }
