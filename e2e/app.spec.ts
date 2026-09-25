@@ -1062,6 +1062,27 @@ test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
   expect(allText).not.toContain('{{BODY}}');
 });
 
+test('puts the NASB text on the verse slide when NASB is the English translation', async ({ page }, testInfo) => {
+  await page.goto('./');
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  const nasb = page.getByRole('button', { name: 'NASB', exact: true });
+  await nasb.click();
+  await expect(nasb).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'ESV', exact: true })).toHaveAttribute('aria-pressed', 'false');
+
+  await moveFromBibleToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('bible-nasb.pptx'));
+  const allText = (await slideTexts(zip)).join('\n');
+  expect(allText).toContain('so that everyone who believes in Him will not perish');
+  expect(allText).not.toContain('whoever believes in him should not perish'); // ESV
+});
+
 test('generates one combined deck from lyrics, bible verses, and announcements together', async ({
   page,
 }, testInfo) => {

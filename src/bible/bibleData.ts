@@ -8,6 +8,7 @@ const TRANSLATION_FILES: Record<string, string> = {
   saenew: 'ko_saenew.json',
   esv: 'en_esv.json',
   niv: 'en_niv.json',
+  nasb: 'en_nasb.json',
   kjv: 'en_kjv.json',
 };
 
