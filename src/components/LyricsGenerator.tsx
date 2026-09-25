@@ -8,6 +8,7 @@ import {
   fetchBundledLibrary,
   findEntry,
   findLibrarySong,
+  libraryLyrics,
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
@@ -119,13 +120,14 @@ function isNonScoreRecognition(score: ParsedScore): boolean {
   );
 }
 
-function songFromLibrary(entry: LibraryEntry, pageIndex?: number): Song {
+function songFromLibrary(entry: LibraryEntry, pageIndex?: number, contiOrder?: string[]): Song {
+  const lyrics = libraryLyrics(entry, contiOrder);
   return {
     id: crypto.randomUUID(),
     title: entry.title,
     key: entry.key,
-    sections: structuredClone(entry.sections),
-    order: [...entry.order],
+    sections: lyrics.sections,
+    order: lyrics.order,
     linesPerSlide: 4,
     pageIndex,
   };
@@ -424,10 +426,9 @@ export default function LyricsGenerator({
               ...s,
               title: entry.title,
               key: s.key ?? entry.key,
-              sections: structuredClone(entry.sections),
               // The saved order is last time's arrangement; one the conti
-              // wrote is this week's.
-              order: s.orderFromConti ? s.order : [...entry.order],
+              // wrote is this week's, and the saved parts follow it.
+              ...libraryLyrics(entry, s.orderFromConti ? s.order : undefined),
             }
           : s,
       ),
@@ -1473,13 +1474,14 @@ export default function LyricsGenerator({
         // title, its saved lyrics are loaded right away and the 악보 is never
         // read for lyrics.
         const hit = findLibrarySong(lib, { title: entry.title });
-        const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
+        // The 진행 순서 written on the conti is this week's arrangement: the
+        // saved lyrics are laid out in exactly that order, not the saved one.
+        const song = hit ? songFromLibrary(hit, entry.pageIndex, entry.order) : blankSong(entry.title);
         song.title = entry.title;
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;
-        // The 진행 순서 written on the conti is this week's arrangement: the
-        // parts are filled from the score or the web, in exactly this order.
+        // Parts filled later from the score or the web follow the same order.
         if (entry.order && entry.order.length > 0) {
           song.order = [...entry.order];
           song.orderFromConti = true;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findEntry,
+  libraryLyrics,
   mergeLibraries,
   normalizeTitle,
   sanitizeLibraryEntry,
@@ -149,5 +150,37 @@ describe('upsertEntry verification precedence', () => {
   it('still appends a draft for a song the library does not have', () => {
     const draft = { ...entry('처음 보는 곡'), verification: 'draft' as const, version: 1 };
     expect(upsertEntry([entry('은혜의 노래')], draft).map((e) => e.title)).toEqual(['은혜의 노래', '처음 보는 곡']);
+  });
+});
+
+describe('libraryLyrics', () => {
+  const saved: LibraryEntry = {
+    title: '주님의 사랑',
+    sections: [
+      { label: 'V1', lines: ['1절'] },
+      { label: 'V2', lines: ['2절'] },
+      { label: 'C', lines: ['후렴'] },
+      { label: 'B', lines: ['브릿지'] },
+    ],
+    order: ['I', 'V1', 'V2', 'C', 'B'],
+  };
+
+  it('lays the saved parts out in the order the conti wrote', () => {
+    const lyrics = libraryLyrics(saved, ['I', 'V1', 'C', 'B', 'V2', 'C']);
+    expect(lyrics.order).toEqual(['I', 'V1', 'C', 'B', 'V2', 'C']);
+    expect(lyrics.sections.map((section) => section.label)).toEqual(['V1', 'C', 'B', 'V2']);
+  });
+
+  it('keeps parts the conti skips after the ones it sings', () => {
+    const lyrics = libraryLyrics(saved, ['I', 'C', 'V1', 'C']);
+    expect(lyrics.sections.map((section) => section.label)).toEqual(['C', 'V1', 'V2', 'B']);
+  });
+
+  it('keeps the saved order when the conti wrote none', () => {
+    const lyrics = libraryLyrics(saved);
+    expect(lyrics.order).toEqual(saved.order);
+    expect(lyrics.sections.map((section) => section.label)).toEqual(['V1', 'V2', 'C', 'B']);
+    lyrics.sections[0].lines.push('수정');
+    expect(saved.sections[0].lines).toEqual(['1절']);
   });
 });
