@@ -61,6 +61,10 @@ export declare class UsageTracker {
   deletePptDeck(id: unknown): Promise<void>;
   purgePptLibrary(options?: { purgeKey?: string | null; at?: string; trigger?: string }): Promise<unknown>;
   lastPptPurge(): Promise<unknown>;
+  praiseEnglishLibrary(): Promise<{ entries: unknown[]; deletedTitles: string[] }>;
+  upsertPraiseEnglish(rawEntry: unknown): Promise<unknown>;
+  mergePraiseEnglish(rawEntries: unknown): Promise<{ entries: unknown[]; deletedTitles: string[] }>;
+  deletePraiseEnglish(title: unknown): Promise<void>;
   prunePptTombstones(now: Date): Promise<number>;
 }
 

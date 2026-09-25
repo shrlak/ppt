@@ -67,6 +67,8 @@ interface Props {
    * is already showing on the left.
    */
   editorOnly?: boolean;
+  /** The 찬양집회 page has no sermon to sing after, so no 설교 후 찬양 toggle. */
+  hidePostSermon?: boolean;
 }
 
 // A single "V" quick-add button rather than separate "V1"/"V2" ones: most
@@ -92,6 +94,7 @@ export default function SongCard({
   webReview,
   onSelectWebCandidate,
   editorOnly = false,
+  hidePostSermon = false,
 }: Props) {
   const [orderText, setOrderText] = useState(formatOrder(song.order));
   const [saved, setSaved] = useState(false);
@@ -313,21 +316,23 @@ export default function SongCard({
         {/* Where in the service this song is sung. 설교 후 찬양 is not part of
             the opening praise set: its slides are placed after the 기도 slide
             that follows the sermon, so the operator never has to jump back. */}
-        <button
-          type="button"
-          className={`btn btn-chip song-slot${song.postSermon ? ' is-post-sermon' : ''}`}
-          data-testid="song-post-sermon-toggle"
-          aria-pressed={!!song.postSermon}
-          title={
-            song.postSermon
-              ? '설교 후 찬양 — 설교 뒤 기도 슬라이드 다음에 들어갑니다. 누르면 일반 찬양으로 되돌립니다.'
-              : '이 곡을 설교 후 찬양으로 지정하면 설교 뒤 기도 슬라이드 다음에 들어갑니다.'
-          }
-          onClick={() => onChange({ ...song, postSermon: song.postSermon ? undefined : true })}
-        >
-          <Icon name={song.postSermon ? 'check' : 'next'} />
-          설교 후 찬양
-        </button>
+        {!hidePostSermon && (
+          <button
+            type="button"
+            className={`btn btn-chip song-slot${song.postSermon ? ' is-post-sermon' : ''}`}
+            data-testid="song-post-sermon-toggle"
+            aria-pressed={!!song.postSermon}
+            title={
+              song.postSermon
+                ? '설교 후 찬양 — 설교 뒤 기도 슬라이드 다음에 들어갑니다. 누르면 일반 찬양으로 되돌립니다.'
+                : '이 곡을 설교 후 찬양으로 지정하면 설교 뒤 기도 슬라이드 다음에 들어갑니다.'
+            }
+            onClick={() => onChange({ ...song, postSermon: song.postSermon ? undefined : true })}
+          >
+            <Icon name={song.postSermon ? 'check' : 'next'} />
+            설교 후 찬양
+          </button>
+        )}
         <div className="song-actions">
           <button
             type="button"

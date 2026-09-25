@@ -72,7 +72,10 @@ function LibraryEntryCard({
   }
 
   async function handleDelete() {
-    if (!window.confirm(`'${deck.name}'을(를) 라이브러리에서 삭제할까요?`)) return;
+    const question = deck.keep
+      ? `'${deck.name}'은(는) 자동으로 지워지지 않는 찬양집회 PPT입니다. 정말 삭제할까요? 삭제하면 되돌릴 수 없습니다.`
+      : `'${deck.name}'을(를) 라이브러리에서 삭제할까요?`;
+    if (!window.confirm(question)) return;
     setDeleting(true);
     try {
       await deleteSavedDeck(deck.id);
@@ -88,7 +91,18 @@ function LibraryEntryCard({
   return (
     <article className="library-entry" data-testid="library-entry">
       <div className="library-entry-info">
-        <strong className="library-entry-name">{deck.name}</strong>
+        <strong className="library-entry-name">
+          {deck.name}
+          {deck.keep && (
+            <span
+              className="library-entry-keep"
+              data-testid="library-entry-keep"
+              title="매주 일요일 자동 삭제에서 제외됩니다. 삭제 버튼으로만 지울 수 있습니다."
+            >
+              찬양집회 · 자동 삭제 안 함
+            </span>
+          )}
+        </strong>
         <p className="library-entry-meta">
           {new Date(deck.savedAt).toLocaleString('ko-KR')} · {deck.slideCount}장
           {deck.songTitles.length > 0 ? ` · ${deck.songTitles.join(', ')}` : ''}
@@ -184,7 +198,8 @@ export default function PptLibraryPanel({ onClose, onEdit }: Props) {
         <span>
           서버에 보관된 PPT와 원본 파일은 <strong>매주 일요일 오후 5시(미 동부 시간)</strong>에 모두 자동으로
           삭제되어 다음 주 콘티를 빈 상태에서 시작합니다. 계속 보관할 파일은 그 전에 다운로드해 두세요.
-          찬양 가사 라이브러리는 삭제되지 않습니다.
+          찬양 가사 라이브러리는 삭제되지 않습니다. <strong>찬양집회 PPT</strong>는 자동 삭제에서 제외되어, 삭제
+          버튼으로 직접 지울 때까지 보관됩니다.
         </span>
       </p>
       {snapshot && (

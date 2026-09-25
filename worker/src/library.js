@@ -218,6 +218,8 @@ export function sanitizePptDeckMetadata(raw, now = new Date()) {
     files,
     slideCount,
     songTitles,
+    // Kept until deleted by hand — the weekly purge skips it (찬양집회 decks).
+    ...(raw.keep === true ? { keep: true } : {}),
     savedAt,
     updatedAt: now.toISOString(),
   };
