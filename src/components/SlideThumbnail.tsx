@@ -28,7 +28,17 @@ export default function SlideThumbnail({ slide, width }: Props) {
   const height = slide.heightEmu * pxPerEmu;
 
   return (
-    <div className="slide-thumb" style={{ width, height, background: slide.background ?? '#ffffff' }}>
+    <div
+      className="slide-thumb"
+      style={{
+        width,
+        height,
+        background: slide.background ?? '#ffffff',
+        ...(slide.backgroundImage
+          ? { backgroundImage: `url("${slide.backgroundImage}")`, backgroundSize: '100% 100%' }
+          : {}),
+      }}
+    >
       {slide.shapes.map((shape, i) => (
         <ShapeView key={i} shape={shape} pxPerEmu={pxPerEmu} />
       ))}

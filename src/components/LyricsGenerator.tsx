@@ -54,6 +54,7 @@ import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
+import { findSection } from '../lib/utils/slidePlanner';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
@@ -119,25 +120,37 @@ function isNonScoreRecognition(score: ParsedScore): boolean {
   );
 }
 
-function songFromLibrary(entry: LibraryEntry, pageIndex?: number): Song {
+/**
+ * Lyric lines per slide a new song starts with. The 찬양집회 deck prints the
+ * English under every Korean slide, so it starts with fewer Korean lines than
+ * the Sunday deck — the same balance last year's bilingual deck used.
+ */
+export function defaultLinesPerSlide(service: LyricsService): number {
+  return service === 'praise' ? 3 : 4;
+}
+
+/** Which generator hosts this step: the Sunday wizard or the 찬양집회 page. */
+export type LyricsService = 'sunday' | 'praise';
+
+function songFromLibrary(entry: LibraryEntry, pageIndex?: number, linesPerSlide = 4): Song {
   return {
     id: crypto.randomUUID(),
     title: entry.title,
     key: entry.key,
     sections: structuredClone(entry.sections),
     order: [...entry.order],
-    linesPerSlide: 4,
+    linesPerSlide,
     pageIndex,
   };
 }
 
-function blankSong(title = ''): Song {
+function blankSong(title = '', linesPerSlide = 4): Song {
   return {
     id: crypto.randomUUID(),
     title,
     sections: [],
     order: ['I'],
-    linesPerSlide: 4,
+    linesPerSlide,
   };
 }
 
@@ -161,6 +174,26 @@ interface Props {
    * bring the 찬양 step into view — the upload it just started happens here.
    */
   onContiDropAnywhere?: () => void;
+  /**
+   * 'praise' (찬양집회) has no 공동체 고백송 and no 설교 후 찬양: every song on
+   * the conti is sung in the order written, and new songs start with fewer
+   * lines per slide because the English goes under the Korean.
+   */
+  service?: LyricsService;
+  /**
+   * Swap one song for another in place (matched by id), keeping everything
+   * else on the page — the 콘티 view, recognition state, the other songs. The
+   * 찬양집회 page uses it to load a song straight from its 영어 가사 library.
+   */
+  replaceSong?: { version: number; song: Song } | null;
+  /**
+   * Songs to take a conti's lyrics from before the 찬양 라이브러리 — the
+   * 찬양집회 page's bilingual songs, whose Korean is split exactly as their
+   * English was written. A song loaded from here is also saved to the 찬양
+   * 라이브러리 (Korean only, as a draft) when the library does not have it
+   * yet, so the Sunday page can load its Korean lyrics too.
+   */
+  preferredSongs?: LibraryEntry[];
 }
 
 export default function LyricsGenerator({
@@ -172,7 +205,11 @@ export default function LyricsGenerator({
   restoreSongs = null,
   restoreConti = null,
   onContiDropAnywhere,
+  service = 'sunday',
+  replaceSong = null,
+  preferredSongs,
 }: Props) {
+  const linesPerSlide = defaultLinesPerSlide(service);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
     hasCloudLibrary() ? 'syncing' : 'local',
@@ -1185,6 +1222,17 @@ export default function LyricsGenerator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreVersion]);
 
+  useEffect(() => {
+    if (!replaceSong) return;
+    const next = structuredClone(replaceSong.song);
+    setSongs((list) => list.map((song) => (song.id === next.id ? next : song)));
+    setEdited(true);
+    // Its Korean reaches the 찬양 라이브러리 too, if the library lacks it.
+    pendingAutoSaveRef.current.add(next.id);
+    // Only a version bump replaces; the song object changing identity must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaceSong?.version]);
+
   /**
    * Apply — or decline — a web candidate the user chose.
    *
@@ -1413,7 +1461,7 @@ export default function LyricsGenerator({
   }, []);
 
   const addFromLibrary = useCallback((entry: LibraryEntry) => {
-    setSongs((l) => [...l, songFromLibrary(entry)]);
+    setSongs((l) => [...l, songFromLibrary(entry, undefined, linesPerSlide)]);
     setEdited(true);
     showToast(`'${entry.title}' 을(를) 목록에 추가했습니다.`);
   }, []);
@@ -1461,10 +1509,12 @@ export default function LyricsGenerator({
       // Which song is the 공동체 고백송 is an administrator setting, and it
       // also decides which entry is the 설교 후 찬양 (the one listed after it).
       const shared = await getSyncedAiSettings();
-      const { lyricsSongs, confessionSong, postSermonSong } = splitLyricsAndConfessionSongs(
-        baseSongs,
-        shared.confessionSong,
-      );
+      // A 찬양집회 conti is all praise: nothing is set aside as the 공동체
+      // 고백송, and nothing moves after a sermon.
+      const { lyricsSongs, confessionSong, postSermonSong } =
+        service === 'praise'
+          ? { lyricsSongs: baseSongs, confessionSong: undefined, postSermonSong: undefined }
+          : splitLyricsAndConfessionSongs(baseSongs, shared.confessionSong);
       const excludedPages = new Set<number>();
       if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
@@ -1472,15 +1522,26 @@ export default function LyricsGenerator({
         // The conti names the song: when 찬양 라이브러리 already holds that
         // title, its saved lyrics are loaded right away and the 악보 is never
         // read for lyrics.
-        const hit = findLibrarySong(lib, { title: entry.title });
-        const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
+        const preferred = preferredSongs ? findLibrarySong(preferredSongs, { title: entry.title }) : undefined;
+        const hit = preferred ?? findLibrarySong(lib, { title: entry.title });
+        const song = hit ? songFromLibrary(hit, entry.pageIndex, linesPerSlide) : blankSong(entry.title, linesPerSlide);
+        if (preferred) {
+          // Split as it was saved: one saved slide per part, never re-chunked.
+          song.linesPerSlide = Math.max(linesPerSlide, ...preferred.sections.map((section) => section.lines.length));
+          pendingAutoSaveRef.current.add(song.id);
+        }
         song.title = entry.title;
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;
         // The 진행 순서 written on the conti is this week's arrangement: the
         // parts are filled from the score or the web, in exactly this order.
-        if (entry.order && entry.order.length > 0) {
+        // A saved song whose parts the conti's tokens cannot name (a song
+        // saved slide by slide from a 찬양집회 deck has parts 1, 2, 3…) keeps
+        // its own order; taking the conti's would leave it with no slides.
+        const orderFits =
+          !hit || (entry.order ?? []).some((token) => token !== 'I' && findSection(song.sections, token));
+        if (entry.order && entry.order.length > 0 && orderFits) {
           song.order = [...entry.order];
           song.orderFromConti = true;
         }
@@ -1502,9 +1563,9 @@ export default function LyricsGenerator({
         if (hit) {
           if (confessionSong && normalizeTitle(hit.title) === normalizeTitle(confessionSong.title)) continue;
           // The page text names a song the library holds: load it right away.
-          next.push(songFromLibrary(hit, page));
+          next.push(songFromLibrary(hit, page, linesPerSlide));
         } else {
-          const stub = blankSong(`새 찬양 (p.${page})`);
+          const stub = blankSong(`새 찬양 (p.${page})`, linesPerSlide);
           stub.pageIndex = page;
           next.push(stub);
         }
@@ -1790,6 +1851,7 @@ export default function LyricsGenerator({
               webReview={webReview[song.id]}
               onSelectWebCandidate={(candidateId) => selectWebCandidate(song.id, candidateId)}
               onZoom={() => setZoomSongId(song.id)}
+              hidePostSermon={service === 'praise'}
               onTitleBlur={(title) => {
                 const hit = findEntry(library, title);
                 if (hit && !songHasLyrics(song)) {
@@ -1805,7 +1867,7 @@ export default function LyricsGenerator({
             type="button"
             className="btn"
             data-testid="add-song"
-            onClick={() => setSongs((l) => [...l, blankSong()])}
+            onClick={() => setSongs((l) => [...l, blankSong('', linesPerSlide)])}
           >
             <Icon name="plus" />
             빈 찬양 추가
@@ -1813,7 +1875,7 @@ export default function LyricsGenerator({
           <LibraryAddSearch
             library={library}
             onAdd={(entry) => {
-              setSongs((l) => [...l, songFromLibrary(entry)]);
+              setSongs((l) => [...l, songFromLibrary(entry, undefined, linesPerSlide)]);
               setEdited(true);
             }}
           />
@@ -1881,6 +1943,7 @@ export default function LyricsGenerator({
             <div className="split-view-editor" data-testid="split-view-editor">
               <SongCard
                 editorOnly
+                hidePostSermon={service === 'praise'}
                 song={zoomSong}
                 index={songs.findIndex((s) => s.id === zoomSong.id)}
                 total={songs.length}

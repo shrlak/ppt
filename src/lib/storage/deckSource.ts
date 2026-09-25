@@ -51,7 +51,7 @@ function sectionsOf(value: unknown): Song['sections'] {
   });
 }
 
-function songOf(value: unknown): Song | null {
+export function songOf(value: unknown): Song | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   if (typeof raw.title !== 'string') return null;

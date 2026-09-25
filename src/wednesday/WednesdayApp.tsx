@@ -418,7 +418,7 @@ export default function WednesdayApp() {
             </div>
           </div>
           <nav className="header-actions" aria-label="도구">
-            <a className="btn" href={`${BASE}index.html`} data-testid="wednesday-to-sunday">
+            <a className="btn" href={`${BASE}index.html?service=sunday`} data-testid="wednesday-to-sunday">
               <Icon name="steps" />
               <span className="btn-label">주일예배 생성기</span>
             </a>

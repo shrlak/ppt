@@ -17,6 +17,7 @@
 //   GET/PUT/DELETE /libraries/lyrics -> shared lyrics library
 //   GET/POST/DELETE /libraries/ppt   -> shared PPT library and chunk transfer
 //   GET/POST /libraries/ppt/purge    -> weekly purge status / run it now
+//   GET/POST/PUT/DELETE /libraries/praise-english -> 찬양집회 영어 가사 library
 //   GET  /learning/models            -> measured per-model recognition accuracy
 //   POST /learning/models/evaluations-> record accuracy from verified corrections
 //   POST /learning/feedback          -> store one verified user correction
@@ -113,6 +114,7 @@ import {
   songPptHostsOnly,
   verifySongPptToken,
 } from './songPpt.js';
+import { MAX_PRAISE_ENGLISH_ENTRIES, sanitizePraiseEnglishEntries, sanitizePraiseEnglishEntry } from './praiseEnglish.js';
 import {
   fetchSheetImage,
   fetchSheetImageCandidates,
@@ -295,6 +297,61 @@ export class UsageTracker extends DurableObject {
     if (!normalized) throw new Error('invalid 수요예배 song title');
     await this.ctx.storage.delete(`library:wednesday-songs:entry:${normalized}`);
     await this.ctx.storage.put(`library:wednesday-songs:deleted:${normalized}`, {
+      normalizedTitle: normalized,
+      deletedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * The 찬양집회 영어 가사 library: each bilingual song's Korean slides and the
+   * English under them. Outside `library:ppt:*`, so the weekly purge leaves
+   * it alone, exactly like the lyrics library.
+   */
+  async praiseEnglishLibrary() {
+    const stored = await this.ctx.storage.list({ prefix: 'library:praise-english:entry:' });
+    const tombstones = await this.ctx.storage.list({ prefix: 'library:praise-english:deleted:' });
+    return {
+      entries: [...stored.values()].map((value) => value.entry).filter(Boolean),
+      deletedTitles: [...tombstones.values()].map((value) => value.normalizedTitle).filter(Boolean),
+    };
+  }
+
+  async upsertPraiseEnglish(rawEntry) {
+    const entry = sanitizePraiseEnglishEntry(rawEntry);
+    if (!entry) throw new Error('invalid 찬양집회 English entry');
+    const normalized = normalizeLibraryTitle(entry.title);
+    const entryKey = `library:praise-english:entry:${normalized}`;
+    if (!(await this.ctx.storage.get(entryKey))) {
+      const all = await this.ctx.storage.list({ prefix: 'library:praise-english:entry:' });
+      if (all.size >= MAX_PRAISE_ENGLISH_ENTRIES) throw new Error('찬양집회 English library is full');
+    }
+    await this.ctx.storage.put(entryKey, { entry, updatedAt: new Date().toISOString() });
+    await this.ctx.storage.delete(`library:praise-english:deleted:${normalized}`);
+    return entry;
+  }
+
+  async mergePraiseEnglish(rawEntries) {
+    for (const entry of sanitizePraiseEnglishEntries(rawEntries)) {
+      const normalized = normalizeLibraryTitle(entry.title);
+      const entryKey = `library:praise-english:entry:${normalized}`;
+      const [existing, deleted] = await Promise.all([
+        this.ctx.storage.get(entryKey),
+        this.ctx.storage.get(`library:praise-english:deleted:${normalized}`),
+      ]);
+      // Migration only: a cloud copy wins, and a tombstone is never
+      // resurrected by another device's stale local cache.
+      if (!existing && !deleted) {
+        await this.ctx.storage.put(entryKey, { entry, updatedAt: new Date().toISOString() });
+      }
+    }
+    return this.praiseEnglishLibrary();
+  }
+
+  async deletePraiseEnglish(title) {
+    const normalized = normalizeLibraryTitle(title);
+    if (!normalized) throw new Error('invalid 찬양집회 English title');
+    await this.ctx.storage.delete(`library:praise-english:entry:${normalized}`);
+    await this.ctx.storage.put(`library:praise-english:deleted:${normalized}`, {
       normalizedTitle: normalized,
       deletedAt: new Date().toISOString(),
     });
@@ -806,7 +863,9 @@ export class UsageTracker extends DurableObject {
    * PPT and the inputs snapshot) and any half-finished upload. Each deck
    * leaves a tombstone behind so a device holding a cached copy deletes it on
    * the next sync instead of uploading it straight back. The 곡 라이브러리 is
-   * a song database rather than a week's material, so it is never touched.
+   * a song database rather than a week's material, so it is never touched —
+   * and neither is a deck saved with `keep` (the 찬양집회 decks), which only
+   * goes when someone deletes it by hand.
    */
   async purgePptLibrary({ purgeKey = null, at = new Date().toISOString(), trigger = 'scheduled' } = {}) {
     const now = new Date(at);
@@ -814,7 +873,14 @@ export class UsageTracker extends DurableObject {
     const decks = await this.ctx.storage.list({ prefix: 'library:ppt:meta:' });
     let files = 0;
     let bytes = 0;
+    let removed = 0;
+    let kept = 0;
     for (const [key, deck] of decks) {
+      if (deck?.keep === true) {
+        kept += 1;
+        continue;
+      }
+      removed += 1;
       await this.cleanupPptUpload(deck.uploadId, deck.files);
       await this.ctx.storage.delete(key);
       await this.ctx.storage.put(`library:ppt:deleted:${deck.id}`, {
@@ -842,7 +908,8 @@ export class UsageTracker extends DurableObject {
       purgeKey,
       trigger,
       at: timestamp.toISOString(),
-      decks: decks.size,
+      decks: removed,
+      kept,
       files,
       bytes,
       uploads: uploads.size,
@@ -1056,6 +1123,39 @@ export default {
         }
         if (request.method === 'DELETE') {
           await tracker.deleteWednesdaySong(body.title);
+          return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+      } catch (error) {
+        return libraryError(error, headers);
+      }
+      return libraryError('not found', headers, 404);
+    }
+
+    // The 찬양집회 영어 가사 library. Same storage and the same administrator
+    // password as the lyrics library.
+    if (url.pathname === '/libraries/praise-english') {
+      const tracker = usageTracker(env);
+      if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
+      try {
+        if (request.method === 'GET') {
+          return jsonResponse(await tracker.praiseEnglishLibrary(), 200, { ...headers, 'Cache-Control': 'no-store' });
+        }
+        if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+        const body = JSON.parse(await request.text());
+        if (request.method === 'POST') {
+          return jsonResponse(await tracker.mergePraiseEnglish(body.entries), 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'PUT') {
+          return jsonResponse({ entry: await tracker.upsertPraiseEnglish(body.entry) }, 200, {
+            ...headers,
+            'Cache-Control': 'no-store',
+          });
+        }
+        if (request.method === 'DELETE') {
+          await tracker.deletePraiseEnglish(body.title);
           return jsonResponse({ ok: true }, 200, { ...headers, 'Cache-Control': 'no-store' });
         }
       } catch (error) {

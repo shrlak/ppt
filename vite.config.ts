@@ -22,12 +22,14 @@ export default defineConfig({
   build: {
     target: 'es2022',
     rollupOptions: {
-      // Two pages, two entries: the Sunday wizard at index.html and the
-      // 수요예배 generator at wednesday.html. Listing index.html explicitly is
-      // required — naming any input replaces Vite's default.
+      // One entry per page: the service picker + Sunday wizard at index.html,
+      // the 수요예배 generator at wednesday.html and the 찬양집회 generator at
+      // praise.html. Listing index.html explicitly is required — naming any
+      // input replaces Vite's default.
       input: {
         main: 'index.html',
         wednesday: 'wednesday.html',
+        praise: 'praise.html',
       },
     },
   },

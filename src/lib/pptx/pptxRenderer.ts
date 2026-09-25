@@ -64,6 +64,8 @@ export interface RenderedSlide {
   widthEmu: number;
   heightEmu: number;
   background?: string;
+  /** A picture background (`p:bg` blipFill), stretched over the whole slide. */
+  backgroundImage?: string;
   shapes: RenderedShape[];
 }
 
@@ -312,6 +314,32 @@ function readSlideRelTargets(relsXml: string | null): Map<string, string> {
   return map;
 }
 
+/** The object URL for a media part, created once per render call. */
+async function mediaUrl(zip: JSZip, mediaPath: string, urlCache: Map<string, string>): Promise<string | undefined> {
+  let url = urlCache.get(mediaPath);
+  if (!url) {
+    const file = zip.file(mediaPath);
+    if (!file) return undefined;
+    url = URL.createObjectURL(await file.async('blob'));
+    urlCache.set(mediaPath, url);
+  }
+  return url;
+}
+
+/** A `p:bg` that is a picture rather than a colour, as an object URL. */
+async function readBackgroundImage(
+  bg: Element | null,
+  zip: JSZip,
+  relTargets: Map<string, string>,
+  urlCache: Map<string, string>,
+): Promise<string | undefined> {
+  const blipFill = bg && firstEl(bg, 'a:blipFill');
+  const blip = blipFill && firstEl(blipFill, 'a:blip');
+  const rEmbed = blip?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed');
+  const target = rEmbed ? relTargets.get(rEmbed) : undefined;
+  return target ? mediaUrl(zip, resolvePartTarget(target), urlCache) : undefined;
+}
+
 async function readPictureShape(
   pic: Element,
   box: ShapeBase,
@@ -383,6 +411,7 @@ async function readSpTreeShapes(
 
 interface StaticLayer {
   background?: string;
+  backgroundImage?: string;
   shapes: RenderedShape[];
   spTree: Element | null;
   doc: Document | null;
@@ -409,10 +438,11 @@ async function readStaticLayer(zip: JSZip, partPath: string, urlCache: Map<strin
   const relsFile = zip.file(relsPathFor(partPath));
   const relsXml = relsFile ? await relsFile.async('string') : null;
   const relTargets = readSlideRelTargets(relsXml);
+  const backgroundImage = await readBackgroundImage(bg, zip, relTargets, urlCache);
 
   const spTree = cSld && firstEl(cSld, 'p:spTree');
   const shapes = spTree ? await readSpTreeShapes(spTree, zip, relTargets, urlCache, true) : [];
-  return { background, shapes, spTree, doc };
+  return { background, backgroundImage, shapes, spTree, doc };
 }
 
 async function resolveThemeFonts(zip: JSZip, masterPath: string): Promise<ThemeFonts> {
@@ -558,7 +588,12 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
     const cSld = firstEl(doc.documentElement, 'p:cSld');
     const bg = cSld && firstEl(cSld, 'p:bg');
     const ownBackground = bg ? readSolidFill(firstEl(bg, 'p:bgPr')) : undefined;
-    const background = ownBackground ?? inheritance.layers.find((l) => l.background)?.background;
+    const ownImage = await readBackgroundImage(bg, zip, relTargets, urlCache);
+    // The nearest background wins: the slide's own, else its layout's, else
+    // the master's — a layout that paints a photo covers the master's colour.
+    const nearest = [...inheritance.layers].reverse().find((l) => l.background || l.backgroundImage);
+    const background = ownBackground ?? (ownImage ? undefined : nearest?.background);
+    const backgroundImage = ownBackground ? undefined : (ownImage ?? nearest?.backgroundImage);
 
     const spTree = cSld && firstEl(cSld, 'p:spTree');
     const ownShapes = spTree
@@ -570,7 +605,7 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
         })
       : [];
     const shapes = [...inheritance.layers.flatMap((l) => l.shapes), ...ownShapes];
-    slides.push({ index, widthEmu, heightEmu, background, shapes });
+    slides.push({ index, widthEmu, heightEmu, background, backgroundImage, shapes });
   }
   return slides;
 }
@@ -579,6 +614,10 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
 export function revokeRenderedSlides(slides: RenderedSlide[]): void {
   const seen = new Set<string>();
   for (const slide of slides) {
+    if (slide.backgroundImage && !seen.has(slide.backgroundImage)) {
+      seen.add(slide.backgroundImage);
+      URL.revokeObjectURL(slide.backgroundImage);
+    }
     for (const shape of slide.shapes) {
       if (shape.kind === 'picture' && !seen.has(shape.imageUrl)) {
         seen.add(shape.imageUrl);
