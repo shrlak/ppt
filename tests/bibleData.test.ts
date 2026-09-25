@@ -121,11 +121,16 @@ const KOREAN_CHAPTER_LENGTHS: Record<string, [number, number, number][]> = {
     [47, 13, 13],
     [66, 12, 18], // 새번역 prints 계12:18 ("그 때에 그 용이 바닷가 모래 위에 섰습니다")
   ],
+  'ko_ko.json': [
+    [47, 13, 13],
+    [22, 6, 14], // 개역한글 prints 아가6:13's second half as verse 14
+  ],
 };
 
 describe.each([
   ['개역개정', 'ko_nkrv.json'],
   ['새번역', 'ko_saenew.json'],
+  ['개역한글', 'ko_ko.json'],
 ])('%s verse numbering', (_name, file) => {
   const raw = readTranslation(file);
 
@@ -176,6 +181,22 @@ describe('새번역 text', () => {
     expect(units(26, 15, 6, 8)).toEqual([
       [6, 6],
       [7, 8],
+    ]);
+  });
+});
+
+describe('개역한글 text', () => {
+  const krv = new Map(readTranslation('ko_ko.json').map((book, i) => [i + 1, book.chapters]));
+
+  it('has the chapters the old file left empty', () => {
+    expect(getVerseRange(krv, 18, 42, 1, 42, 1)[0].text).toMatch(/^욥이 여호와께 대답하여/);
+    expect(getVerseRange(krv, 60, 5, 7, 5, 7)[0].text).toMatch(/^너희 염려를 다 주께 맡겨 버리라/);
+  });
+
+  it('reads 삼상30:30, which carries verse 31 too, as 30-31', () => {
+    expect(getVerseUnits(krv, 9, 30, 29, 30, 31).map((v) => [v.verse, lastVerseOf(v)])).toEqual([
+      [29, 29],
+      [30, 31],
     ]);
   });
 });
