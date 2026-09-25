@@ -198,6 +198,23 @@ export function libraryLyrics(
   return { sections: sortSectionsByOrder(sections, contiOrder), order: [...contiOrder] };
 }
 
+/**
+ * What a 찬양 라이브러리 entry holds for a song, as one comparable string.
+ * Auto-save writes a song back whenever this differs from the saved entry —
+ * any change at all, down to one letter, a key or the 진행 순서.
+ */
+export function libraryContentKey(
+  item: Pick<LibraryEntry, 'title' | 'artist' | 'key' | 'sections' | 'order'>,
+): string {
+  return JSON.stringify({
+    title: item.title.trim(),
+    artist: item.artist ?? '',
+    key: item.key ?? '',
+    sections: item.sections.map((section) => ({ label: section.label, lines: section.lines })),
+    order: item.order,
+  });
+}
+
 /** Load the read-only starter library bundled with the site. */
 export async function fetchBundledLibrary(baseUrl: string): Promise<LibraryEntry[]> {
   try {

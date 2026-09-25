@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findEntry,
+  libraryContentKey,
   libraryLyrics,
   mergeLibraries,
   normalizeTitle,
@@ -182,5 +183,28 @@ describe('libraryLyrics', () => {
     expect(lyrics.sections.map((section) => section.label)).toEqual(['V1', 'V2', 'C', 'B']);
     lyrics.sections[0].lines.push('수정');
     expect(saved.sections[0].lines).toEqual(['1절']);
+  });
+});
+
+describe('libraryContentKey', () => {
+  const saved: LibraryEntry = {
+    title: '주 은혜임을',
+    key: 'E',
+    sections: [{ label: 'V1', lines: ['내가 살아가는 날 동안'] }],
+    order: ['I', 'V1'],
+    verification: 'verified',
+    version: 3,
+  };
+
+  it('ignores the trust level and version, which are not the song', () => {
+    const drafted: LibraryEntry = { ...saved, verification: 'draft', version: 9 };
+    expect(libraryContentKey(drafted)).toBe(libraryContentKey(saved));
+  });
+
+  it('changes with any edit to the words, key or 진행 순서', () => {
+    const base = libraryContentKey(saved);
+    expect(libraryContentKey({ ...saved, order: ['I', 'V1', 'V1'] })).not.toBe(base);
+    expect(libraryContentKey({ ...saved, key: 'F' })).not.toBe(base);
+    expect(libraryContentKey({ ...saved, sections: [{ label: 'V1', lines: ['내가 살아가는 날 동안!'] }] })).not.toBe(base);
   });
 });
