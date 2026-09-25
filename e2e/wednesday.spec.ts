@@ -5,13 +5,56 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Stands in for a downloaded 찬양 PPT. It is a real four-slide deck at another
-// slide size, so the rescale path runs here too.
+// Stands in for a 찬양 PPT. It is a real four-slide deck at another slide
+// size, so the rescale path runs here too.
 const SONG_PPTX = path.join(HERE, '..', 'public', 'front-slides.pptx');
 const SHEET_PNG = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
 const PROXY = 'http://localhost:4173/ppt/__proxy';
 // Reading the 개역개정 file and building the deck are both slower in CI.
 const BUILD_TIMEOUT = 60_000;
+
+/**
+ * The stand-in as a downloaded 찬양 PPT really is: the 악보 page on every
+ * slide. The app refuses a download that is text alone, as a 가사 PPT.
+ */
+async function sheetMusicDeck(): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(await fs.readFile(SONG_PPTX));
+  zip.file('ppt/media/e2e-sheet.png', await fs.readFile(SHEET_PNG));
+  const types = await zip.file('[Content_Types].xml')!.async('string');
+  if (!/Extension="png"/i.test(types)) {
+    zip.file(
+      '[Content_Types].xml',
+      types.replace(/<Types\b[^>]*>/, (open) => `${open}<Default Extension="png" ContentType="image/png"/>`),
+    );
+  }
+  const size = (await zip.file('ppt/presentation.xml')!.async('string')).match(
+    /<p:sldSz\b[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/,
+  )!;
+  for (const name of Object.keys(zip.files).filter((file) => /^ppt\/slides\/slide\d+\.xml$/.test(file))) {
+    const relsName = name.replace('slides/', 'slides/_rels/') + '.rels';
+    const rels = await zip.file(relsName)!.async('string');
+    zip.file(
+      relsName,
+      rels.replace(
+        '</Relationships>',
+        '<Relationship Id="rIdE2eSheet" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/e2e-sheet.png"/></Relationships>',
+      ),
+    );
+    const xml = await zip.file(name)!.async('string');
+    zip.file(
+      name,
+      xml.replace(
+        '</p:spTree>',
+        '<p:pic><p:nvPicPr><p:cNvPr id="9999" name="악보"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>' +
+          '<p:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdE2eSheet"/>' +
+          '<a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+          `<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${size[1]}" cy="${size[2]}"/></a:xfrm>` +
+          '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree>',
+      ),
+    );
+  }
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
 
 /**
  * Slide text in presentation order.
@@ -198,7 +241,7 @@ test.describe('수요예배 generator', () => {
   });
 
   test('offers the search hits the proxy is willing to fetch', async ({ page }) => {
-    const songFile = await fs.readFile(SONG_PPTX);
+    const songFile = await sheetMusicDeck();
     await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
       route.fulfill({
         json: {
@@ -331,7 +374,7 @@ test.describe('수요예배 generator', () => {
   });
 
   test('prefers a 찬양 PPT when the search is sure of one', async ({ page }) => {
-    const songFile = await fs.readFile(SONG_PPTX);
+    const songFile = await sheetMusicDeck();
     await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
       route.fulfill({
         json: {
@@ -372,7 +415,7 @@ test.describe('수요예배 generator', () => {
   test('moves on to the next hit when the first one has no file', async ({ page }) => {
     // 제목을 검색해서 위에 있는 걸 눌러 보는 것과 같습니다 — 첫 글에 첨부가
     // 없으면 그다음 것을 눌러 봅니다.
-    const songFile = await fs.readFile(SONG_PPTX);
+    const songFile = await sheetMusicDeck();
     const hit = (token: string, url: string) => ({
       token,
       url,

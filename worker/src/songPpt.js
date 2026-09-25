@@ -82,6 +82,16 @@ const NEVER_FILE_HOSTS = [
   'wikipedia.org',
 ];
 
+/**
+ * Where this church looks first: 티스토리 blogs (and their file CDN) and
+ * 갓피플. A sure hit on one of these is tried before a sure hit anywhere
+ * else, 네이버 블로그 included.
+ */
+export const PREFERRED_SONG_PPT_HOSTS = ['tistory.com', 'blog.kakaocdn.net', 'godpeople.com', 'godpeople.co.kr'];
+
+/** The sites the Google search is restricted to. */
+export const GOOGLE_SONG_PPT_SITES = ['tistory.com', 'godpeople.com'];
+
 /** Per-request ceilings, so one lookup can never stall the Worker. */
 const SEARCH_TIMEOUT_MS = 6000;
 const DOWNLOAD_TIMEOUT_MS = 20_000;
@@ -112,11 +122,48 @@ export function naverBlogSearchUrl(query) {
   return `https://search.naver.com/search.naver?ssc=tab.blog.all&query=${encodeURIComponent(query)}`;
 }
 
-/** Search phrasings, most specific first. */
+/**
+ * Google 검색, asked first and only for 티스토리 and 갓피플.
+ *
+ * Google answers a server's own fetch of its results page with a CAPTCHA
+ * (/sorry/), and its Custom Search API takes no new sign-ups and ends on
+ * 2027-01-01, so the search goes through Serper, which returns Google's own
+ * results as JSON. A deployment without SERPER_API_KEY skips it, and the blog
+ * and web searches below still run.
+ */
+export const GOOGLE_SEARCH_ENDPOINT = 'https://google.serper.dev/search';
+
+export function googleSearchKey(env = {}) {
+  return String(env.SERPER_API_KEY || '').trim();
+}
+
+/** A phrasing, restricted to the sites the Google search asks. */
+export function googleSongPptQuery(query) {
+  return `${query} (${GOOGLE_SONG_PPT_SITES.map((site) => `site:${site}`).join(' OR ')})`;
+}
+
+export function fetchGoogleSearch(query, env = {}) {
+  return fetchWithTimeout(GOOGLE_SEARCH_ENDPOINT, {
+    method: 'POST',
+    headers: { 'X-API-KEY': googleSearchKey(env), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: googleSongPptQuery(query), gl: 'kr', hl: 'ko', num: 10 }),
+  });
+}
+
+/**
+ * Search phrasings, most specific first. 악보 leads: a 찬양 PPT is shared
+ * both as 가사 only and with the 악보 on every slide, and only the second is
+ * what this church puts up.
+ */
 export function buildSongPptQueries(title) {
   const clean = String(title || '').trim();
   if (!clean) return [];
-  return [`${clean} 찬양 ppt`, `${clean} ppt 다운로드`, `${clean} 악보 ppt`];
+  return [`${clean} 악보 ppt`, `${clean} 찬양 ppt`, `${clean} ppt 다운로드`];
+}
+
+/** True when a hit's title or snippet says its PPT carries the 악보. */
+export function mentionsSheet(text) {
+  return /악보/.test(String(text || ''));
 }
 
 /** The known-host list for this deployment: the defaults plus its own. */
@@ -152,6 +199,17 @@ export function isKnownSongPptHost(rawUrl, env = {}) {
     return false;
   }
   return songPptHosts(env).some((entry) => hostMatches(hostname, entry));
+}
+
+/** True when this host is 티스토리 or 갓피플, the sites tried first. */
+export function isPreferredSongPptHost(rawUrl) {
+  let hostname;
+  try {
+    hostname = new URL(rawUrl).hostname;
+  } catch {
+    return false;
+  }
+  return PREFERRED_SONG_PPT_HOSTS.some((entry) => hostMatches(hostname, entry));
 }
 
 /** True when this host never holds a file, whatever its page is titled. */
@@ -299,7 +357,7 @@ export function extractSongPptResults(html, env = {}, limit = MAX_SONG_PPT_CANDI
 
     const direct = looksLikePptxUrl(url);
     if (isAllowedSongPptUrl(url, env) && (direct || !isNeverFileHost(url))) {
-      results.push({ url, host, title, direct, known: isKnownSongPptHost(url, env) });
+      results.push({ url, host, title, direct, known: isKnownSongPptHost(url, env), sheet: mentionsSheet(title) });
     } else if (direct && links.length < limit) {
       // A .pptx this deployment may not relay is still worth showing.
       links.push({ url, host, title });
@@ -361,9 +419,51 @@ function blogPostHits(labels, isPost, env, limit) {
       direct: looksLikePptxUrl(url),
       known: isKnownSongPptHost(url, env),
       attachment: attachmentKind(texts.join(' ')),
+      sheet: mentionsSheet(texts.join(' ')),
     });
   }
   return { results, links: [] };
+}
+
+/**
+ * Pull hits out of a Google search answered as JSON (see fetchGoogleSearch):
+ * `organic` is the results page, each with its address, title and snippet.
+ * The same rules as the HTML searches decide what may be fetched.
+ */
+export function extractGoogleResults(payload, env = {}, limit = MAX_SONG_PPT_CANDIDATES * 2) {
+  const results = [];
+  const links = [];
+  const clean = (value) =>
+    decodeEntities(String(value ?? ''))
+      .replace(/\s+/g, ' ')
+      .trim();
+  for (const item of Array.isArray(payload?.organic) ? payload.organic : []) {
+    if (results.length >= limit) break;
+    const url = typeof item?.link === 'string' ? item.link.split('#')[0] : '';
+    let host;
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      continue;
+    }
+    const title = clean(item.title).slice(0, 160);
+    const text = `${title} ${clean(item.snippet)}`;
+    const direct = looksLikePptxUrl(url);
+    if (isAllowedSongPptUrl(url, env) && (direct || !isNeverFileHost(url))) {
+      results.push({
+        url,
+        host,
+        title,
+        direct,
+        known: isKnownSongPptHost(url, env),
+        attachment: attachmentKind(text),
+        sheet: mentionsSheet(text),
+      });
+    } else if (direct && links.length < limit) {
+      links.push({ url, host, title });
+    }
+  }
+  return { results, links };
 }
 
 /**
@@ -440,17 +540,20 @@ export const SET_LIST_TITLE = /(콘티|모음|메들리|medley|셋리스트|set\
 /**
  * Rank 찬양 PPT hits for a song, and mark the ones the app may try unasked.
  *
- * Sure hits come first. Among them a link straight to the file beats a post
- * whose snippet names a .pptx attachment, which beats a post on a 자료실 we
- * know, which beats the rest — and a post whose only attachment is the old
- * .ppt format comes last, because a slide cannot be made from one.
+ * Sure hits come first, and a post whose only attachment is the old .ppt
+ * format goes to the end of them, because a slide cannot be made from one.
+ * Among the rest a post that says it has the 악보 comes first, then 티스토리
+ * and 갓피플 before any other site — those are where this church gets its
+ * songs. Guesses are shown best match first instead, since a preferred site
+ * does not make another song's post any closer. After that a link straight
+ * to the file beats a post whose snippet names a .pptx attachment, which
+ * beats a post on a 자료실 we know, which beats the rest.
  */
 export function rankSongPptHits(title, hits) {
   const order = new Map(hits.map((hit, index) => [hit.url, index]));
   const fileRank = (hit) => {
     if (hit.direct) return 0;
     if (hit.attachment === 'pptx') return 1;
-    if (hit.attachment === 'ppt') return 4;
     return hit.known ? 2 : 3;
   };
   return rankSongMatches(title, hits)
@@ -460,9 +563,14 @@ export function rankSongPptHits(title, hits) {
     }))
     .sort((a, b) => {
       const sure = (hit) => (hit.decision === 'auto' ? 0 : 1);
+      if (sure(a) !== sure(b)) return sure(a) - sure(b);
+      const legacy = (hit) => (hit.attachment === 'ppt' ? 1 : 0);
+      const sheet = (hit) => (hit.sheet ? 0 : 1);
+      const preferred = (hit) => (isPreferredSongPptHost(hit.url) ? 0 : 1);
+      const byPreference = legacy(a) - legacy(b) || sheet(a) - sheet(b) || preferred(a) - preferred(b);
+      const byScore = b.score - a.score;
       return (
-        sure(a) - sure(b) ||
-        b.score - a.score ||
+        (a.decision === 'auto' ? byPreference || byScore : byScore || byPreference) ||
         fileRank(a) - fileRank(b) ||
         order.get(a.url) - order.get(b.url)
       );
@@ -493,14 +601,23 @@ function absoluteUrl(rawUrl, pageUrl) {
  * Only a .pptx counts. A post that offers the old .ppt format beside it
  * (티스토리 often has both, 4:3 and wide) gets its .pptx taken; one that only
  * has a .ppt has nothing a slide can be made from — see hasLegacyPptAttachment.
+ *
+ * A post often has more than one .pptx: 악보 and 가사 only, with a background
+ * and 무배경. The file's name decides between them (see pptVersionRank), so
+ * the one with the 악보, and without a background, is the one taken.
  */
 export function findSongPptAttachment(html, pageUrl, env = {}) {
   const text = String(html || '');
+  const labels = linkLabels(text, pageUrl);
+  const version = (url) => pptVersionRank(`${labels.get(url) ?? ''} ${fileNameOf(url)}`);
+  const best = (urls, rank) =>
+    urls.reduce((chosen, url) => (rank(url) < rank(chosen) ? url : chosen), urls[0]);
+
   const found = [];
   for (const match of text.matchAll(/(?:href|src|data-src)="([^"]+)"/gi)) {
     const url = absoluteUrl(match[1], pageUrl);
     if (!url || !looksLikeModernPptxUrl(url)) continue;
-    if (!isAllowedSongPptUrl(url, env)) continue;
+    if (!isAllowedSongPptUrl(url, env) || found.includes(url)) continue;
     found.push(url);
   }
   if (found.length > 0) {
@@ -513,7 +630,7 @@ export function findSongPptAttachment(html, pageUrl, env = {}) {
         return '';
       }
     })();
-    const rank = (url) => {
+    const hostRank = (url) => {
       if (isKnownSongPptHost(url, env)) return 0;
       try {
         return sameSite(new URL(url).hostname, pageHost) ? 1 : 2;
@@ -521,18 +638,41 @@ export function findSongPptAttachment(html, pageUrl, env = {}) {
         return 2;
       }
     };
-    return found.reduce((best, url) => (rank(url) < rank(best) ? url : best), found[0]);
+    return best(found, (url) => hostRank(url) * 10 + version(url));
   }
 
   // No address gave it away; try the one a person would click.
-  for (const match of text.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]{0,200}?)<\/a>/gi)) {
-    const label = decodeEntities(match[2].replace(/<[^>]*>/g, ' '));
-    if (!/\.pptx\b/i.test(label)) continue;
+  const named = [...labels.entries()]
+    .filter(([url, label]) => /\.pptx\b/i.test(label) && isAllowedSongPptUrl(url, env))
+    .map(([url]) => url);
+  return named.length > 0 ? best(named, version) : null;
+}
+
+/** Every link on a page with the text shown for it — on most blogs, the file's name. */
+function linkLabels(html, pageUrl) {
+  const labels = new Map();
+  for (const match of html.matchAll(/<a\b[^>]*?\shref="([^"]+)"[^>]*>([\s\S]{0,400}?)<\/a>/gi)) {
     const url = absoluteUrl(match[1], pageUrl);
-    if (!url || !isAllowedSongPptUrl(url, env)) continue;
-    return url;
+    if (!url) continue;
+    const label = decodeEntities(match[2].replace(/<[^>]*>/g, ' '))
+      .replace(/\s+/g, ' ')
+      .trim();
+    labels.set(url, `${labels.get(url) ?? ''} ${label}`.trim());
   }
-  return null;
+  return labels;
+}
+
+/**
+ * Which of a post's PowerPoint files to take, lowest first, from its name:
+ * one with the 악보 before one that does not say, before one that is 가사
+ * only; and among those, 무배경 before the same with a background.
+ */
+export function pptVersionRank(name) {
+  const text = String(name || '').toLowerCase();
+  const sheet = /악보/.test(text);
+  const lyricsOnly = !sheet && /가사/.test(text);
+  const plain = /무배경|배경\s*(?:x|없)/.test(text);
+  return (sheet ? 0 : lyricsOnly ? 4 : 2) + (plain ? 0 : 1);
 }
 
 /** True when a post's only PowerPoint attachment is the old binary .ppt. */
@@ -743,11 +883,13 @@ export async function verifySongPptToken(token, secret, { now = Date.now() } = {
 
 // ---- fetching -----------------------------------------------------------
 
-export async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {} } = {}) {
+export async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {}, method, body } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
+      method,
+      body,
       signal: controller.signal,
       headers: {
         // Some hosts serve an empty shell to clients with no UA at all.
@@ -790,20 +932,33 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
   const queries = buildSongPptQueries(title);
   if (queries.length === 0) return { candidates: [], links: [] };
 
-  // Each search is its own list of addresses, tried in order until one
+  // Each search is its own list of requests, tried in order until one
   // answers with hits; the searches themselves run side by side, so one
-  // engine being slow or turning the Worker away costs nothing.
+  // engine being slow or turning the Worker away costs nothing. Google comes
+  // first, so on a tie in the ranking its order is the one that stands.
+  const htmlSearch = (endpoints, extract) => ({
+    requests: endpoints.map((endpoint) => (query) => fetchWithTimeout(endpoint(query))),
+    read: async (response) => extract(await readBoundedText(response), env),
+  });
   const searches = [
-    { urls: [daumBlogSearchUrl], extract: extractDaumBlogResults },
-    { urls: [naverBlogSearchUrl], extract: extractNaverBlogResults },
-    { urls: SEARCH_ENDPOINTS, extract: extractSongPptResults },
+    ...(googleSearchKey(env)
+      ? [
+          {
+            requests: [(query) => fetchGoogleSearch(query, env)],
+            read: async (response) => extractGoogleResults(JSON.parse(await readBoundedText(response)), env),
+          },
+        ]
+      : []),
+    htmlSearch([daumBlogSearchUrl], extractDaumBlogResults),
+    htmlSearch([naverBlogSearchUrl], extractNaverBlogResults),
+    htmlSearch(SEARCH_ENDPOINTS, extractSongPptResults),
   ];
   const runSearch = async (search, query) => {
-    for (const url of search.urls) {
+    for (const request of search.requests) {
       try {
-        const response = await fetchWithTimeout(url(query));
+        const response = await request(query);
         if (!response.ok) continue;
-        const found = search.extract(await readBoundedText(response), env);
+        const found = await search.read(response);
         if (found.results.length > 0 || found.links.length > 0) return found;
       } catch {
         // A search engine being unreachable just means trying the next one.
@@ -823,6 +978,7 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
         if (existing) {
           // The other search may have seen the snippet that names the file.
           existing.attachment ??= hit.attachment;
+          existing.sheet ||= hit.sheet;
           continue;
         }
         seen.set(key, hit);

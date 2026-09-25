@@ -81,6 +81,9 @@ new_sqlite_classes = ["UsageTracker"]
 # API keys are NOT set here (this file is committed to git). Set them with:
 #   npx wrangler secret put GEMINI_API_KEY
 #   npx wrangler secret put OPENROUTER_API_KEY
+# The 수요예배 찬양 PPT search asks Google (티스토리·갓피플) only when this
+# optional key from https://serper.dev is set:
+#   npx wrangler secret put SERPER_API_KEY
 # POST /settings (shared recognition settings) is guarded by the 관리자 설정
 # password. It defaults to the app's built-in admin password; override with:
 #   npx wrangler secret put ADMIN_PASSWORD

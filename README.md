@@ -516,7 +516,8 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 **곡 제목만 적으면 됩니다.** 제목을 입력하면 앱이 알아서 인터넷을 찾아 그 곡의 자료를 받아
 붙입니다. 붙는 것은 둘 중 하나입니다.
 
-- **찬양 PPT** — 그 파일의 **모든 슬라이드가** 찬양 제목 장 뒤에 순서대로 들어갑니다.
+- **찬양 PPT** — 그 파일의 **모든 슬라이드가** 찬양 제목 장 뒤에 순서대로 들어갑니다. **악보가 있는
+  PPT만** 받고, **배경은 없앤 채**(흰 바탕) 넣습니다.
 - **악보 사진** — 사진 **한 장이 슬라이드 한 장**이 됩니다. 사진은 비율을 그대로 유지한 채 슬라이드
   가운데에 맞춰 들어갑니다.
 
@@ -524,9 +525,22 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 확실한 결과가 없을 때는 **마음대로 고르지 않고** 찾은 것을 보여 주니 맞는 것을 고르시면 됩니다.
 첫 번째 결과에 파일이 없으면 그다음 것을 눌러 보는 식으로 최대 세 개까지 시도합니다.
 
-- **어디서 찾나요** — 찬양 PPT는 **다음·네이버 블로그 검색**(티스토리·네이버 블로그 글)과 웹 검색에서
-  동시에 찾고, 악보 사진은 **네이버 이미지 검색**에서 찾습니다. 네이버 블로그 글은 첨부 파일이 있는
-  모바일 페이지에서 받아 옵니다.
+- **어디서 찾나요** — 찬양 PPT는 **구글에서 티스토리·갓피플 글을** 먼저 찾고(`<제목> 악보 ppt`),
+  **다음·네이버 블로그 검색**과 웹 검색도 동시에 찾습니다. 확실한 결과 중에서는 **악보가 있다고 적힌
+  글 → 티스토리·갓피플 → 그 밖의 사이트** 순서로 받아 봅니다. 악보 사진은 **네이버 이미지 검색**에서
+  찾습니다. 네이버 블로그 글은 첨부 파일이 있는 모바일 페이지에서 받아 옵니다.
+  - 구글 검색은 Worker에 `SERPER_API_KEY`(<https://serper.dev>, 무료 2,500회)가 있어야 동작합니다.
+    구글은 서버에서 직접 검색하면 자동 접속 확인(CAPTCHA) 페이지로 막고, 구글 공식 검색 API는 신규
+    가입을 받지 않기 때문입니다. 키가 없으면 다음·네이버·웹 검색만으로 찾습니다.
+- **악보가 있는 PPT만 받습니다** — 한 글에 PPT가 여러 개(`악보`·`가사`·`무배경`)면 파일 이름을 보고
+  **악보가 있는 것**, 그중에서도 **무배경**을 받습니다. 받은 PPT는 슬라이드를 직접 열어 보고, 악보(그림)
+  없이 **가사만 있는 PPT면 넣지 않고** 다음 결과를 받아 보거나 악보 사진으로 넘어갑니다. 직접 고른
+  결과가 가사 PPT면 그렇다고 알려 드립니다.
+- **배경은 없앱니다** — 곡 PPT의 슬라이드는 모두 **흰 바탕**으로 바꾸고, 마스터·레이아웃에 깔린
+  배경 그림(PowerPoint의 "배경 그래픽 숨기기")과 모든 장 맨 뒤에 깔린 같은 배경 사진도 뺍니다.
+  악보는 그대로 둡니다 — 악보를 슬라이드 배경으로 넣어 둔 PPT도 악보가 사라지지 않습니다. 어두운
+  배경에 맞춘 흰 글자는 검은색으로 바꿉니다(색이 칠해진 버튼 안의 글자는 그대로). 직접 올린 PPT도
+  똑같이 배경을 없앱니다.
 - **다른 곡을 붙이지 않습니다** — 검색 결과 제목에 곡 제목이 **따로 떨어져** 있어야(따옴표·괄호·`-`
   사이, 앞뒤에 악보·가사·PPT·코드 정도만) 확실한 결과로 봅니다. 그래서 `은혜`를 찾을 때
   `하나님의 은혜`, `은혜 아니면`, `은혜로다`는 붙이지 않고 보여 주기만 합니다. 여러 곡이 든
@@ -552,10 +566,10 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 > 사이트를 가리지 않고 받되 **받아온 내용으로** 거릅니다 — 찬양 PPT는 진짜 PowerPoint 파일인지와
 > 크기(25MB), 악보 사진은 PNG·JPG가 맞는지와 크기(8MB)를 확인합니다. 곡 하나가 네이버 블로그,
 > 갓피플, 티스토리 중 어디에 있을지는 그때그때 다르고, 목록으로 막으면 대부분이 "직접 올려
-> 주세요"가 되기 때문입니다. **네이버 블로그·카페·갓피플·티스토리**는 아는 자료실로 등록되어 있어
-> 검색 결과에서 먼저 시도하고(`WEDNESDAY_PPT_HOSTS`로 추가), 스트리밍·영상 사이트는 파일이 있을 수
-> 없으니 아예 받으러 가지 않습니다. 사이트를 목록으로만 제한하려면 `WEDNESDAY_PPT_HOSTS_ONLY=true`
-> (악보 사진은 `WEDNESDAY_IMAGE_HOSTS_ONLY=true`).
+> 주세요"가 되기 때문입니다. **티스토리·갓피플**을 가장 먼저 시도하고, **네이버 블로그·카페**도 아는
+> 자료실로 등록되어 있어 모르는 사이트보다 먼저 시도하며(`WEDNESDAY_PPT_HOSTS`로 추가),
+> 스트리밍·영상 사이트는 파일이 있을 수 없으니 아예 받으러 가지 않습니다. 사이트를 목록으로만
+> 제한하려면 `WEDNESDAY_PPT_HOSTS_ONLY=true` (악보 사진은 `WEDNESDAY_IMAGE_HOSTS_ONLY=true`).
 
 - **슬라이드 크기가 다르면 자동으로 맞춥니다** — 내려받은 곡 PPT가 수요예배 PPT와 크기가 다르면
   비율을 유지한 채 가운데로 맞추고, 다운로드 화면에 그 사실을 알려 줍니다.
@@ -724,8 +738,12 @@ the deck is made. The operator types the date, sermon title, preacher and a scri
 verses come from the same 개역개정 text, the file is named after that week's Wednesday
 (`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. Typing a song's title is the whole
 interaction: the app searches, downloads and attaches what it is confident about by itself — the
-song's own 찬양 PPT when one is found (다음·네이버 블로그 search plus the web), otherwise its 악보 사진
-(네이버 이미지 검색), one slide per page, centred on the deck's canvas. A hit counts as sure only when
+song's own 찬양 PPT when one is found (Google restricted to 티스토리·갓피플 via Serper when
+`SERPER_API_KEY` is set, plus 다음·네이버 블로그 search and the web; 악보 posts first, then 티스토리·갓피플),
+otherwise its 악보 사진 (네이버 이미지 검색), one slide per page, centred on the deck's canvas. Only a
+찬양 PPT with the 악보 on its slides is taken (a 가사-only deck is refused and the next hit tried), and
+every song deck is put on plain white — slide, layout and master backgrounds and a photo sent to the
+back of every slide are removed, the 악보 itself kept. A hit counts as sure only when
 its title names the song on its own, so 하나님의 은혜 is never taken for 은혜, and only same-size pages of
 one post are attached together. A browser cannot fetch a cross-origin file, so the proxy does it
 (`GET /wednesday/songs` and `/wednesday/songs/sheets` search; `POST /wednesday/songs/file` and

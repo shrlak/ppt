@@ -30,7 +30,7 @@ export async function readSlideSize(data: ArrayBuffer | Uint8Array): Promise<Sli
   return readSlideSizeOf(await zip.file('ppt/presentation.xml')!.async('string'));
 }
 
-function readSlideSizeOf(presentationXml: string): SlideSize {
+export function readSlideSizeOf(presentationXml: string): SlideSize {
   const tag = presentationXml.match(/<p:sldSz\b[^>]*>/)?.[0];
   const cx = Number(tag?.match(/\bcx="(\d+)"/)?.[1]);
   const cy = Number(tag?.match(/\bcy="(\d+)"/)?.[1]);
@@ -92,7 +92,7 @@ export function scaleSlideXml(slideXml: string, { scale, offsetX, offsetY }: Sli
 }
 
 /** Index just past `</name>` matching the element opening at `start`. */
-function matchingCloseIndex(xml: string, start: number, name: string): number {
+export function matchingCloseIndex(xml: string, start: number, name: string): number {
   const pattern = new RegExp(`<(/?)${name}\\b[^>]*?(/?)>`, 'g');
   pattern.lastIndex = start;
   let depth = 0;

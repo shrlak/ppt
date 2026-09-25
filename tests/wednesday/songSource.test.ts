@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { autoAttachSong } from '../../src/wednesday/songSource';
+import { NO_SHEET_MUSIC_MESSAGE, autoAttachSong, downloadSongPpt } from '../../src/wednesday/songSource';
+import { deckOf, lyricsSlides, sheetSlides } from '../support/songDeckFixtures';
 
 const PROXY = 'https://proxy.test';
 
@@ -91,5 +92,69 @@ describe('autoAttachSong with 악보 사진', () => {
     const found = await autoAttachSong('주 품에');
     expect(found.kind).toBe('none');
     expect(downloaded).toEqual([]);
+  });
+});
+
+describe('autoAttachSong with 찬양 PPT', () => {
+  /** A proxy whose PPT search finds `decks` (all sure), with these 악보 사진 behind them. */
+  function stubDecks(decks: Record<string, Uint8Array>, sheets: Hit[] = []) {
+    const downloaded: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith(`${PROXY}/wednesday/songs?`)) {
+          return Response.json({
+            candidates: Object.keys(decks).map((deckUrl) => ({
+              token: deckUrl,
+              url: deckUrl,
+              host: new URL(deckUrl).host,
+              title: '은혜 PPT',
+              direct: true,
+              decision: 'auto',
+            })),
+          });
+        }
+        if (url.startsWith(`${PROXY}/wednesday/songs/sheets?`)) {
+          return Response.json({
+            candidates: sheets.map((hit) => ({ ...hit, token: hit.url, host: new URL(hit.url).host, title: '악보' })),
+          });
+        }
+        const { token } = JSON.parse(String(init?.body)) as { token: string };
+        downloaded.push(token);
+        if (url === `${PROXY}/wednesday/songs/file`) return new Response(decks[token].slice().buffer as ArrayBuffer);
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } });
+      }),
+    );
+    return downloaded;
+  }
+
+  it('passes over a 가사 PPT for the next one that has the 악보', async () => {
+    const downloaded = stubDecks({
+      'https://a.tistory.com/lyrics.pptx': await deckOf(lyricsSlides(3)),
+      'https://b.tistory.com/sheet.pptx': await deckOf(sheetSlides(3)),
+    });
+
+    const found = await autoAttachSong('은혜');
+    expect(downloaded).toEqual(['https://a.tistory.com/lyrics.pptx', 'https://b.tistory.com/sheet.pptx']);
+    expect(found.kind).toBe('deck');
+    if (found.kind === 'deck') expect(found.candidate.url).toBe('https://b.tistory.com/sheet.pptx');
+  });
+
+  it('takes the 악보 사진 when the only PPT is 가사', async () => {
+    const downloaded = stubDecks({ 'https://a.tistory.com/lyrics.pptx': await deckOf(lyricsSlides(3)) }, [
+      sheet('https://img.test/a1.png', 'https://blog.test/a'),
+    ]);
+
+    const found = await autoAttachSong('은혜');
+    expect(found.kind).toBe('images');
+    expect(downloaded).toEqual(['https://a.tistory.com/lyrics.pptx', 'https://img.test/a1.png']);
+  });
+
+  it('says why when a 가사 PPT is picked by hand', async () => {
+    stubDecks({ 'https://a.tistory.com/lyrics.pptx': await deckOf(lyricsSlides(3)) });
+    await expect(
+      downloadSongPpt({ token: 'https://a.tistory.com/lyrics.pptx', url: 'https://a.tistory.com/lyrics.pptx' }),
+    ).rejects.toThrow(NO_SHEET_MUSIC_MESSAGE);
   });
 });
