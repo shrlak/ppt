@@ -71,6 +71,34 @@ describe.each([
   });
 });
 
+describe('KJV text', () => {
+  const raw = readTranslation('en_kjv.json');
+  const kjv = new Map(raw.map((book, i) => [i + 1, book.chapters]));
+  const text = (bookId: number, chapter: number, verse: number) =>
+    getVerseRange(kjv, bookId, chapter, verse, chapter, verse)[0]?.text;
+
+  it('has the same verse slots as the NASB in every chapter', () => {
+    raw.forEach((book, i) =>
+      book.chapters.forEach((chapter, c) =>
+        expect(chapter, `${BIBLE_BOOKS[i].nameEn} ${c + 1}`).toHaveLength(nasbRaw[i].chapters[c].length),
+      ),
+    );
+  });
+
+  it('keeps the verses the old copy dropped or split, each at its own number', () => {
+    expect(text(40, 2, 16)).toMatch(/^Then Herod, when he saw that he was mocked of the wise men/);
+    expect(text(9, 20, 42)).toMatch(/for ever\. And he arose and departed: and Jonathan went into the city\.$/);
+    expect(text(66, 13, 1)).toMatch(/^And I stood upon the sand of the sea, and saw a beast/);
+  });
+
+  it('prints LORD in capitals and carries no footnotes, psalm titles or italic braces', () => {
+    expect(text(19, 23, 1)).toBe('The LORD is my shepherd; I shall not want.');
+    expect(text(1, 10, 15)).toBe('And Canaan begat Sidon his firstborn, and Heth,');
+    const verses = raw.flatMap((b) => b.chapters.flat());
+    expect(verses.filter((v) => /[{}[\]«»]|\s{2}/.test(v))).toEqual([]);
+  });
+});
+
 it('uses the NIV 2011 text, with no section headings run into the verses', () => {
   const niv = readTranslation('en_niv.json');
   expect(niv[0].chapters[0][0]).toBe('In the beginning God created the heavens and the earth.');
