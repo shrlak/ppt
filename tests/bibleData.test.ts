@@ -114,13 +114,26 @@ describe('getVerseUnits', () => {
 // The Korean files decide which verses a slide shows, so every chapter must carry every verse at its own
 // number. A verse printed together with the next ones ("18-19") keeps its text at the first number and an
 // empty slot after it; a verse the translation leaves out is printed as "(없음)".
-describe.each([['개역개정', 'ko_nkrv.json']])('%s verse numbering', (_name, file) => {
+// Where a Korean translation numbers a chapter differently from the NASB: [bookId, chapter, verses].
+const KOREAN_CHAPTER_LENGTHS: Record<string, [number, number, number][]> = {
+  'ko_nkrv.json': [[47, 13, 13]], // 고후13 is 1-13 in Korean Bibles
+  'ko_saenew.json': [
+    [47, 13, 13],
+    [66, 12, 18], // 새번역 prints 계12:18 ("그 때에 그 용이 바닷가 모래 위에 섰습니다")
+  ],
+};
+
+describe.each([
+  ['개역개정', 'ko_nkrv.json'],
+  ['새번역', 'ko_saenew.json'],
+])('%s verse numbering', (_name, file) => {
   const raw = readTranslation(file);
 
-  it('has every chapter at the English length, except 고후13 which Korean Bibles number 1-13', () => {
+  it('has every chapter at the English length, except where Korean Bibles number it differently', () => {
     raw.forEach((book, i) =>
       book.chapters.forEach((chapter, c) => {
-        const expected = i === 46 && c === 12 ? 13 : nasbRaw[i].chapters[c].length;
+        const own = KOREAN_CHAPTER_LENGTHS[file].find(([bookId, ch]) => bookId === i + 1 && ch === c + 1);
+        const expected = own ? own[2] : nasbRaw[i].chapters[c].length;
         expect(chapter, `${BIBLE_BOOKS[i].nameKo} ${c + 1}`).toHaveLength(expected);
       }),
     );
@@ -137,6 +150,33 @@ describe.each([['개역개정', 'ko_nkrv.json']])('%s verse numbering', (_name, 
   it('keeps no markup, footnote markers or doubled spaces from the source page', () => {
     const verses = raw.flatMap((b) => b.chapters.flat());
     expect(verses.filter((v) => /[<>]|&[a-z]+;|\d\)|\s{2}|^\s|\s$/.test(v))).toEqual([]);
+  });
+});
+
+describe('새번역 text', () => {
+  const saenew = new Map(readTranslation('ko_saenew.json').map((book, i) => [i + 1, book.chapters]));
+  const units = (bookId: number, chapter: number, from: number, to: number) =>
+    getVerseUnits(saenew, bookId, chapter, from, chapter, to).map((v) => [v.verse, lastVerseOf(v)]);
+
+  it('joins a verse it leaves out to the verse whose note says so', () => {
+    expect(units(40, 17, 20, 22)).toEqual([
+      [20, 21],
+      [22, 22],
+    ]);
+    expect(getVerseRange(saenew, 40, 17, 20, 17, 20)[0].text).toMatch(/\(21절 없음\)$/);
+  });
+
+  it('keeps each verse whole, including what comes after a line break in it', () => {
+    expect(getVerseRange(saenew, 62, 4, 16, 4, 16)[0].text).toBe(
+      '우리는 하나님이 우리에게 베푸시는 사랑을 알았고, 또 믿었습니다. 하나님은 사랑이십니다. 사랑 안에 있는 사람은 하나님 안에 있고 하나님도 그 사람 안에 계십니다.',
+    );
+  });
+
+  it('reads 겔15:7, which carries verse 8 too, as 7-8', () => {
+    expect(units(26, 15, 6, 8)).toEqual([
+      [6, 6],
+      [7, 8],
+    ]);
   });
 });
 
