@@ -13,7 +13,7 @@ const KIND_ICON: Record<Toast['kind'], IconName> = {
 };
 
 /**
- * Renders whatever's pushed via showToast() as a stack in the bottom-left
+ * Renders whatever's pushed via showToast() as a stack in the top-right
  * corner. Keeps a toast mounted for its exit animation instead of dropping
  * it the instant it leaves the source list, so it fades/slides away rather
  * than vanishing mid-frame.

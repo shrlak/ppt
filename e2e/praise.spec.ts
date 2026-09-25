@@ -32,7 +32,7 @@ test.describe('service picker', () => {
     await expect(page.getByTestId('service-picker')).toBeVisible();
     await page.getByTestId('service-retreat').click();
     await expect(page.getByTestId('retreat-panel-info')).toBeVisible();
-    await page.getByTestId('retreat-to-home').click();
+    await page.getByTestId('nav-home').click();
     await expect(page.getByTestId('service-picker')).toBeVisible();
 
     await page.getByTestId('service-sunday').click();
@@ -45,8 +45,31 @@ test.describe('service picker', () => {
     await page.getByTestId('service-praise').click();
     await expect(page.getByTestId('praise-panel-songs')).toBeVisible();
 
-    await page.getByTestId('praise-to-home').click();
+    await page.getByTestId('nav-home').click();
     await expect(page.getByTestId('service-picker')).toBeVisible();
+  });
+
+  test('offers 수요예배 as a choice of its own', async ({ page }) => {
+    await page.goto('./');
+    await page.getByTestId('service-wednesday').click();
+    await expect(page.getByTestId('wednesday-panel-service')).toBeVisible();
+  });
+
+  test('the rail reaches every generator and marks the one you are in', async ({ page }) => {
+    await page.goto('praise.html');
+    await expect(page.getByTestId('nav-praise')).toHaveAttribute('aria-current', 'page');
+
+    await page.getByTestId('nav-retreat').click();
+    await expect(page.getByTestId('retreat-panel-info')).toBeVisible();
+    await expect(page.getByTestId('nav-retreat')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('nav-praise')).not.toHaveAttribute('aria-current', 'page');
+
+    await page.getByTestId('nav-wednesday').click();
+    await expect(page.getByTestId('wednesday-panel-service')).toBeVisible();
+
+    await page.getByTestId('nav-sunday').click();
+    await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
+    await expect(page.getByTestId('nav-sunday')).toHaveAttribute('aria-current', 'page');
   });
 });
 

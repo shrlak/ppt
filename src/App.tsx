@@ -42,6 +42,7 @@ import {
 } from './lib/storage/deckAutoSave';
 import { showToast } from './lib/utils/toast';
 import Icon from './components/Icon';
+import AppShell, { StepNav } from './components/AppShell';
 import AdditionalFilesSection from './components/AdditionalFilesSection';
 import type { AdditionalFile } from './lib/additionalFiles/types';
 import { convertAdditionalFile } from './lib/additionalFiles/convert';
@@ -114,51 +115,12 @@ const WIZARD_STEPS = [
   { id: 'download', label: '다운로드' },
 ] as const;
 
-interface WizardNavigationProps {
-  step: number;
-  onMove: (step: number) => void;
-}
-
-function WizardNavigation({ step, onMove }: WizardNavigationProps) {
-  const currentId = WIZARD_STEPS[step].id;
-  const nextStep = WIZARD_STEPS[step + 1];
-
-  return (
-    <nav className="wizard-nav" aria-label="단계 이동">
-      {step > 0 ? (
-        <button
-          className="btn"
-          data-testid={`wizard-back-${currentId}`}
-          onClick={() => onMove(step - 1)}
-        >
-          <Icon name="back" />
-          이전
-        </button>
-      ) : (
-        <span />
-      )}
-      {nextStep && (
-        <button
-          className="btn btn-primary"
-          data-testid={`wizard-next-${currentId}`}
-          onClick={() => onMove(step + 1)}
-        >
-          다음: {nextStep.label}
-          <Icon name="next" />
-        </button>
-      )}
-    </nav>
-  );
-}
-
 function SundayApp() {
   const [activeStep, setActiveStep] = useState(0);
   // Which way the active wizard step just moved, so the incoming panel can
   // sweep in from the matching side instead of a single fixed direction.
   const [direction, setDirection] = useState<'forward' | 'back'>('forward');
   const [viewMode, setViewMode] = useState<'wizard' | 'editor'>('wizard');
-  const [scrolled, setScrolled] = useState(false);
-  const headerRef = useRef<HTMLElement>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [contiDate, setContiDate] = useState<string | undefined>();
   const [bibleState, setBibleState] = useState<BibleGeneratorState>({
@@ -243,45 +205,6 @@ function SundayApp() {
       verseInput: normalizeContiScripture(info.scripture ?? ''),
       sermonTitle: info.sermonTitle ?? '',
     }));
-  }, []);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // The header is sticky, so anything scrolled to by an anchor or by
-  // scrollIntoView() has to clear it. Publish the bar's real painted height as
-  // --header-h (never a guessed token) and keep it current as the bar wraps,
-  // shrinks on scroll, or changes at a breakpoint. The taller, unscrolled
-  // height is what the offset uses, so the layout doesn't jump when the bar
-  // compacts.
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    let tallest = 0;
-    const publish = () => {
-      const height = el.getBoundingClientRect().height;
-      if (height <= tallest) return;
-      tallest = height;
-      document.documentElement.style.setProperty('--header-h', `${Math.round(height)}px`);
-    };
-    publish();
-    const observer = new ResizeObserver(publish);
-    observer.observe(el);
-    // A breakpoint change can make the bar shorter, so the running maximum is
-    // reset and re-measured rather than kept forever.
-    const onResize = () => {
-      tallest = 0;
-      publish();
-    };
-    window.addEventListener('resize', onResize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', onResize);
-    };
   }, []);
 
   useEffect(() => {
@@ -936,325 +859,274 @@ function SundayApp() {
   }, []);
 
   return (
-    <>
-      <a className="skip-link" href="#main-content">
-        본문으로 건너뛰기
-      </a>
-      <header
-        ref={headerRef}
-        className={`header${scrolled ? ' header-scrolled' : ''}${viewMode === 'editor' ? ' header-wide' : ''}`}
-      >
-        <div className="header-inner">
-          <div className="header-brand">
-            <img
-              className="header-logo"
-              src={`${BASE}logo.png`}
-              alt="KCCP 빛주사랑 대학청년부 Media Team 로고"
-            />
-            <div className="header-text">
-              <h1>KCCP PPT Generator</h1>
-              <p>필요한 내용을 단계별로 입력하고, 하나의 예배 PPT로 다운로드하세요.</p>
-            </div>
-          </div>
-          {/* Narrow screens drop the labels and keep the icons; the label
-              stays in the DOM as the accessible name either way. */}
-          <nav className="header-actions" aria-label="도구">
-            <a className="btn" href={`${BASE}index.html`} data-testid="service-picker-link">
-              <Icon name="back" />
-              <span className="btn-label">예배 선택</span>
-            </a>
-            {/* The 수요예배 generator is its own page: no 콘티, no 광고, no
-                추가 자료, and a different deck design end to end. */}
-            <a className="btn" href={`${BASE}wednesday.html`} data-testid="wednesday-link">
-              <Icon name="music" />
-              <span className="btn-label">수요예배</span>
-            </a>
-            <button
-              type="button"
-              className="btn"
-              data-testid="view-mode-toggle"
-              onClick={() => setViewMode((mode) => (mode === 'wizard' ? 'editor' : 'wizard'))}
-            >
-              <Icon name={viewMode === 'wizard' ? 'editor' : 'steps'} />
-              <span className="btn-label">{viewMode === 'wizard' ? '편집기 보기' : '단계별 보기'}</span>
-            </button>
-            <button
-              type="button"
-              className="btn library-open"
-              data-testid="library-open"
-              onClick={() => setLibraryOpen(true)}
-            >
-              <Icon name="library" />
-              <span className="btn-label">라이브러리</span>
-            </button>
-            <button
-              type="button"
-              className="btn usage-open"
-              data-testid="usage-open"
-              onClick={() => setUsageOpen(true)}
-            >
-              <Icon name="usage" />
-              <span className="btn-label">사용량</span>
-            </button>
-            <button
-              type="button"
-              className="btn admin-open"
-              data-testid="admin-open"
-              onClick={() => setAdminOpen(true)}
-            >
-              <Icon name="settings" />
-              <span className="btn-label">관리자</span>
-            </button>
-          </nav>
-        </div>
-      </header>
-
+    <AppShell
+      service="sunday"
+      steps={viewMode === 'wizard' ? WIZARD_STEPS : undefined}
+      activeStep={activeStep}
+      onStepSelect={moveToStep}
+      testIdPrefix="wizard"
+      compact={viewMode === 'editor'}
+      appClassName={viewMode === 'editor' ? 'app-editor-mode' : undefined}
+      actions={
+        <button
+          type="button"
+          className="btn"
+          data-testid="view-mode-toggle"
+          aria-pressed={viewMode === 'editor'}
+          onClick={() => setViewMode((mode) => (mode === 'wizard' ? 'editor' : 'wizard'))}
+        >
+          <Icon name={viewMode === 'wizard' ? 'editor' : 'steps'} />
+          <span className="btn-label">{viewMode === 'wizard' ? '편집기 보기' : '단계별 보기'}</span>
+        </button>
+      }
+      tools={
+        <>
+          <button
+            type="button"
+            className="btn library-open"
+            data-testid="library-open"
+            onClick={() => setLibraryOpen(true)}
+          >
+            <Icon name="library" />
+            <span className="btn-label">라이브러리</span>
+          </button>
+          <button type="button" className="btn usage-open" data-testid="usage-open" onClick={() => setUsageOpen(true)}>
+            <Icon name="usage" />
+            <span className="btn-label">사용량</span>
+          </button>
+          <button type="button" className="btn admin-open" data-testid="admin-open" onClick={() => setAdminOpen(true)}>
+            <Icon name="settings" />
+            <span className="btn-label">관리자</span>
+          </button>
+        </>
+      }
+    >
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} onDeckChange={handleDeckChange} />}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
       {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} onEdit={openSavedDeck} />}
 
-      <div className={`app${viewMode === 'editor' ? ' app-editor-mode' : ''}`}>
-        {viewMode === 'wizard' && (
-          <ol
-            className="wizard-progress"
-            aria-label="PPT 생성 단계"
-            style={{ '--active-index': activeStep } as React.CSSProperties}
-          >
-            {WIZARD_STEPS.map((step, index) => (
-              <li
-                key={step.id}
-                className={`wizard-step${index === activeStep ? ' current' : ''}${index < activeStep ? ' complete' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="wizard-step-button"
-                  data-testid={`wizard-tab-${step.id}`}
-                  aria-current={index === activeStep ? 'step' : undefined}
-                  onClick={() => moveToStep(index)}
-                >
-                  <span className="wizard-step-dot">
-                    {index < activeStep ? <Icon name="check" /> : index + 1}
-                  </span>
-                  <span className="wizard-step-label">{step.label}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
+      <div className="app-body">
+        {viewMode === 'editor' && (
+          <SlideOverviewList
+            overview={editorDeck?.overview ?? []}
+            slides={editorDeck?.slides ?? null}
+            loading={editorLoading}
+            error={editorError}
+            onSelectSong={scrollToSong}
+            onSelectBible={scrollToBible}
+            onSelectSermon={scrollToSermon}
+            onSelectAnnouncement={scrollToAnnouncement}
+            onSelectAdditional={scrollToAdditional}
+            onDownload={() => void generate()}
+            onSaveToLibrary={() => void saveCurrentToLibrary()}
+            downloading={generating}
+            savingToLibrary={savingToLibrary}
+            autoSaveStatus={autoSaveStatus}
+          />
         )}
-
-        <div className="app-body">
-          {viewMode === 'editor' && (
-            <SlideOverviewList
-              overview={editorDeck?.overview ?? []}
-              slides={editorDeck?.slides ?? null}
-              loading={editorLoading}
-              error={editorError}
-              onSelectSong={scrollToSong}
-              onSelectBible={scrollToBible}
-              onSelectSermon={scrollToSermon}
-              onSelectAnnouncement={scrollToAnnouncement}
-              onSelectAdditional={scrollToAdditional}
-              onDownload={() => void generate()}
-              onSaveToLibrary={() => void saveCurrentToLibrary()}
-              downloading={generating}
-              savingToLibrary={savingToLibrary}
-              autoSaveStatus={autoSaveStatus}
+        <main id="main-content" data-direction={direction}>
+          <section
+            className={`wizard-panel${isPanelActive('lyrics') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('lyrics')}
+            data-testid="wizard-panel-lyrics"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">1 / 6</p>
+              <h2>찬양</h2>
+              <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
+            </div>
+            <LyricsGenerator
+              onSongsChange={handleSongsChange}
+              onDateDetected={handleDateDetected}
+              onContiInfoDetected={handleContiInfoDetected}
+              onContiFileLoaded={setContiFile}
+              restoreVersion={restore.version}
+              restoreSongs={restore.songs}
+              restoreConti={restore.conti}
+              onContiDropAnywhere={showLyricsStep}
             />
-          )}
-          <main id="main-content" data-direction={direction}>
-            <section
-              className={`wizard-panel${isPanelActive('lyrics') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('lyrics')}
-              data-testid="wizard-panel-lyrics"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">1 / 6</p>
-                <h2>찬양</h2>
-                <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
-              </div>
-              <LyricsGenerator
-                onSongsChange={handleSongsChange}
-                onDateDetected={handleDateDetected}
-                onContiInfoDetected={handleContiInfoDetected}
-                onContiFileLoaded={setContiFile}
-                restoreVersion={restore.version}
-                restoreSongs={restore.songs}
-                restoreConti={restore.conti}
-                onContiDropAnywhere={showLyricsStep}
-              />
-              {viewMode === 'wizard' && <WizardNavigation step={0} onMove={moveToStep} />}
-            </section>
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={0} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
 
-            <section
-              className={`wizard-panel${isPanelActive('bible') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('bible')}
-              data-testid="wizard-panel-bible"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">2 / 6</p>
-                <h2>성경 말씀</h2>
-                <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
-              </div>
-              <BibleSlideGenerator
-                onStateChange={handleBibleStateChange}
-                autoFillVersion={contiBibleAutoFill.version}
-                autoVerseInput={contiBibleAutoFill.verseInput}
-                autoSermonTitle={contiBibleAutoFill.sermonTitle}
-                restoreVersion={restore.version}
-                restoreState={restore.bible}
-              />
-              {viewMode === 'wizard' && <WizardNavigation step={1} onMove={moveToStep} />}
-            </section>
+          <section
+            className={`wizard-panel${isPanelActive('bible') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('bible')}
+            data-testid="wizard-panel-bible"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">2 / 6</p>
+              <h2>성경 말씀</h2>
+              <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
+            </div>
+            <BibleSlideGenerator
+              onStateChange={handleBibleStateChange}
+              autoFillVersion={contiBibleAutoFill.version}
+              autoVerseInput={contiBibleAutoFill.verseInput}
+              autoSermonTitle={contiBibleAutoFill.sermonTitle}
+              restoreVersion={restore.version}
+              restoreState={restore.bible}
+            />
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={1} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
 
-            <section
-              className={`wizard-panel${isPanelActive('sermon') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('sermon')}
-              data-testid="wizard-panel-sermon"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">3 / 6</p>
-                <h2>설교</h2>
-                <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
-              </div>
-              <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
-              {viewMode === 'wizard' && <WizardNavigation step={2} onMove={moveToStep} />}
-            </section>
+          <section
+            className={`wizard-panel${isPanelActive('sermon') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('sermon')}
+            data-testid="wizard-panel-sermon"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">3 / 6</p>
+              <h2>설교</h2>
+              <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
+            </div>
+            <SermonUploadSection value={sermonFile} onChange={setSermonFile} />
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={2} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
 
-            <section
-              className={`wizard-panel${isPanelActive('announcement') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('announcement')}
-              data-testid="wizard-panel-announcement"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">4 / 6</p>
-                <h2>광고</h2>
-                <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
-              </div>
-              <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
-              {viewMode === 'wizard' && <WizardNavigation step={3} onMove={moveToStep} />}
-            </section>
+          <section
+            className={`wizard-panel${isPanelActive('announcement') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('announcement')}
+            data-testid="wizard-panel-announcement"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">4 / 6</p>
+              <h2>광고</h2>
+              <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
+            </div>
+            <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={3} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
 
-            <section
-              className={`wizard-panel${isPanelActive('additional') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('additional')}
-              data-testid="wizard-panel-additional"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">5 / 6</p>
-                <h2>추가 자료</h2>
-                <p>예배 End 슬라이드 뒤에 이어서 보여줄 파일과 순서를 정하세요.</p>
-              </div>
-              <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
-              {viewMode === 'wizard' && <WizardNavigation step={4} onMove={moveToStep} />}
-            </section>
+          <section
+            className={`wizard-panel${isPanelActive('additional') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('additional')}
+            data-testid="wizard-panel-additional"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">5 / 6</p>
+              <h2>추가 자료</h2>
+              <p>예배 End 슬라이드 뒤에 이어서 보여줄 파일과 순서를 정하세요.</p>
+            </div>
+            <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={4} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
 
-            <section
-              className={`wizard-panel${isPanelActive('download') ? ' active' : ''}`}
-              aria-hidden={!isPanelActive('download')}
-              data-testid="wizard-panel-download"
-            >
-              <div className="wizard-page-header">
-                <p className="wizard-kicker">6 / 6</p>
-                <h2>확인 및 다운로드</h2>
-                <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
-              </div>
-              <section className="card download-card">
-                {editingDeck && (
-                  <div className="banner banner-notice" data-testid="editing-deck-banner">
-                    <Icon name="info" />
-                    <span className="banner-text">
-                      라이브러리의 &lsquo;{editingDeck.name}&rsquo;을(를) 편집하고 있습니다. 저장하면
-                      같은 항목이 갱신됩니다.
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      data-testid="editing-deck-detach"
-                      onClick={() => {
-                        // Release the name too, or the "new" entry would save
-                        // straight back onto the one just detached from.
-                        setEditingDeck(null);
-                        setNameOverride(null);
-                        // Auto-save must let go of the entry as well, so the
-                        // next one creates the new item instead of renaming it.
-                        autoSaveTargetRef.current = null;
-                      }}
-                    >
-                      새 항목으로 저장
-                    </button>
-                  </div>
-                )}
-                {allWarnings.length > 0 && (
-                  <div className="banner banner-warn">
-                    <Icon name="warning" />
-                    <span className="banner-text">
-                      일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
-                      {allWarnings
-                        .map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`)
-                        .join(' · ')}
-                    </span>
-                  </div>
-                )}
-                <p className="deck-order">
-                  슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back/End → 추가 자료
-                </p>
-                <div className="generate-row">
-                  <label htmlFor="filename-input">
-                    파일명
-                    <input
-                      id="filename-input"
-                      data-testid="filename-input"
-                      value={fileName}
-                      onChange={(e) => setNameOverride(e.target.value)}
-                    />
-                    <span className="input-hint">
-                      {nameOverride === null
-                        ? '콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.'
-                        : '직접 입력한 이름을 사용합니다. 라이브러리에도 이 이름으로 저장됩니다.'}
-                    </span>
-                  </label>
-                  <div className="slide-count" data-testid="slide-count">
-                    총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
-                    {bibleRefs.length}구절
-                    {sermonFile ? ' · 설교 첨부' : ''}
-                    {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
-                    {additionalFiles.length > 0 ? ` · 추가 자료 ${additionalFiles.length}개 (${additionalSlideCount}장)` : ''}
-                  </div>
-                  {/* Both actions share the base control size — the primary is
-                      told apart by its variant, not by being bigger — and it
-                      sits last, the LTR position for the primary action. */}
-                  <div className="download-actions">
-                    <button
-                      className="btn"
-                      data-testid="save-to-library"
-                      disabled={savingToLibrary}
-                      onClick={() => void saveCurrentToLibrary()}
-                    >
-                      <Icon name="save" />
-                      {savingToLibrary ? '저장 중…' : '라이브러리에 저장'}
-                    </button>
-                    <button
-                      className="btn btn-primary btn-download"
-                      data-testid="generate-pptx"
-                      disabled={generating}
-                      onClick={() => void generate()}
-                    >
-                      <Icon name="download" />
-                      {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
-                    </button>
-                  </div>
+          <section
+            className={`wizard-panel${isPanelActive('download') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('download')}
+            data-testid="wizard-panel-download"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">6 / 6</p>
+              <h2>확인 및 다운로드</h2>
+              <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
+            </div>
+            <section className="card download-card">
+              {editingDeck && (
+                <div className="banner banner-notice" data-testid="editing-deck-banner">
+                  <Icon name="info" />
+                  <span className="banner-text">
+                    라이브러리의 &lsquo;{editingDeck.name}&rsquo;을(를) 편집하고 있습니다. 저장하면
+                    같은 항목이 갱신됩니다.
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="editing-deck-detach"
+                    onClick={() => {
+                      // Release the name too, or the "new" entry would save
+                      // straight back onto the one just detached from.
+                      setEditingDeck(null);
+                      setNameOverride(null);
+                      // Auto-save must let go of the entry as well, so the
+                      // next one creates the new item instead of renaming it.
+                      autoSaveTargetRef.current = null;
+                    }}
+                  >
+                    새 항목으로 저장
+                  </button>
                 </div>
-                <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
-              </section>
-              <WizardNavigation step={5} onMove={moveToStep} />
+              )}
+              {allWarnings.length > 0 && (
+                <div className="banner banner-warn">
+                  <Icon name="warning" />
+                  <span className="banner-text">
+                    일부 순서 토큰에 해당하는 가사가 없어 건너뜁니다:{' '}
+                    {allWarnings
+                      .map((w) => `${w.title || '(제목 없음)'}: ${w.tokens.join(', ')}`)
+                      .join(' · ')}
+                  </span>
+                </div>
+              )}
+              <p className="deck-order">
+                슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back/End → 추가 자료
+              </p>
+              <div className="generate-row">
+                <label htmlFor="filename-input">
+                  파일명
+                  <input
+                    id="filename-input"
+                    data-testid="filename-input"
+                    value={fileName}
+                    onChange={(e) => setNameOverride(e.target.value)}
+                  />
+                  <span className="input-hint">
+                    {nameOverride === null
+                      ? '콘티 날짜가 속한 주의 일요일을 MMDD 형식으로 사용합니다.'
+                      : '직접 입력한 이름을 사용합니다. 라이브러리에도 이 이름으로 저장됩니다.'}
+                  </span>
+                </label>
+                <div className="slide-count" data-testid="slide-count">
+                  총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
+                  {bibleRefs.length}구절
+                  {sermonFile ? ' · 설교 첨부' : ''}
+                  {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
+                  {additionalFiles.length > 0 ? ` · 추가 자료 ${additionalFiles.length}개 (${additionalSlideCount}장)` : ''}
+                </div>
+                {/* Both actions share the base control size — the primary is
+                    told apart by its variant, not by being bigger — and it
+                    sits last, the LTR position for the primary action. */}
+                <div className="download-actions">
+                  <button
+                    className="btn"
+                    data-testid="save-to-library"
+                    disabled={savingToLibrary}
+                    onClick={() => void saveCurrentToLibrary()}
+                  >
+                    <Icon name="save" />
+                    {savingToLibrary ? '저장 중…' : '라이브러리에 저장'}
+                  </button>
+                  <button
+                    className="btn btn-primary btn-download"
+                    data-testid="generate-pptx"
+                    disabled={generating}
+                    onClick={() => void generate()}
+                  >
+                    <Icon name="download" />
+                    {generating ? '생성 중…' : 'PPTX 생성 및 다운로드'}
+                  </button>
+                </div>
+              </div>
+              <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
             </section>
-          </main>
-        </div>
-
-        <footer className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</footer>
-        <ToastHost />
+            <StepNav steps={WIZARD_STEPS} index={5} onMove={moveToStep} testIdPrefix="wizard" />
+          </section>
+        </main>
       </div>
-    </>
+
+      <footer className="brand-footer">KCCP PPT Generator · {contiDate ?? ''}</footer>
+      <ToastHost />
+    </AppShell>
   );
 }
 

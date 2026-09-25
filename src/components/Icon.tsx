@@ -38,6 +38,9 @@ export type IconName =
   | 'bible'
   | 'sermon'
   | 'divider'
+  | 'home'
+  | 'calendar'
+  | 'tent'
   | 'announcement'
   | 'slide';
 
@@ -111,6 +114,12 @@ const PATHS: Record<IconName, string[]> = {
   ],
   sermon: ['M12 19v3', 'M19 10v2a7 7 0 0 1-14 0v-2', 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z'],
   divider: ['m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'],
+  home: [
+    'M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8',
+    'M3 10a2 2 0 0 1 .7-1.5l7-6a2 2 0 0 1 2.6 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  ],
+  calendar: ['M8 2v4', 'M16 2v4', 'M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M3 10h18'],
+  tent: ['M3.5 21 14 3', 'M20.5 21 10 3', 'M15.5 21 12 15l-3.5 6', 'M2 21h20'],
   announcement: ['m3 11 18-5v12L3 14z', 'M11.6 16.8a3 3 0 1 1-5.8-1.6'],
   slide: [
     'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z',

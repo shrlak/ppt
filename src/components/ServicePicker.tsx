@@ -1,43 +1,31 @@
 // The first screen of the PPT Generator: which kind of service is this deck
 // for? Each kind is its own generator — the Sunday wizard lives on this page,
-// 찬양집회 on praise.html and 수련회 on retreat.html.
-import Icon, { type IconName } from './Icon';
-
-const BASE: string = import.meta.env.BASE_URL || '/';
+// 수요예배 on wednesday.html, 찬양집회 on praise.html and 수련회 on
+// retreat.html. 주일예배 is the one built every week, so it gets the wide
+// tile; the other three sit side by side under it.
+import AppShell, { SERVICES, type ServiceId } from './AppShell';
+import Icon from './Icon';
 
 export type ServiceChoice = 'sunday';
 
-interface Option {
-  id: 'sunday' | 'praise' | 'retreat';
-  title: string;
-  english: string;
-  description: string;
-  icon: IconName;
-}
-
-const OPTIONS: Option[] = [
-  {
-    id: 'sunday',
-    title: '주일예배',
-    english: 'Sunday Service',
-    description: '콘티 PDF로 찬양·성경 말씀·설교·광고까지 한 번에 만듭니다.',
-    icon: 'bible',
+const DETAILS: Record<ServiceId, { description: string; steps: string }> = {
+  sunday: {
+    description: '콘티 PDF 하나로 찬양·성경 말씀·설교·광고·추가 자료까지 한 번에 만듭니다.',
+    steps: '6단계 · 매주 일요일',
   },
-  {
-    id: 'praise',
-    title: '찬양집회',
-    english: 'Praise Night',
-    description: '콘티를 올리면 한글·영어 제목과 가사가 함께 들어간 PPT를 만듭니다. 자동 삭제되지 않습니다.',
-    icon: 'music',
+  wednesday: {
+    description: '예배 정보와 찬양만 넣으면 수요예배 PPT와 썸네일을 함께 만듭니다.',
+    steps: '3단계 · 매주 수요일',
   },
-  {
-    id: 'retreat',
-    title: '수련회',
-    english: 'Retreat',
+  praise: {
+    description: '한글·영어 제목과 가사가 함께 들어간 찬양집회 PPT를 만듭니다. 자동 삭제되지 않습니다.',
+    steps: '4단계',
+  },
+  retreat: {
     description: '수련회 콘티와 집회 순서로 집회마다 수련회 디자인의 PPT를 만듭니다. 자동 삭제되지 않습니다.',
-    icon: 'steps',
+    steps: '3단계',
   },
-];
+};
 
 interface Props {
   onChoose: (choice: ServiceChoice) => void;
@@ -45,44 +33,45 @@ interface Props {
 
 export default function ServicePicker({ onChoose }: Props) {
   return (
-    <>
-      <header className="header">
-        <div className="header-inner">
-          <div className="header-brand">
-            <img
-              className="header-logo"
-              src={`${BASE}logo.png`}
-              alt="KCCP 빛주사랑 대학청년부 Media Team 로고"
-            />
-            <div className="header-text">
-              <h1>KCCP PPT Generator</h1>
-              <p>만들 PPT의 예배 종류를 고르세요.</p>
-            </div>
-          </div>
+    <AppShell service={null}>
+      <main id="main-content" className="launcher service-picker" data-testid="service-picker">
+        <div className="launcher-intro">
+          <p className="wizard-kicker">KCCP Media Team</p>
+          <h1>어떤 PPT를 만들까요?</h1>
+          <p>예배 종류를 고르면 필요한 단계만 차례로 안내합니다. 만든 PPT는 라이브러리에 자동으로 저장됩니다.</p>
         </div>
-      </header>
-      <main id="main-content" className="app service-picker" data-testid="service-picker">
-        <h2>어떤 PPT를 만들까요?</h2>
         <ul className="service-options">
-          {OPTIONS.map((option, index) => {
+          {SERVICES.map((service, index) => {
+            const details = DETAILS[service.id];
             const body = (
               <>
-                <span className="service-option-number" aria-hidden="true">
-                  {index + 1}
+                <span className="service-option-top">
+                  <Icon name={service.icon} />
+                  <span className="service-option-number" aria-hidden="true">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
                 </span>
-                <Icon name={option.icon} />
                 <span className="service-option-text">
                   <span className="service-option-title">
-                    {option.title}
-                    <span className="service-option-english">{option.english}</span>
+                    {service.title}
+                    <span className="service-option-english" lang="en">
+                      {service.english}
+                    </span>
                   </span>
-                  <span className="service-option-description">{option.description}</span>
+                  <span className="service-option-description">{details.description}</span>
+                </span>
+                <span className="service-option-foot">
+                  <span className="service-option-steps">{details.steps}</span>
+                  <span className="service-option-go">
+                    시작하기
+                    <Icon name="next" />
+                  </span>
                 </span>
               </>
             );
             return (
-              <li key={option.id}>
-                {option.id === 'sunday' ? (
+              <li key={service.id} className={service.id === 'sunday' ? 'service-featured' : undefined}>
+                {service.id === 'sunday' ? (
                   <button
                     type="button"
                     className="service-option"
@@ -92,7 +81,7 @@ export default function ServicePicker({ onChoose }: Props) {
                     {body}
                   </button>
                 ) : (
-                  <a className="service-option" href={`${BASE}${option.id}.html`} data-testid={`service-${option.id}`}>
+                  <a className="service-option" href={service.href} data-testid={`service-${service.id}`}>
                     {body}
                   </a>
                 )}
@@ -100,14 +89,7 @@ export default function ServicePicker({ onChoose }: Props) {
             );
           })}
         </ul>
-        <p className="service-picker-footnote">
-          수요예배 PPT는{' '}
-          <a href={`${BASE}wednesday.html`} data-testid="service-wednesday">
-            수요예배 생성기
-          </a>
-          에서 만들 수 있습니다.
-        </p>
       </main>
-    </>
+    </AppShell>
   );
 }
