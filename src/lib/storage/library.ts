@@ -6,6 +6,7 @@ import type {
   StoredProvenance,
   VerificationState,
 } from '../utils/types';
+import { sortSectionsByOrder } from '../utils/slidePlanner';
 import { cloudLibraryJson, hasCloudLibrary } from './cloudLibrary';
 
 const STORAGE_KEY = 'praise-lyrics-library';
@@ -178,6 +179,40 @@ export function findLibrarySong(
         !wantedArtist || !candidate.artist || normalizeTitle(candidate.artist) === wantedArtist,
     )
     .sort((a, b) => (b.version ?? 1) - (a.version ?? 1))[0];
+}
+
+/**
+ * A saved song's lyrics, laid out for this week's service.
+ *
+ * The 진행 순서 the conti wrote (`contiOrder`) is this week's arrangement: it
+ * replaces the saved order, and the saved sections are rearranged to follow
+ * it, exactly as sections read off a 악보 are. Without one the saved order
+ * and section layout are kept as they are.
+ */
+export function libraryLyrics(
+  entry: Pick<LibraryEntry, 'sections' | 'order'>,
+  contiOrder?: string[],
+): { sections: Section[]; order: string[] } {
+  const sections = structuredClone(entry.sections);
+  if (!contiOrder || contiOrder.length === 0) return { sections, order: [...entry.order] };
+  return { sections: sortSectionsByOrder(sections, contiOrder), order: [...contiOrder] };
+}
+
+/**
+ * What a 찬양 라이브러리 entry holds for a song, as one comparable string.
+ * Auto-save writes a song back whenever this differs from the saved entry —
+ * any change at all, down to one letter, a key or the 진행 순서.
+ */
+export function libraryContentKey(
+  item: Pick<LibraryEntry, 'title' | 'artist' | 'key' | 'sections' | 'order'>,
+): string {
+  return JSON.stringify({
+    title: item.title.trim(),
+    artist: item.artist ?? '',
+    key: item.key ?? '',
+    sections: item.sections.map((section) => ({ label: section.label, lines: section.lines })),
+    order: item.order,
+  });
 }
 
 /** Load the read-only starter library bundled with the site. */

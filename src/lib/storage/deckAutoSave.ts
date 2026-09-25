@@ -1,7 +1,6 @@
 // Change detection for auto-saving the current deck into the PPT 라이브러리.
-// Rebuilding and uploading a deck costs seconds and megabytes, so an edit is
-// only worth saving when it would actually change the generated file — that
-// is what the fingerprint below decides. Kept apart from pptLibrary.ts so it
+// Every edit to what the entry stores is saved, however small; the
+// fingerprint below only keeps an unchanged deck from being uploaded again. Kept apart from pptLibrary.ts so it
 // stays free of browser storage APIs and can be unit tested directly.
 import type { Song } from '../utils/types';
 import type { DeckSourceBible } from './deckSource';
@@ -55,24 +54,29 @@ function fileKey(file: AutoSaveFile | null): string | null {
 }
 
 function songKey(song: Song) {
-  // Deliberately without `id`: a restored deck mints fresh song ids for the
-  // editing session, and that alone must not count as an edit. Nor pageIndex
-  // or description — neither reaches a slide.
+  // Everything the deck archives for the song, down to its key, description
+  // and score page — any change is an edit worth saving. Only `id` is left
+  // out: a restored deck mints fresh song ids for the editing session, and
+  // that alone must not count as an edit.
   return {
     title: song.title,
+    key: song.key ?? null,
+    description: song.description ?? null,
     sections: song.sections.map((section) => ({ label: section.label, lines: section.lines })),
     order: song.order,
     linesPerSlide: song.linesPerSlide,
+    pageIndex: song.pageIndex ?? null,
     // 설교 후 찬양 moves the song's slides to a different point in the deck.
     postSermon: !!song.postSermon,
   };
 }
 
 /**
- * A stable string that changes exactly when the deck the user would download
- * changes. Auto-save compares it against the last saved one and skips the
- * rebuild when they match, so reopening a saved deck, switching views, or
- * retyping the same text never re-uploads an identical file.
+ * A stable string that changes whenever anything the 라이브러리 entry holds
+ * changes — however small the edit. Auto-save compares it against the last
+ * saved one and skips the rebuild only when they match, so reopening a saved
+ * deck, switching views, or retyping the same text never re-uploads an
+ * identical entry.
  */
 export function deckFingerprint(inputs: AutoSaveInputs): string {
   return JSON.stringify({
@@ -80,13 +84,13 @@ export function deckFingerprint(inputs: AutoSaveInputs): string {
     contiDate: inputs.contiDate ?? null,
     songs: inputs.songs.map(songKey),
     bible: {
-      verseInput: inputs.bible.verseInput.trim(),
-      sermonTitle: inputs.bible.sermonTitle.trim(),
+      verseInput: inputs.bible.verseInput,
+      sermonTitle: inputs.bible.sermonTitle,
       translations: inputs.bible.translations,
       versesPerSlide: inputs.bible.versesPerSlide,
       template: fileKey(inputs.bibleTemplate),
     },
-    announcementText: inputs.announcementText.trim(),
+    announcementText: inputs.announcementText,
     sermon: fileKey(inputs.sermonFile),
     conti: fileKey(inputs.contiFile),
     additional: inputs.additionalFiles.map((file) => fileKey(file)),

@@ -5,9 +5,13 @@ import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
 import {
+  entryVerification,
   fetchBundledLibrary,
   findEntry,
   findLibrarySong,
+  isGroundTruth,
+  libraryContentKey,
+  libraryLyrics,
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
@@ -82,6 +86,37 @@ function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
 }
 
+/** Idle time after the last change before a song is written to 찬양 라이브러리. */
+const LIBRARY_AUTO_SAVE_DEBOUNCE_MS = 1500;
+
+/**
+ * The user's copy of a song, measured against what recognition produced.
+ * With no recorded baseline the song never went through recognition (typed
+ * by hand, or pulled from the library), so there is nothing to have
+ * corrected — the user's copy is simply verified.
+ */
+function userReading(song: Song): {
+  final: ParsedScore;
+  diff: ReturnType<typeof diffFeedback> | undefined;
+  verification: 'verified' | 'edited';
+} {
+  const baseline = song.provenance?.baseline;
+  const final: ParsedScore = {
+    title: song.title.trim() || undefined,
+    artist: song.artist,
+    key: song.key,
+    order: [...song.order],
+    sections: structuredClone(song.sections),
+  };
+  const diff = baseline
+    ? diffFeedback(
+        { title: baseline.title, artist: baseline.artist, key: baseline.key, order: baseline.order, sections: baseline.sections },
+        final,
+      )
+    : undefined;
+  return { final, diff, verification: diff ? verificationFor(diff) : 'verified' };
+}
+
 /**
  * What recognition produced, before the user touched it.
  *
@@ -119,13 +154,14 @@ function isNonScoreRecognition(score: ParsedScore): boolean {
   );
 }
 
-function songFromLibrary(entry: LibraryEntry, pageIndex?: number): Song {
+function songFromLibrary(entry: LibraryEntry, pageIndex?: number, contiOrder?: string[]): Song {
+  const lyrics = libraryLyrics(entry, contiOrder);
   return {
     id: crypto.randomUUID(),
     title: entry.title,
     key: entry.key,
-    sections: structuredClone(entry.sections),
-    order: [...entry.order],
+    sections: lyrics.sections,
+    order: lyrics.order,
     linesPerSlide: 4,
     pageIndex,
   };
@@ -211,7 +247,12 @@ export default function LyricsGenerator({
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
   const autoAttemptedRef = useRef<Set<string>>(new Set());
-  const pendingAutoSaveRef = useRef<Set<string>>(new Set());
+  // Songs the user changed by hand in this session: their auto-saves carry
+  // the user's trust level instead of the machine's.
+  const userEditedRef = useRef<Set<string>>(new Set());
+  // What each song last wrote to 찬양 라이브러리, so an unchanged song is
+  // never written twice.
+  const librarySavedRef = useRef<Map<string, string>>(new Map());
   // Songs whose scan result should be discarded (library lyrics arrived first).
   const scanCancelledRef = useRef<Set<string>>(new Set());
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
@@ -365,31 +406,64 @@ export default function LyricsGenerator({
     return entry;
   }, []);
 
-  // Auto-save only after React has committed the recognized lyrics. Keeping
-  // this side effect outside a state updater also makes it safe in Strict Mode.
+  // Only which pages are still being read matters to auto-save, not every
+  // progress tick, or a long scan would keep pushing the save back.
+  const readingIds = Object.keys(recog)
+    .filter((id) => recog[id].status === 'running')
+    .sort()
+    .join(',');
+
+  /**
+   * Auto-save to 찬양 라이브러리: every change to a song — a lyric line, the
+   * title, the key, the 진행 순서 the conti wrote — is written back once edits
+   * settle, without pressing 저장.
+   *
+   * The trust level follows who made the change. A song the user edited is
+   * saved as the user's copy (verified or edited, exactly like 저장). A song
+   * only rearranged by the conti keeps the level its saved entry already has.
+   * A fresh machine reading is a draft, which never replaces a confirmed
+   * entry. Training feedback still goes out only on an explicit 저장.
+   */
   useEffect(() => {
-    if (pendingAutoSaveRef.current.size === 0) return;
-    for (const id of [...pendingAutoSaveRef.current]) {
-      const song = songs.find((candidate) => candidate.id === id);
-      if (!song) {
-        pendingAutoSaveRef.current.delete(id);
-        continue;
+    const reading = new Set(readingIds.split(','));
+    const timer = window.setTimeout(() => {
+      const updates = new Map<string, Pick<Song, 'verification' | 'version'>>();
+      for (const song of songs) {
+        if (!song.title.trim() || /^새 찬양/.test(song.title) || !songHasLyrics(song)) continue;
+        // A page still being read is not settled yet.
+        if (reading.has(song.id)) continue;
+        const content = libraryContentKey(song);
+        if (librarySavedRef.current.get(song.id) === content) continue;
+        const previous = findEntry(libraryRef.current, song.title);
+        if (previous && libraryContentKey(previous) === content) {
+          librarySavedRef.current.set(song.id, content);
+          continue;
+        }
+        const verification: VerificationState = userEditedRef.current.has(song.id)
+          ? userReading(song).verification
+          : previous
+            ? entryVerification(previous)
+            : 'draft';
+        librarySavedRef.current.set(song.id, content);
+        // A machine draft never overwrites a confirmed entry.
+        if (verification === 'draft' && previous && isGroundTruth(previous)) continue;
+        const entry = saveToLibrary(song, verification);
+        if (!entry) continue;
+        updates.set(song.id, { verification, version: entry.version });
+        if (!previous && verification === 'draft') {
+          showToast(`'${song.title}' 을(를) 초안으로 저장했습니다.`);
+        }
       }
-      if (
-        song.title.trim() &&
-        !/^새 찬양/.test(song.title) &&
-        songHasLyrics(song) &&
-        !findEntry(libraryRef.current, song.title)
-      ) {
-        // Automatic recognition produces a DRAFT. Nobody has looked at it, so
-        // it must not become the ground truth a later conti reuses, nor count
-        // as evidence that any model read the page correctly.
-        saveToLibrary(song, 'draft');
-        showToast(`'${song.title}' 을(를) 초안으로 저장했습니다.`);
-      }
-      pendingAutoSaveRef.current.delete(id);
-    }
-  }, [songs, saveToLibrary]);
+      if (updates.size === 0) return;
+      setSongs((current) =>
+        current.map((song) => {
+          const update = updates.get(song.id);
+          return update ? { ...song, ...update } : song;
+        }),
+      );
+    }, LIBRARY_AUTO_SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [songs, readingIds, saveToLibrary]);
 
   /**
    * Drop a song whose recognized title is on the administrator-managed
@@ -424,10 +498,9 @@ export default function LyricsGenerator({
               ...s,
               title: entry.title,
               key: s.key ?? entry.key,
-              sections: structuredClone(entry.sections),
               // The saved order is last time's arrangement; one the conti
-              // wrote is this week's.
-              order: s.orderFromConti ? s.order : [...entry.order],
+              // wrote is this week's, and the saved parts follow it.
+              ...libraryLyrics(entry, s.orderFromConti ? s.order : undefined),
             }
           : s,
       ),
@@ -564,7 +637,6 @@ export default function LyricsGenerator({
         engine: string,
         provenance?: Partial<NonNullable<Song['provenance']>>,
       ) => {
-        pendingAutoSaveRef.current.add(id);
         const found = evidence.get(id);
         setSongs((current) =>
           current.map((song) => {
@@ -1171,6 +1243,12 @@ export default function LyricsGenerator({
       infoRef.current = null;
       setInfo(null);
       setSongs(restoreSongs.map((song) => structuredClone(song)));
+      // A reopened deck holds last time's copy of each song. It is written to
+      // 찬양 라이브러리 once it is changed here, not merely for being opened —
+      // that would roll newer saved lyrics back to the old deck's.
+      librarySavedRef.current.clear();
+      userEditedRef.current.clear();
+      for (const song of restoreSongs) librarySavedRef.current.set(song.id, libraryContentKey(song));
       setPageImages({});
       setRecog({});
       setEdited(false);
@@ -1358,27 +1436,11 @@ export default function LyricsGenerator({
    */
   const handleSaveToLibrary = useCallback(
     (song: Song) => {
-      const baseline = song.provenance?.baseline;
-      const final: ParsedScore = {
-        title: song.title.trim() || undefined,
-        artist: song.artist,
-        key: song.key,
-        order: [...song.order],
-        sections: structuredClone(song.sections),
-      };
-      const diff = baseline
-        ? diffFeedback(
-            { title: baseline.title, artist: baseline.artist, key: baseline.key, order: baseline.order, sections: baseline.sections },
-            final,
-          )
-        : undefined;
-      // With no recorded baseline this song never went through recognition
-      // (typed by hand, or pulled from the library), so there is nothing to
-      // have corrected — the user's copy is simply verified.
-      const verification = diff ? verificationFor(diff) : 'verified';
+      const { final, diff, verification } = userReading(song);
 
       const entry = saveToLibrary(song, verification);
       if (!entry) return;
+      librarySavedRef.current.set(song.id, libraryContentKey(entry));
       setSongs((current) =>
         current.map((candidate) =>
           candidate.id === song.id
@@ -1473,13 +1535,14 @@ export default function LyricsGenerator({
         // title, its saved lyrics are loaded right away and the 악보 is never
         // read for lyrics.
         const hit = findLibrarySong(lib, { title: entry.title });
-        const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
+        // The 진행 순서 written on the conti is this week's arrangement: the
+        // saved lyrics are laid out in exactly that order, not the saved one.
+        const song = hit ? songFromLibrary(hit, entry.pageIndex, entry.order) : blankSong(entry.title);
         song.title = entry.title;
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;
-        // The 진행 순서 written on the conti is this week's arrangement: the
-        // parts are filled from the score or the web, in exactly this order.
+        // Parts filled later from the score or the web follow the same order.
         if (entry.order && entry.order.length > 0) {
           song.order = [...entry.order];
           song.orderFromConti = true;
@@ -1656,6 +1719,7 @@ export default function LyricsGenerator({
 
   function updateSong(next: Song) {
     setEdited(true);
+    userEditedRef.current.add(next.id);
     setSongs((list) => list.map((s) => (s.id === next.id ? next : s)));
   }
 

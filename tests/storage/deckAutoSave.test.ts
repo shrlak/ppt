@@ -64,13 +64,17 @@ describe('auto-save change detection', () => {
     expect(deckFingerprint({ ...inputs, confessionSong: '  ' })).toBe(base);
   });
 
-  it('ignores song fields that never reach a slide', () => {
+  it('changes with every archived song field, however small', () => {
     const base = deckFingerprint(inputs);
+    expect(deckFingerprint(withSong({ pageIndex: 9 }))).not.toBe(base);
+    expect(deckFingerprint(withSong({ description: '설명 변경' }))).not.toBe(base);
+    expect(deckFingerprint(withSong({ key: 'F' }))).not.toBe(base);
+  });
+
+  it('ignores the per-session song id', () => {
     // A reopened deck mints fresh ids for its editing session; that alone is
     // not an edit, or every 편집 would immediately re-upload the same deck.
-    expect(deckFingerprint(withSong({ id: 'song-restored' }))).toBe(base);
-    expect(deckFingerprint(withSong({ pageIndex: 9 }))).toBe(base);
-    expect(deckFingerprint(withSong({ description: '설명 변경' }))).toBe(base);
+    expect(deckFingerprint(withSong({ id: 'song-restored' }))).toBe(deckFingerprint(inputs));
   });
 
   it('changes when a song is added or removed', () => {
@@ -95,10 +99,10 @@ describe('auto-save change detection', () => {
     expect(deckFingerprint({ ...inputs, contiDate: '8/2/26' })).not.toBe(base);
   });
 
-  it('leaves trailing whitespace out of the announcement and title text', () => {
-    expect(deckFingerprint({ ...inputs, announcementText: `${inputs.announcementText}\n` })).toBe(
-      deckFingerprint(inputs),
-    );
+  it('counts even a whitespace-only change to the announcement or bible text', () => {
+    const base = deckFingerprint(inputs);
+    expect(deckFingerprint({ ...inputs, announcementText: `${inputs.announcementText}\n` })).not.toBe(base);
+    expect(deckFingerprint({ ...inputs, bible: { ...inputs.bible, sermonTitle: '사랑 ' } })).not.toBe(base);
   });
 
   it('changes when an uploaded or administrator-replaced file changes', () => {
