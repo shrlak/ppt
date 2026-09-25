@@ -153,6 +153,33 @@ export function selectReusableEntry(
     .sort((a, b) => (b.version ?? 1) - (a.version ?? 1))[0];
 }
 
+/**
+ * The saved song a title names, for loading straight from the library.
+ *
+ * A confirmed entry is preferred; when the library only holds a draft under
+ * that title, the draft is used — it is already in 찬양 라이브러리, and
+ * reading the 악보 again would only take time to produce another draft. Titles
+ * must match exactly (ignoring spacing, case and punctuation), and a known
+ * artist on both sides must agree, so two songs sharing a title stay apart.
+ */
+export function findLibrarySong(
+  entries: LibraryEntry[],
+  identity: SongIdentity,
+): LibraryEntry | undefined {
+  const confirmed = selectReusableEntry(entries, identity);
+  if (confirmed) return confirmed;
+  const wantedTitle = normalizeTitle(identity.title ?? '');
+  if (!wantedTitle) return undefined;
+  const wantedArtist = identity.artist ? normalizeTitle(identity.artist) : '';
+  return entries
+    .filter((candidate) => normalizeTitle(candidate.title) === wantedTitle)
+    .filter(
+      (candidate) =>
+        !wantedArtist || !candidate.artist || normalizeTitle(candidate.artist) === wantedArtist,
+    )
+    .sort((a, b) => (b.version ?? 1) - (a.version ?? 1))[0];
+}
+
 /** Load the read-only starter library bundled with the site. */
 export async function fetchBundledLibrary(baseUrl: string): Promise<LibraryEntry[]> {
   try {

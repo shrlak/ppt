@@ -7,7 +7,7 @@ import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib
 import {
   fetchBundledLibrary,
   findEntry,
-  findReusableEntry,
+  findLibrarySong,
   loadUserLibrary,
   mergeLibraries,
   normalizeTitle,
@@ -53,7 +53,6 @@ import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
-import { sameLyrics } from '../lib/lyrics/textSimilarity';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
@@ -520,6 +519,16 @@ export default function LyricsGenerator({
         });
       };
 
+      // Songs already filled from 찬양 라이브러리 (or by the user) are done
+      // from the start: their cards never show a scan in progress.
+      const prefilled = active.filter(songHasLyrics).map((song) => song.id);
+      if (prefilled.length > 0) markDone(prefilled, 'library');
+      // Every song already has its lyrics: nothing is left to read.
+      if (prefilled.length === active.length) {
+        window.clearInterval(ticker);
+        return;
+      }
+
       /**
        * Songs the models read off the 악보 that are new to the library, with
        * the engine that read them. They are shown immediately but held back
@@ -729,10 +738,6 @@ export default function LyricsGenerator({
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
         let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
-        // How much of the models' weight agreed on each title. It is what
-        // decides whether the library may answer a page outright, so a title
-        // pass that never ran leaves every page at zero — unsettled.
-        let titleConfidence: number[] = active.map(() => 0);
         try {
           const titleResult = await recognizeAdaptiveBatch(
             images,
@@ -745,7 +750,6 @@ export default function LyricsGenerator({
             deadline.stageEndsAt('titles'),
           );
           titleScores = titleResult.scores;
-          titleConfidence = titleResult.titleConfidence;
           for (const modelKey of titleResult.exhaustedModels) exhausted.add(modelKey);
         } catch (error) {
           console.warn('제목 일괄 인식 실패, 전체 가사 인식으로 계속:', error instanceof Error ? error.message : error);
@@ -772,7 +776,6 @@ export default function LyricsGenerator({
           images = permute(images);
           pageHashes = permute(pageHashes);
           aliasedTitles = permute(aliasedTitles);
-          titleConfidence = permute(titleConfidence);
           active.forEach((song, index) => {
             const found = evidence.get(song.id);
             if (found) evidence.set(song.id, { ...found, pageHash: pageHashes[index], image: images[index] });
@@ -792,21 +795,21 @@ export default function LyricsGenerator({
         }
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
-        // The saved entry a page might turn out to be, where the title behind
-        // the match was NOT settled — models reading different titles, mostly.
-        // Those are held until the lyrics pass has read the page, because on a
-        // shaky title a matching name is not evidence that the page carries
-        // those lyrics.
-        const libraryCandidates = new Map<string, LibraryEntry>();
         const titlePlan = planScoreBatch(
           aliasedTitles,
           active.map((song) => song.title),
           libraryRef.current,
-          titleConfidence,
         );
 
         active.forEach((song, index) => {
           if (isCancelled(song.id)) return;
+          // A song that already has lyrics has them from the library, the
+          // user or a restored deck — all authoritative, so the page is never
+          // read again, and its card is never dropped on a page classification.
+          if (songHasLyrics(song)) {
+            markDone([song.id], 'library');
+            return;
+          }
           const identity = aliasedTitles[index] ?? { order: [], sections: [] };
           if (discardNonScorePage(song, identity)) {
             resolvedIds.add(song.id);
@@ -817,19 +820,9 @@ export default function LyricsGenerator({
             resolvedIds.add(song.id);
             return;
           }
-          const candidate = titlePlan.libraryCandidates[index];
-          if (candidate) libraryCandidates.set(song.id, candidate);
-          // A song that already has lyrics has them from the user or from a
-          // restored deck — both are authoritative, so the page is classified
-          // but never read again.
-          if (songHasLyrics(song)) {
-            markDone([song.id], 'library');
-            return;
-          }
-          // The library already holds this exact title and the title is
-          // settled: stop here and load the saved lyrics. Reading the 악보
-          // would spend a request to learn what is already saved, and the
-          // saved copy is the wording somebody confirmed.
+          // 찬양 라이브러리 already holds this title: stop here and load the
+          // saved lyrics. Reading the 악보 would spend time and a request to
+          // learn what is already saved.
           const match = titlePlan.libraryMatches[index];
           if (match) {
             resolvedIds.add(song.id);
@@ -971,15 +964,12 @@ export default function LyricsGenerator({
             continue;
           }
           const aliased = recognizedTitle ? resolveTitleAlias(recognizedTitle, memory) : '';
-          const saved =
-            (aliased
-              ? findReusableEntry(libraryRef.current, { title: aliased, artist: score.artist })
-              : undefined) ?? libraryCandidates.get(song.id);
-          // The saved copy replaces what was read only when the page says the
-          // same thing. Where they differ the page wins: it is this week's
-          // arrangement, and the library may be holding another song that
-          // happens to share the title.
-          if (saved && sameLyrics(saved.sections, score.sections)) {
+          const saved = aliased
+            ? findLibrarySong(libraryRef.current, { title: aliased, artist: score.artist })
+            : undefined;
+          // The lyrics pass read a title the title pass missed, and 찬양
+          // 라이브러리 holds it: the saved lyrics are used.
+          if (saved) {
             scoreById.delete(song.id);
             resolvedIds.add(song.id);
             fillFromLibrary(song, saved);
@@ -1066,13 +1056,11 @@ export default function LyricsGenerator({
                 return;
               }
               const aliasedTitle = mergedTitle ? resolveTitleAlias(mergedTitle, memoryRef.current) : '';
-              const saved =
-                (aliasedTitle
-                  ? findReusableEntry(libraryRef.current, { title: aliasedTitle, artist: merged.artist })
-                  : undefined) ?? libraryCandidates.get(song.id);
-              // Same rule as the batch path: identical title AND identical
-              // lyrics, or the page's own reading stands.
-              if (saved && sameLyrics(saved.sections, merged.sections)) {
+              const saved = aliasedTitle
+                ? findLibrarySong(libraryRef.current, { title: aliasedTitle, artist: merged.artist })
+                : undefined;
+              // Same rule as the batch path: a title in the library loads it.
+              if (saved) {
                 resolvedIds.add(song.id);
                 fillFromLibrary(song, saved);
                 return;
@@ -1481,12 +1469,10 @@ export default function LyricsGenerator({
       if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
       for (const entry of lyricsSongs) {
-        // A song with a score page waits for recognition: nothing has read the
-        // page yet, so there is no way to tell whether the saved lyrics are the
-        // ones printed on it. A song the conti lists with no score page will
-        // never be read at all — there the saved copy, under exactly this
-        // title, is all there is.
-        const hit = entry.pageIndex == null ? findEntry(lib, entry.title) : undefined;
+        // The conti names the song: when 찬양 라이브러리 already holds that
+        // title, its saved lyrics are loaded right away and the 악보 is never
+        // read for lyrics.
+        const hit = findLibrarySong(lib, { title: entry.title });
         const song = hit ? songFromLibrary(hit, entry.pageIndex) : blankSong(entry.title);
         song.title = entry.title;
         song.key = entry.key ?? song.key;
@@ -1515,12 +1501,8 @@ export default function LyricsGenerator({
         });
         if (hit) {
           if (confessionSong && normalizeTitle(hit.title) === normalizeTitle(confessionSong.title)) continue;
-          // The page text names the song; its lyrics still come from reading
-          // the score, and the saved copy only stands in if the two agree.
-          const named = blankSong(hit.title);
-          named.key = hit.key;
-          named.pageIndex = page;
-          next.push(named);
+          // The page text names a song the library holds: load it right away.
+          next.push(songFromLibrary(hit, page));
         } else {
           const stub = blankSong(`새 찬양 (p.${page})`);
           stub.pageIndex = page;
