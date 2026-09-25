@@ -328,9 +328,9 @@ test('appends image and PPTX uploads after the final Back/End slide in chosen or
   await page.getByTestId('generate-pptx').click();
   const zip = await loadPptx(await downloadPromise, testInfo.outputPath('post-end-order.pptx'));
 
-  expect(slideFileNames(zip)).toHaveLength(34);
-  expect(await zip.file('ppt/slides/slide28.xml')!.async('string')).toContain('<p:pic>');
-  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('주님의 사랑');
+  expect(slideFileNames(zip)).toHaveLength(35);
+  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('<p:pic>');
+  expect(await zip.file('ppt/slides/slide30.xml')!.async('string')).toContain('주님의 사랑');
 });
 
 test('editor view shows slides and all five content editors together', async ({ page }) => {

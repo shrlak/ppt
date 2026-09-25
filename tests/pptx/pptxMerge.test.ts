@@ -185,7 +185,7 @@ describe('mergePptxDecks', () => {
     const ids = await slideMasterAndLayoutIds(zip);
 
     expect(finalPresentation.match(/<p:sldMasterId\b/g)).toHaveLength(2);
-    expect(slideFiles(zip)).toHaveLength(7);
+    expect(slideFiles(zip)).toHaveLength(8);
     expect(new Set(ids).size).toBe(ids.length);
     await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
   });
@@ -344,7 +344,7 @@ describe('mergePptxDecks', () => {
   it('merges the supplied front and back decks without PowerPoint repair relationships', async () => {
     const merged = await mergePptxDecks(frontSlides, backSlides);
     const zip = await JSZip.loadAsync(merged);
-    expect(slideFiles(zip)).toHaveLength(25);
+    expect(slideFiles(zip)).toHaveLength(26);
     expect(await findBrokenRelationships(zip)).toEqual([]);
     await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
     expect(Object.keys(zip.files).some((path) => path.startsWith('ppt/notesSlides/'))).toBe(false);

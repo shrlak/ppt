@@ -36,7 +36,7 @@ interface Props {
 }
 
 const SLOTS: { slot: DeckSlot; label: string; description: string }[] = [
-  { slot: 'front', label: 'Front slides', description: '예배 시작 전 안내 슬라이드 (기본 4장)' },
+  { slot: 'front', label: 'Front slides', description: '예배 시작 전 안내 슬라이드 (기본 5장)' },
   { slot: 'back', label: 'Back slides', description: '공동체 고백송과 마무리 슬라이드 (기본 21장)' },
 ];
 

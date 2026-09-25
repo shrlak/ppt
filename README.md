@@ -22,7 +22,7 @@
 Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  기도  →  설교 후 찬양  →  기도  →  광고  →  Back/End  →  추가 자료
 ```
 
-Front 4장과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
+Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
 포함합니다. **설교 후 찬양**으로 지정한 곡만 찬양 자리 대신 설교 뒤 기도 슬라이드 다음으로
 들어가고, 그 뒤에 기도 슬라이드가 한 장 더 붙습니다 (지정한 곡이 없으면 이 찬양과 기도를 함께
 건너뛰므로 기도 슬라이드가 연달아 나오지 않습니다). Back slides의 **공동체 고백** 슬라이드는
