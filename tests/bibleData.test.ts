@@ -157,6 +157,8 @@ const KOREAN_CHAPTER_LENGTHS: Record<string, [number, number, number][]> = {
     [47, 13, 13],
     [66, 12, 18], // 쉬운성경 prints 계12:18 ("용은 바닷가 모래 위에 섰습니다")
   ],
+  // 현대인의성경 numbers 고후13 as the English Bibles do (1-14)
+  'ko_hyun.json': [[66, 12, 18]], // and prints 계12:18 ("바닷가 모래 위에 섰습니다")
 };
 
 describe.each([
@@ -164,6 +166,7 @@ describe.each([
   ['새번역', 'ko_saenew.json'],
   ['개역한글', 'ko_ko.json'],
   ['쉬운성경', 'ko_easy.json'],
+  ['현대인의성경', 'ko_hyun.json'],
 ])('%s verse numbering', (_name, file) => {
   const raw = readTranslation(file);
 
@@ -263,6 +266,60 @@ describe('쉬운성경 text', () => {
       '(없음)',
       expect.stringMatching(/^제자들이 갈릴리에 모여 있었을 때/),
     ]);
+  });
+});
+
+describe('현대인의성경 text', () => {
+  const hyunRaw = readTranslation('ko_hyun.json');
+  const hyun = new Map(hyunRaw.map((book, i) => [i + 1, book.chapters]));
+  const text = (bookId: number, chapter: number, verse: number) =>
+    getVerseRange(hyun, bookId, chapter, verse, chapter, verse)[0]?.text;
+  const units = (bookId: number, chapter: number, from: number, to: number) =>
+    getVerseUnits(hyun, bookId, chapter, from, chapter, to).map((v) => [v.verse, lastVerseOf(v)]);
+
+  it('is offered as a Korean translation the loader knows', () => {
+    expect(TRANSLATIONS.find((t) => t.id === 'hyun')).toEqual({ id: 'hyun', name: '현대인의성경', language: 'ko' });
+    expect(isKnownTranslation('hyun')).toBe(true);
+  });
+
+  it('fetches ko_hyun.json and indexes books from 1', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(hyunRaw)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bible = await loadTranslation('/ppt/', 'hyun');
+
+    expect(fetchMock).toHaveBeenCalledWith('/ppt/bible-text/ko_hyun.json');
+    expect(getVerseRange(bible, 43, 3, 16, 3, 16)[0].text).toMatch(/^"하나님이 세상을 무척 사랑하셔서 하나밖에 없는 외아들마저/);
+  });
+
+  it('reads the verses it retells together as one, like 룻4:18-22 and 창25:7-8', () => {
+    expect(units(8, 4, 17, 22)).toEqual([
+      [17, 17],
+      [18, 22],
+    ]);
+    expect(text(8, 4, 18)).toMatch(/^베레스부터 다윗까지의 족보는 이렇다 :.*이새는 다윗을 낳았다\.$/);
+    expect(units(1, 25, 7, 9)).toEqual([
+      [7, 8],
+      [9, 9],
+    ]);
+    expect(units(4, 11, 4, 6)).toEqual([
+      [4, 5],
+      [6, 6],
+    ]);
+  });
+
+  it('joins the paragraphs of 민7:12-83, which it retells as one passage', () => {
+    expect(units(4, 7, 11, 89)).toEqual([
+      [11, 11],
+      [12, 83],
+      [84, 88],
+      [89, 89],
+    ]);
+    expect(text(4, 7, 12)).toMatch(/^그래서 이스라엘의 그 열두 지도자들은.*제12일에는 납달리 지파에서 에난의 아들 아히라가 드렸다\.$/);
+  });
+
+  it('has 계5:14, which the source page left out', () => {
+    expect(text(66, 5, 14)).toBe('그러자 네 생물은 "아멘" 하고 장로들은 엎드려 경배했습니다.');
   });
 });
 

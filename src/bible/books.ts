@@ -75,6 +75,7 @@ export const TRANSLATIONS = [
   { id: 'ko', name: '개역한글', language: 'ko' },
   { id: 'saenew', name: '새번역', language: 'ko' },
   { id: 'easy', name: '쉬운성경', language: 'ko' },
+  { id: 'hyun', name: '현대인의성경', language: 'ko' },
   { id: 'esv', name: 'ESV', language: 'en' },
   { id: 'niv', name: 'NIV', language: 'en' },
   { id: 'nasb', name: 'NASB', language: 'en' },
