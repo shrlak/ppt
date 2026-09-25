@@ -81,7 +81,7 @@ test.describe('수요예배 generator', () => {
     await page.getByTestId('wednesday-song-add').click();
     await page.getByTestId('wednesday-song-title-0').fill('나의 반석이신 하나님');
     await page.getByTestId('wednesday-song-input-0').setInputFiles(SONG_PPTX);
-    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장');
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 5장');
 
     await page.getByTestId('wednesday-next-songs').click();
     // That week's Wednesday, as the church names its files.
@@ -96,16 +96,16 @@ test.describe('수요예배 generator', () => {
     const zip = await JSZip.loadAsync(await fs.readFile(saved));
     const texts = await textOfSlides(zip);
 
-    // 표지 · 인트로 · 경배와 찬양 · [찬양 제목 + 곡 4장] · 기도 · 말씀 · 본문 4장
+    // 표지 · 인트로 · 경배와 찬양 · [찬양 제목 + 곡 5장] · 기도 · 말씀 · 본문 4장
     // · 설교 · 기도 · 합심기도 · 마지막
-    expect(texts).toHaveLength(18);
+    expect(texts).toHaveLength(19);
     expect(texts[0]).toContain('2026년 9월 16일');
     expect(texts[0]).toContain('나의 힘이 되신 여호와여');
     expect(texts[2]).toContain('경배와 찬양');
     expect(texts[3]).toContain('나의 반석이신 하나님');
-    expect(texts[8]).toContain('기 도');
-    expect(texts[10]).toContain('나의 힘이신 여호와여 내가 주를 사랑하나이다');
-    expect(texts[17]).toContain('성령으로 봉사하는 교회');
+    expect(texts[9]).toContain('기 도');
+    expect(texts[11]).toContain('나의 힘이신 여호와여 내가 주를 사랑하나이다');
+    expect(texts[18]).toContain('성령으로 봉사하는 교회');
     // Placeholders never reach the screen.
     expect(texts.join('\n')).not.toContain('{{');
 
@@ -141,7 +141,7 @@ test.describe('수요예배 generator', () => {
     await page.getByTestId('wednesday-song-add').click();
     await page.getByTestId('wednesday-song-title-0').fill('하늘 위에 주님 밖에');
     await page.getByTestId('wednesday-song-input-0').setInputFiles(SONG_PPTX);
-    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장');
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 5장');
     // The song's file is written to IndexedDB as soon as it is attached; wait
     // for it rather than for a fixed delay.
     await expect
@@ -172,7 +172,7 @@ test.describe('수요예배 generator', () => {
     await page.getByTestId('wednesday-tab-songs').click();
     await expect(page.getByTestId('wednesday-song-title-0')).toHaveValue('하늘 위에 주님 밖에');
     // The uploaded file comes back too, not just its title.
-    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장');
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 5장');
   });
 
   test('offers the search hits the proxy is willing to fetch', async ({ page }) => {
@@ -341,7 +341,7 @@ test.describe('수요예배 generator', () => {
     await page.getByTestId('wednesday-song-add').click();
     await page.getByTestId('wednesday-song-title-0').fill('나의 반석이신 하나님');
 
-    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장', {
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 5장', {
       timeout: BUILD_TIMEOUT,
     });
     await expect(page.getByTestId('wednesday-song-file-0')).toContainText('인터넷에서 받음');
@@ -393,7 +393,7 @@ test.describe('수요예배 generator', () => {
     await page.getByTestId('wednesday-song-add').click();
     await page.getByTestId('wednesday-song-title-0').fill('나의 반석이신 하나님');
 
-    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 4장', {
+    await expect(page.getByTestId('wednesday-song-file-0')).toContainText('슬라이드 5장', {
       timeout: BUILD_TIMEOUT,
     });
     expect(asked).toEqual(['dead-end', 'has-the-file']);

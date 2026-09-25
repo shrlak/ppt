@@ -569,7 +569,11 @@ export async function renderPptxSlides(data: ArrayBuffer | Uint8Array): Promise<
           themeFonts: inheritance.themeFonts,
         })
       : [];
-    const shapes = [...inheritance.layers.flatMap((l) => l.shapes), ...ownShapes];
+    // showMasterSp="0" is PowerPoint's "hide background graphics": the slide
+    // keeps its own background but none of the layout's or master's art.
+    const showMasterShapes = doc.documentElement.getAttribute('showMasterSp') !== '0';
+    const inherited = showMasterShapes ? inheritance.layers.flatMap((l) => l.shapes) : [];
+    const shapes = [...inherited, ...ownShapes];
     slides.push({ index, widthEmu, heightEmu, background, shapes });
   }
   return slides;

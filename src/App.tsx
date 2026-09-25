@@ -91,7 +91,7 @@ async function backDeckWithConfessionSong(
   return result.data;
 }
 
-const FRONT_SLIDE_COUNT = 4;
+const FRONT_SLIDE_COUNT = 5;
 const BACK_SLIDE_COUNT = 21;
 /**
  * Lyric slides the bundled back deck prints for its own 공동체 고백송

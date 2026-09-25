@@ -12,9 +12,9 @@ describe('additional PPTX conversion', () => {
     const file = await inspectAdditionalUpload(new File([frontSlides], 'extra.pptx'));
 
     expect(file.kind).toBe('pptx');
-    expect(file.slideCount).toBe(4);
+    expect(file.slideCount).toBe(5);
     const converted = await convertAdditionalFile(file, template.buffer as ArrayBuffer);
-    expect(converted.slideCount).toBe(4);
+    expect(converted.slideCount).toBe(5);
     expect(converted.deck).toEqual(new Uint8Array(frontSlides));
   });
 
