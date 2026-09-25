@@ -29,6 +29,9 @@ import { getCustomDeck, type DeckSlot, type StoredDeck } from './lib/storage/dec
 import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck, type SavedDeckResult } from './lib/storage/pptLibrary';
 import { decodeDeckSource, encodeDeckSource } from './lib/storage/deckSource';
 import { isWednesdaySource } from './wednesday/source';
+import { isPraiseSource } from './praise/source';
+import ServicePicker, { type ServiceChoice } from './components/ServicePicker';
+import { getSavedDeck } from './lib/storage/pptLibrary';
 import {
   AUTO_SAVE_BUSY_POLL_MS,
   AUTO_SAVE_DEBOUNCE_MS,
@@ -147,7 +150,7 @@ function WizardNavigation({ step, onMove }: WizardNavigationProps) {
   );
 }
 
-export default function App() {
+function SundayApp() {
   const [activeStep, setActiveStep] = useState(0);
   // Which way the active wizard step just moved, so the incoming panel can
   // sweep in from the matching side instead of a single fixed direction.
@@ -853,6 +856,11 @@ export default function App() {
       window.location.href = `${BASE}wednesday.html?deck=${encodeURIComponent(deck.id)}`;
       return;
     }
+    if (isPraiseSource(deck.source)) {
+      showToast(`'${deck.name}'은(는) 찬양집회 PPT입니다. 찬양집회 생성기로 이동합니다.`);
+      window.location.href = `${BASE}praise.html?deck=${encodeURIComponent(deck.id)}`;
+      return;
+    }
 
     const source = decodeDeckSource(deck.source);
     let restoreWarning: string | null = null;
@@ -903,6 +911,24 @@ export default function App() {
     );
   }
 
+  // A deck id in the URL comes from another generator's 라이브러리 (the
+  // 찬양집회 or 수요예배 page handing a 주일 deck over to this one).
+  useEffect(() => {
+    const deckId = new URLSearchParams(window.location.search).get('deck');
+    if (!deckId) return;
+    let cancelled = false;
+    void getSavedDeck(deckId)
+      .then((deck) => {
+        if (!cancelled) return openSavedDeck(deck);
+      })
+      .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+    return () => {
+      cancelled = true;
+    };
+    // Only on arrival: openSavedDeck is re-created every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <>
       <a className="skip-link" href="#main-content">
@@ -927,6 +953,10 @@ export default function App() {
           {/* Narrow screens drop the labels and keep the icons; the label
               stays in the DOM as the accessible name either way. */}
           <nav className="header-actions" aria-label="도구">
+            <a className="btn" href={`${BASE}index.html`} data-testid="service-picker-link">
+              <Icon name="back" />
+              <span className="btn-label">예배 선택</span>
+            </a>
             {/* The 수요예배 generator is its own page: no 콘티, no 광고, no
                 추가 자료, and a different deck design end to end. */}
             <a className="btn" href={`${BASE}wednesday.html`} data-testid="wednesday-link">
@@ -1219,5 +1249,41 @@ export default function App() {
         <ToastHost />
       </div>
     </>
+  );
+}
+
+/** Which generator the address asks for, if any: `?service=sunday`, or a deck to open. */
+function serviceFromLocation(): ServiceChoice | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('service') === 'sunday' || params.has('deck')) return 'sunday';
+  return null;
+}
+
+/**
+ * The PPT Generator's front door: pick 주일예배, 찬양집회 or 수련회 first.
+ * 주일예배 is this page's own wizard; the choice goes into the address
+ * (`?service=sunday`) so a reload, a bookmark or the back button lands in
+ * the same place.
+ */
+export default function App() {
+  const [service, setService] = useState<ServiceChoice | null>(serviceFromLocation);
+
+  useEffect(() => {
+    const onPopState = () => setService(serviceFromLocation());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  if (service === 'sunday') return <SundayApp />;
+  return (
+    <ServicePicker
+      onChoose={(choice) => {
+        const url = new URL(window.location.href);
+        url.searchParams.set('service', choice);
+        window.history.pushState(null, '', url);
+        setService(choice);
+        window.scrollTo({ top: 0 });
+      }}
+    />
   );
 }

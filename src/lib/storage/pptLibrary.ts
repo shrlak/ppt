@@ -38,6 +38,12 @@ export interface SavedDeck {
   additionalFiles?: SavedFile | null;
   slideCount: number;
   songTitles: string[];
+  /**
+   * Kept until someone deletes it by hand: the weekly purge skips it. Set on
+   * 찬양집회 decks, which are a once-a-year event rather than a week's
+   * material.
+   */
+  keep?: boolean;
   savedAt: string;
   /** Last edit or successful cloud migration; legacy records fall back to savedAt. */
   updatedAt: string;
@@ -69,6 +75,7 @@ export interface SavedDeckSummary {
   additionalFiles: SavedFileSummary | null;
   slideCount: number;
   songTitles: string[];
+  keep?: boolean;
   savedAt: string;
   updatedAt: string;
   syncPending?: boolean;
@@ -93,6 +100,7 @@ interface RemoteDeckMetadata {
   };
   slideCount: number;
   songTitles: string[];
+  keep?: boolean;
   savedAt: string;
   updatedAt: string;
 }
@@ -203,6 +211,7 @@ function summaryFromRemote(deck: RemoteDeckMetadata, syncPending = false): Saved
     additionalFiles: deck.files.additionalFiles ?? null,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
+    ...(deck.keep ? { keep: true } : {}),
     savedAt: deck.savedAt,
     updatedAt: deck.updatedAt,
     ...(syncPending ? { syncPending: true } : {}),
@@ -221,6 +230,7 @@ export function summarizeSavedDeck(deck: SavedDeck): SavedDeckSummary {
     additionalFiles: files.additionalFiles ?? null,
     slideCount: deck.slideCount,
     songTitles: deck.songTitles,
+    ...(deck.keep ? { keep: true } : {}),
     savedAt: deck.savedAt,
     updatedAt: deck.updatedAt || deck.savedAt,
     ...(deck.syncPending ? { syncPending: true } : {}),
@@ -282,6 +292,7 @@ async function uploadDeckToCloud(deck: SavedDeck): Promise<RemoteDeckMetadata> {
         files,
         slideCount: deck.slideCount,
         songTitles: deck.songTitles,
+        ...(deck.keep ? { keep: true } : {}),
         savedAt: deck.savedAt,
       },
     }),
@@ -345,6 +356,7 @@ async function downloadRemoteDeck(metadata: RemoteDeckMetadata): Promise<SavedDe
     additionalFiles,
     slideCount: metadata.slideCount,
     songTitles: metadata.songTitles,
+    ...(metadata.keep ? { keep: true } : {}),
     savedAt: metadata.savedAt,
     updatedAt: metadata.updatedAt,
   };

@@ -41,6 +41,8 @@ export interface PptDeckMetadata {
   files: PptFiles;
   slideCount: number;
   songTitles: string[];
+  /** Kept until deleted by hand; the weekly purge skips it. */
+  keep?: true;
   savedAt: string;
   updatedAt: string;
 }

@@ -33,6 +33,8 @@ Browser  ──GET  /wednesday/songs/sheets▶ Worker (image search) ──▶ �
 Browser  ──POST /wednesday/songs/image▶ Worker downloads that image and relays it
 Everyone ◀──GET /libraries/wednesday-songs── 수요예배 song titles + source links
 Admin    ──PUT/DELETE /libraries/wednesday-songs── save or delete one
+Everyone ◀──GET /libraries/praise-english── 찬양집회 Korean + English lyrics, slide by slide
+Admin    ──PUT/POST/DELETE /libraries/praise-english── save, merge or delete one
 Everyone ◀──GET /libraries/ppt───── shared PPT metadata and file chunks
 Admin    ──POST/DELETE /libraries/ppt── save, edit, or delete PPT entries
 Cron     ──Sun 5 PM ET────────▶  wipe every PPT entry and its files
@@ -135,13 +137,24 @@ from "open this and download it" rather than from a search. It lives outside
 lyrics library. The week's actual files ride along with that week's PPT-library
 entry and are cleared with it.
 
+`GET|PUT|POST|DELETE /libraries/praise-english` is the 찬양집회 bilingual lyrics
+library: for each song, its Korean slides and the English printed under each one.
+The 찬양집회 page writes to it by itself whenever a song's lyrics settle, and reads
+it to fill next year's English. Writes take the administrator password like every
+other shared write; deletes leave a tombstone so a stale device cannot bring a song
+back. Like the lyrics library it lives outside `library:ppt:*`, so the weekly purge
+never touches it.
+
 ### Weekly PPT purge (Sunday 5 PM)
 
 The shared PPT library holds one week of material at a time. A cron trigger
 deletes **every saved PPT entry and all of its files** each Sunday at 5 PM
 `PURGE_TIMEZONE` (default `America/New_York`), so the next week's 콘티 starts
 from an empty library. Half-finished uploads go with them. The 곡 (lyrics)
-library, shared settings, and usage counters are never touched.
+library, the 찬양집회 English-lyrics library (`/libraries/praise-english`), shared
+settings, and usage counters are never touched — and neither is any deck saved with
+`keep: true` (every 찬양집회 deck), which stays until someone deletes it by hand. The
+purge record counts those as `kept`.
 
 Cron triggers are UTC-only, so `wrangler.toml` fires the Worker at **both**
 UTC hours that can be 5 PM Eastern — `crons = ["0 21,22 * * SUN"]`, i.e.

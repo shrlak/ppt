@@ -3,18 +3,26 @@
 찬양, 성경 말씀, 설교, 광고, 추가 자료를 **6단계 화면**에서 `다음`/이전 버튼으로 입력하면
 **하나의 예배 슬라이드 PPTX**로 합쳐서 만들어 주는 웹 앱입니다.
 
-예배 종류마다 준비 방식이 달라 생성기도 **두 개**입니다.
+예배 종류마다 준비 방식이 달라 생성기도 따로 있습니다. <https://shrlak.github.io/ppt/>에 들어가면
+먼저 **어떤 PPT를 만들지** 고르는 화면이 나옵니다.
 
-| | 주일예배 | 수요예배 |
-|---|---|---|
-| 주소 | <https://shrlak.github.io/ppt/> | <https://shrlak.github.io/ppt/wednesday.html> |
-| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
-| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
-| 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
-| 파일명 | 그 주 **일요일** `MMDD.pptx` | 그 주 **수요일** `MMDD.pptx` |
+1. **주일예배** — 이 페이지의 6단계 화면 (`?service=sunday`로 바로 열 수 있습니다)
+2. **찬양집회** — 한글·영어 제목과 가사가 함께 들어가는 찬양집회 PPT (`praise.html`)
+3. **수련회** — 준비 중
 
-헤더의 **수요예배**/**주일예배 생성기** 버튼으로 두 화면을 오갈 수 있습니다. 아래 설명은
-따로 표시하지 않는 한 주일예배 생성기 기준입니다 (수요예배는 [🌙 수요예배](#-수요예배) 참고).
+수요예배 생성기는 첫 화면 아래 링크와 주일예배 헤더의 **수요예배** 버튼으로 엽니다.
+
+| | 주일예배 | 찬양집회 | 수요예배 |
+|---|---|---|---|
+| 주소 | <https://shrlak.github.io/ppt/?service=sunday> | <https://shrlak.github.io/ppt/praise.html> | <https://shrlak.github.io/ppt/wednesday.html> |
+| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
+| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
+| 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 설교 PPT·말씀 자료를 **원하는 곡 뒤에** 삽입 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
+| 파일명 | 그 주 **일요일** `MMDD.pptx` | 집회 날짜 `MMDD_PraiseNight.pptx` | 그 주 **수요일** `MMDD.pptx` |
+| 라이브러리 | 매주 일요일 오후 5시 자동 삭제 | **자동 삭제 안 함** — 직접 삭제할 때까지 보관 | 매주 일요일 오후 5시 자동 삭제 |
+
+아래 설명은 따로 표시하지 않는 한 주일예배 생성기 기준입니다 (찬양집회는
+[🙌 찬양집회](#-찬양집회), 수요예배는 [🌙 수요예배](#-수요예배) 참고).
 
 ## 생성되는 슬라이드 순서
 
@@ -82,6 +90,8 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 - 삭제될 때 각 항목에 삭제 표시가 남아, 브라우저에만 남아 있던 사본도 다음에 라이브러리를 열 때
   함께 정리됩니다(오프라인 사본이 다시 올라가지 않습니다).
 - 삭제 이후에 저장하면 새 주의 항목으로 다시 쌓이기 시작합니다.
+- **찬양집회 PPT는 자동 삭제에서 제외됩니다.** 라이브러리에 `찬양집회 · 자동 삭제 안 함` 표시가 붙고,
+  항목의 **삭제** 버튼으로 직접 지울 때까지 남습니다 (삭제할 때 한 번 더 확인합니다).
 - 삭제 시각·시간대는 Worker의 `PURGE_TIMEZONE`/`PURGE_HOUR` 설정으로 바꿀 수 있습니다
   (`worker/README.md`의 *Weekly PPT purge* 참고).
 
@@ -355,6 +365,76 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 - PPTX는 원본 슬라이드·레이아웃·테마를 유지한 채 전체가 삽입됩니다.
 - 저장된 PPT를 라이브러리에서 다시 편집하면 파일 이름, 원본 데이터, 순서가 함께 복원됩니다.
 
+## 🙌 찬양집회
+
+찬양집회 PPT는 **별도 페이지**(`/ppt/praise.html`)에서 만듭니다. 작년(2025년 9월 27일 EM & KM
+Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가사가 함께** 들어갑니다.
+
+### 생성되는 슬라이드 순서
+
+```
+표지(올해 날짜)  →  [곡 제목(한글 / English)  →  가사(한글 위, 영어 아래) × N  →  그 곡 뒤에 넣은 자료
+                    →  기도 / Prayer(고른 곡만)] × 곡 수  →  맨 뒤에 넣은 자료
+```
+
+표지·곡 제목·가사·기도 네 가지 디자인은 모두 작년 PPT의 슬라이드를 그대로 씁니다
+(`public/praise-template.pptx` — 배경 사진, 나눔고딕 글꼴 포함). 가사 슬라이드 모서리에는 작년처럼
+`한글 제목 | English Title`이 들어갑니다. **페이지에 맞게 나눕니다** — 한글과 영어가 한 장에 다
+들어가지 않으면 먼저 글자를 조금 줄이고, 28pt보다 작아져야 하면 그 장을 **두 장으로 나눠**(한글 줄을
+반으로, 영어도 같은 비율로) 뒤에서도 읽을 수 있는 크기를 지킵니다. 영어 가사 단계에서 나뉘는 장에는
+`N장으로 나눠 넣습니다`가 표시됩니다.
+
+### 1단계 · 찬양
+
+주일예배와 똑같이 **콘티 PDF를 올리면** 곡 순서·제목·한글 가사를 읽습니다 (찬양 라이브러리에 있는
+곡은 바로 불러오고, 없는 곡은 악보를 인식합니다). 작년이나 이전 찬양집회에서 **한글·영어로 저장된
+곡**이면 그 저장본을 먼저 불러와 영어까지 한 번에 채웁니다. 찬양집회에는 공동체 고백송·설교 후 찬양 구분이
+없어서 콘티의 **모든 곡이 적힌 순서대로** 들어가고, 한글 아래에 영어가 들어가므로 새 곡은
+**슬라이드당 3줄**로 시작합니다 (곡마다 바꿀 수 있습니다).
+
+### 2단계 · 영어 가사
+
+곡마다 **영어 제목**과, 한글 슬라이드 한 장마다 그 아래에 들어갈 **영어 가사 칸**이 나옵니다.
+
+- **자동으로 채워집니다** — 작년 찬양집회에서 부른 10곡(춤추는 세대, 주 하나님 지으신 모든 세계,
+  예수 우리 왕이여, Who Else, 예수 아름다우신, 여호와께 돌아가자, 주님의 선하심, 부르신 곳에서,
+  나의 슬픔을, Praise)과 이후 저장한 곡은 영어 가사를 **빈 칸에만** 알아서 넣습니다. 올해 한글 가사의
+  줄 나눔이 작년과 달라도(예: 두 줄이 한 줄로) 글자로 맞춰 보므로 제자리에 들어가고, 글자 한두 개
+  차이(그려/그리어)도 맞춥니다.
+- **저장된 가사로 불러오기** — 라이브러리에 없는 곡이나 영어로만 부르는 곡(Who Else, Praise)은 이
+  버튼으로 작년 한글·영어 가사를 한 번에 가져옵니다.
+- **영어 가사 한 번에 붙여넣기** — 곡 전체 영어 가사를 붙여넣으면 빈 줄로 나눈 문단을 한 장씩,
+  문단 수가 안 맞으면 줄을 순서대로 나눠 넣습니다.
+- **AI로 빈 칸 채우기** — 영어 원곡이 있으면 원곡 가사를, 없으면 부를 수 있는 번역을 AI가 채웁니다.
+  `AI 초안 · 확인 필요`로 표시되니 띄우기 전에 확인하세요.
+- 영어로만 된 곡은 가사가 한 번만 나오고, 영어 가사를 비워 둔 장은 한글만 나옵니다.
+- **이 곡 뒤에 기도 / Prayer 슬라이드**를 곡마다 켤 수 있습니다.
+- **한글·영어 가사는 자동으로 저장됩니다** — 찬양집회 페이지에 콘티를 올리면 곡마다 한글과 영어
+  가사가 (버튼을 누르지 않아도) 입력이 멈춘 뒤 **찬양집회 영어 가사 라이브러리**에 함께 저장되고,
+  다음 찬양집회에서 그대로 불러옵니다. 영어가 일부만 맞은 결과가 이미 저장된 더 완전한 영어를
+  덮어쓰지는 않으며(직접 입력한 것은 덮어씁니다), **영어 가사 저장** 버튼으로 바로 저장할 수도
+  있습니다. 이 라이브러리도 자동 삭제되지 않습니다.
+- **다른 예배에서는 한글만** — 같은 곡의 한글 가사는 찬양 라이브러리에도 (없을 때만, 초안으로)
+  저장되어 주일예배에서도 불러올 수 있지만, 주일예배는 찬양 라이브러리만 읽으므로 **한글 가사만**
+  들어갑니다. 찬양집회에서 저장된 곡은 파트가 1, 2, 3…으로 나뉘어 있어 콘티의 진행(V-C-B)과 맞지
+  않으면 저장된 순서를 그대로 씁니다.
+
+### 3단계 · 추가 자료
+
+설교 PPT, 말씀·기도제목 슬라이드, 이미지, PDF를 올리고 파일마다 **넣을 위치**(표지 바로 뒤 /
+N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡의 기도 슬라이드보다 앞에 들어가므로,
+작년처럼 `찬양 → 설교 → 기도 → 다음 찬양` 순서를 만들 수 있습니다. 4:3이 아닌 PPT는 찬양집회 PPT
+크기(4:3)에 맞춰 줄입니다.
+
+### 4단계 · 표지 및 다운로드
+
+- **날짜** — 콘티 날짜로 채워지고, 작년 표지 그림 속 날짜(09/27/2025)를 가리고 그 자리에
+  `MM/DD/YYYY`로 올해 날짜를 씁니다. 올해 새 표지 이미지를 올리면 그 그림을 그대로 씁니다.
+- **미리보기**로 실제 슬라이드(배경 사진 포함)를 확인한 뒤 **찬양집회 PPT 다운로드**를 누릅니다.
+- **자동 저장** — 공유 PPT 라이브러리에 계속 저장되며 **매주 자동 삭제에서 제외**됩니다. 이 브라우저는
+  마지막으로 작업한 찬양집회를 기억해 다시 열면 이어서 편집하고, **새 찬양집회 시작**으로 비울 수
+  있습니다. 다른 기기에서는 라이브러리의 **편집**으로 엽니다.
+
 ## 🌙 수요예배
 
 수요예배는 주일예배와 만드는 방식이 완전히 달라 **별도 페이지**(`/ppt/wednesday.html`)에서
@@ -495,6 +575,11 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   템플릿 장을 옵션으로 받아 수요예배 캔버스에 맞추고, 만든 덱은
   `pptxPackage.ts`의 `pruneToSlides()`로 **자기 슬라이드가 쓰지 않는 파트를 모두 덜어낸 뒤** 합쳐집니다
   (그러지 않으면 곡마다 템플릿 배경 2MB가 한 벌씩 복사됩니다).
+- 찬양집회 슬라이드: `public/praise-template.pptx` (표지·곡 제목·가사·기도 4장)와 작년 영어 가사
+  `public/praise-english.json`. 둘 다 작년 찬양집회 PPT에서
+  `node scripts/prepare-praise-template.mjs <찬양집회.pptx>`로 뽑아낸 파일입니다 (원본은 저장소에 두지
+  않습니다). 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
+  라이브러리는 Worker의 `/libraries/praise-english` 경로가 담당합니다.
 - 데스크톱 앱(별도 프로젝트): `desktop/` — Tauri 기반 예배 셋리스트 관리 앱, 자세한 내용은
   `desktop/README.md` 참고
 
@@ -531,6 +616,18 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 5. **Additional files** — ordered PDF, PPTX, PNG, and JPG/JPEG uploads are appended only after the
    final back/end slide. PDFs become one slide per page, images are fitted without cropping, and
    uploaded PPTX slides keep their own layouts and themes.
+
+**찬양집회 (praise night)** has its own page at `/ppt/praise.html`, reached from the service picker
+that now opens the site (주일예배 / 찬양집회 / 수련회 — the last is not built yet). It reads a conti
+exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
+praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
+English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
+and matched by text, so different line breaks still line up — or pasted, typed, or drafted by AI. Every
+song's Korean and English are saved automatically; other services only ever load the Korean (it is also
+saved to the lyrics library as a draft). A bilingual slide that would have to shrink below 28pt is split
+into two. Files such as a sermon deck can be placed after any song, a 기도/Prayer slide can follow any
+song, and the cover photo gets this year's date over last year's. 찬양집회 decks are saved with `keep`, so
+the weekly Sunday purge never deletes them — only a manual delete does.
 
 **수요예배 (Wednesday service)** is prepared differently enough to get its own page at
 `/ppt/wednesday.html`: there is no 콘티 to read, each song's slides are the 악보 pages of that

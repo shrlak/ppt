@@ -1116,7 +1116,11 @@ main[data-direction='back'] .wizard-panel.active {
 .deck-editor-name input,
 .admin-lock label input,
 .song-footer select,
-.library-add select {
+.library-add select,
+.praise-english-title,
+.praise-slide-en,
+.praise-paste textarea,
+.praise-placements select {
   width: 100%;
   border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
@@ -1142,13 +1146,17 @@ main[data-direction='back'] .wizard-panel.active {
 .deck-editor-name input,
 .admin-lock label input,
 .song-footer select,
-.library-add select {
+.library-add select,
+.praise-english-title,
+.praise-placements select {
   min-height: var(--control-h);
   padding: var(--s-2) var(--s-3);
 }
 .section-row textarea,
 .announcement-textarea,
-.admin-excluded-input {
+.admin-excluded-input,
+.praise-slide-en,
+.praise-paste textarea {
   padding: var(--s-3);
   resize: vertical;
 }
@@ -1161,7 +1169,10 @@ main[data-direction='back'] .wizard-panel.active {
 .verse-input:hover,
 .announcement-textarea:hover,
 .library-add-input:hover,
-.library-search-input:hover {
+.library-search-input:hover,
+.praise-english-title:hover,
+.praise-slide-en:hover,
+.praise-paste textarea:hover {
   border-color: var(--field-border-strong);
 }
 .song-title:focus-visible,
@@ -1181,7 +1192,11 @@ main[data-direction='back'] .wizard-panel.active {
 .admin-excluded-input:focus-visible,
 .deck-editor-name input:focus-visible,
 .admin-lock label input:focus-visible,
-.song-footer select:focus-visible {
+.song-footer select:focus-visible,
+.praise-english-title:focus-visible,
+.praise-slide-en:focus-visible,
+.praise-paste textarea:focus-visible,
+.praise-placements select:focus-visible {
   border-color: var(--accent);
   outline: var(--focus-width) solid var(--focus-ring);
   outline-offset: var(--focus-offset);
@@ -1194,7 +1209,8 @@ main[data-direction='back'] .wizard-panel.active {
 /* Native selects: strip the OS glyph, draw our own chevron at the same inset
    the text uses on the other side, and reserve room so they never collide. */
 .song-footer select,
-.library-add select {
+.library-add select,
+.praise-placements select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -2689,6 +2705,21 @@ main[data-direction='back'] .wizard-panel.active {
   font-size: var(--text-base);
   font-weight: 600;
 }
+/* A deck the weekly purge leaves alone (찬양집회). The words carry the
+   meaning; the tint only groups it with the other "kept" signals. */
+.library-entry-keep {
+  display: inline-block;
+  margin-left: var(--s-2);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--notice-border);
+  border-radius: 999px;
+  background: var(--leaf-bg);
+  color: var(--leaf-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 20px;
+  vertical-align: middle;
+}
 .library-entry-meta {
   margin: var(--s-1) 0 0;
   color: var(--ink-muted);
@@ -3794,4 +3825,308 @@ main[data-direction='back'] .wizard-panel.active {
     width: 64px;
     height: 48px;
   }
+}
+
+/* ==========================================================================
+   찬양집회 page
+   ---------------------------------------------------------------------------
+   Same tokens and card geometry as the other generators. The one layout of
+   its own is the 영어 가사 row: the Korean slide on the left and the English
+   box that goes under it on the right, so each pair reads as one slide.
+   ========================================================================== */
+
+.praise-songs {
+  display: grid;
+  gap: var(--s-4);
+}
+.praise-song {
+  display: grid;
+  gap: var(--s-3);
+  border-left: 3px solid var(--hairline);
+}
+.praise-song:focus-within {
+  border-left-color: var(--accent);
+}
+.praise-song-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+.praise-song-titles {
+  display: grid;
+  flex: 1 1 260px;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.praise-song-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.praise-song-status {
+  flex: none;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.praise-song-status.is-done {
+  border-color: var(--notice-border);
+  background: var(--leaf-bg);
+  color: var(--leaf-ink);
+}
+.praise-song-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.praise-prayer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.praise-paste {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+}
+.praise-paste-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+.praise-slides {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.praise-slide {
+  display: grid;
+  grid-template-columns: var(--s-6) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-3);
+  padding: var(--s-2);
+  border-radius: var(--radius-sm);
+}
+.praise-slide:nth-child(odd) {
+  background: var(--canvas);
+}
+.praise-slide-number {
+  padding-top: var(--s-3);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.praise-slide-ko {
+  display: grid;
+  gap: var(--s-1);
+  padding: var(--s-3) 0;
+  line-height: var(--lh-snug);
+}
+.praise-slide-split {
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  font-style: normal;
+}
+.praise-slide-en {
+  font-size: var(--text-base);
+  /* Grow with what is typed where the browser can; `rows` covers the rest. */
+  field-sizing: content;
+  min-height: calc(2lh + 2 * var(--s-3));
+}
+
+.praise-placements h3,
+.praise-preview h3 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--text-base);
+}
+.praise-placements ul {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-3);
+  padding: 0;
+  list-style: none;
+}
+.praise-placements li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+}
+.praise-placement-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praise-cover-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.praise-cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.praise-preview ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.praise-preview li {
+  display: grid;
+  gap: var(--s-1);
+  justify-items: start;
+}
+.praise-preview-label {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .praise-slide {
+    grid-template-columns: var(--s-6) minmax(0, 1fr);
+  }
+  .praise-slide-en {
+    grid-column: 2;
+  }
+  .praise-placements li,
+  .praise-cover-row {
+    grid-template-columns: 1fr;
+  }
+  .praise-prayer-toggle {
+    margin-left: 0;
+  }
+}
+
+/* ==========================================================================
+   Service picker — the PPT Generator's first screen
+   ---------------------------------------------------------------------------
+   Three large, equal choices. Each is a real control (a link for a separate
+   page, a button for this one), numbered like the wizard steps, and the
+   unavailable one says so in words, not only by being dimmed.
+   ========================================================================== */
+
+.service-picker {
+  padding-top: var(--s-10);
+}
+.service-picker h2 {
+  margin: 0 0 var(--s-6);
+  font-size: var(--text-xl);
+}
+.service-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.service-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: var(--s-3);
+  width: 100%;
+  height: 100%;
+  padding: var(--s-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.service-option > .icon {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+}
+.service-option:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.service-option:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+.service-option:disabled {
+  cursor: not-allowed;
+  background: var(--canvas);
+  color: var(--ink-muted);
+}
+.service-option:disabled > .icon {
+  color: var(--ink-faint);
+}
+.service-option-number {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-4);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.service-option-text {
+  display: grid;
+  gap: var(--s-2);
+}
+.service-option-title {
+  display: grid;
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+.service-option-english {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.service-option-description {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-snug);
+}
+.service-option-soon {
+  grid-column: 2;
+  justify-self: start;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 22px;
+}
+.service-picker-footnote {
+  margin-top: var(--s-6);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
 }

@@ -269,7 +269,7 @@ async function recognizeFirstSong(page: Page) {
 }
 
 test('moves through the six-step wizard with next and back buttons', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
   await expect(page.getByTestId('wizard-panel-bible')).toBeHidden();
@@ -285,7 +285,7 @@ test('moves through the six-step wizard with next and back buttons', async ({ pa
 });
 
 test('adds, reorders, and removes files on the new 추가 자료 page', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('wizard-tab-additional').click();
   await expect(page.getByTestId('additional-files-section')).toBeVisible();
 
@@ -310,7 +310,7 @@ test('adds, reorders, and removes files on the new 추가 자료 page', async ({
 test('appends image and PPTX uploads after the final Back/End slide in chosen order', async ({
   page,
 }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('wizard-tab-additional').click();
   const fixtureImages = await makeImageFixtures(page);
   await page.getByTestId('additional-files-input').setInputFiles([
@@ -334,7 +334,7 @@ test('appends image and PPTX uploads after the final Back/End slide in chosen or
 });
 
 test('editor view shows slides and all five content editors together', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   // Type an announcement before switching views, so both editors have content.
@@ -428,7 +428,7 @@ test('editor view shows slides and all five content editors together', async ({ 
 
 test('editor view keeps balanced gutters and stacks before the editing column gets cramped', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('view-mode-toggle').click();
 
   const wide = await page.evaluate(() => {
@@ -464,7 +464,7 @@ test('editor view keeps balanced gutters and stacks before the editing column ge
 });
 
 test('jumps directly between steps via the progress tabs', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
 
   // Jump forward several steps at once.
@@ -483,7 +483,7 @@ test('jumps directly between steps via the progress tabs', async ({ page }) => {
 });
 
 test('admin panel replaces the front deck and restores the default', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('admin-open').click();
 
   // Password-gated: a wrong password is rejected, the right one unlocks.
@@ -512,7 +512,7 @@ test('admin panel replaces the front deck and restores the default', async ({ pa
 test('a real PowerPoint deck\'s placeholder text inherits position/size/font from its layout and master', async ({
   page,
 }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
@@ -559,7 +559,7 @@ test('PPT library saves a generated deck with its source files and can re-downlo
   page,
 }) => {
   await allowSharedLibraryDeletes(page);
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   // Check the library is empty before there is anything to auto-save.
   await page.getByTestId('library-open').click();
   await expect(page.getByTestId('library-empty')).toBeVisible();
@@ -601,7 +601,7 @@ test('PPT library saves a generated deck with its source files and can re-downlo
 });
 
 test('saving the same file name twice overwrites the library entry instead of adding a copy', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
   await moveFromLyricsToDownload(page);
 
@@ -631,7 +631,7 @@ test('every edit auto-saves into the library, always updating the same entry', a
   // Each auto-save rebuilds and stores the whole deck, and this test waits
   // through several of them.
   test.slow();
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   // No save button is ever pressed here: parsing the conti is itself an edit,
@@ -671,7 +671,7 @@ test('every edit auto-saves into the library, always updating the same entry', a
 });
 
 test('library 편집 reopens a saved deck in the six-step wizard and re-saves over the same entry', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
   const savedSongTitle = await page
     .getByTestId('song-card')
@@ -746,7 +746,7 @@ test('library 편집 reopens a saved deck in the six-step wizard and re-saves ov
 });
 
 test('admin panel lists the complete concurrent recognition model pool', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
@@ -764,7 +764,7 @@ test('admin panel lists the complete concurrent recognition model pool', async (
 });
 
 test('admin panel edits the excluded-title list and persists it', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('admin-open').click();
   await page.getByTestId('admin-password').fill('kccpmedia1980');
   await page.getByTestId('admin-unlock').click();
@@ -780,13 +780,13 @@ test('admin panel edits the excluded-title list and persists it', async ({ page 
 });
 
 test('usage page shows AI usage next to the admin button', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('usage-open').click();
   await expect(page.getByTestId('admin-ai-usage')).toBeVisible();
 });
 
 test('score click opens the split view: whole conti left, lyric editor right', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   // Wait for a score preview to render, then click it.
@@ -827,7 +827,7 @@ test('score click opens the split view: whole conti left, lyric editor right', a
 });
 
 test('typing a library title into a blank song pulls up its saved lyrics', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await page.getByTestId('add-song').click();
 
   const card = page.getByTestId('song-card').first();
@@ -846,7 +846,7 @@ test('typing a library title into a blank song pulls up its saved lyrics', async
 });
 
 test('parses the example conti PDF and prefills songs', async ({ page }) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   const contiInfo = page.getByTestId('conti-info');
@@ -881,7 +881,7 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
 });
 
 test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   // Lyrics are pre-filled from the bundled library, so generation works immediately.
@@ -921,7 +921,7 @@ test('generates a valid pptx from the parsed conti alone', async ({ page }, test
 });
 
 test('manual flow without a PDF', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
 
   const librarySearch = page.getByTestId('library-add-search');
   await expect(librarySearch).toBeVisible();
@@ -977,7 +977,7 @@ async function slideTexts(zip: JSZip): Promise<string[]> {
 test('설교 후 찬양 lands after the sermon prayer instead of in the opening set', async ({
   page,
 }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await addLibrarySong(page, '주님의 사랑');
   await addLibrarySong(page, '주 은혜임을');
 
@@ -1007,7 +1007,7 @@ test('설교 후 찬양 lands after the sermon prayer instead of in the opening 
 });
 
 test('admin panel sets the 공동체 고백송 and the back slides print it', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   // The deck needs some content of its own before it can be generated.
   await addLibrarySong(page, '주님의 사랑');
   await page.getByTestId('admin-open').click();
@@ -1041,7 +1041,7 @@ test('admin panel sets the 공동체 고백송 and the back slides print it', as
 });
 
 test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
 
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('bible-verse-input').fill('요3:16');
@@ -1063,7 +1063,7 @@ test('generates a bible verse slide deck alone', async ({ page }, testInfo) => {
 });
 
 test('puts the NASB text on the verse slide when NASB is the English translation', async ({ page }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
 
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('bible-verse-input').fill('요3:16');
@@ -1107,7 +1107,7 @@ test('shows a verse 개역개정 prints as "18-19" on one slide beside both Engl
 test('generates one combined deck from lyrics, bible verses, and announcements together', async ({
   page,
 }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
 
   await page.getByTestId('wizard-next-lyrics').click();
@@ -1151,7 +1151,7 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
 test('keeps PowerPoint ids valid with a parsed conti and an uploaded sermon deck', async ({
   page,
 }, testInfo) => {
-  await page.goto('./');
+  await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('wizard-next-bible').click();
@@ -1199,7 +1199,7 @@ test.describe('web lyrics candidate review', () => {
       },
     });
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await uploadExamplePdf(page);
     const card = await recognizeFirstSong(page);
 
@@ -1226,7 +1226,7 @@ test.describe('web lyrics candidate review', () => {
   test('a rejected candidate leaves the recognized lyrics untouched', async ({ page }) => {
     await stubRecognitionProxy(page, { lyrics: { candidates: [webCandidate()], links: [] } });
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await uploadExamplePdf(page);
     const card = await recognizeFirstSong(page);
 
@@ -1252,7 +1252,7 @@ test.describe('web lyrics candidate review', () => {
       },
     });
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await uploadExamplePdf(page);
     const card = await recognizeFirstSong(page);
 
@@ -1302,7 +1302,7 @@ test.describe('learning admin dashboard', () => {
       route.fulfill({ json: { marked: 1, status: {} } }),
     );
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await unlockAdmin(page);
 
     // Three models read every page; the rest wait in reserve.
@@ -1326,7 +1326,7 @@ test.describe('learning admin dashboard', () => {
       }),
     );
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await unlockAdmin(page);
 
     // Catalog roles stand in until measurement takes over.
@@ -1338,7 +1338,7 @@ test.describe('learning admin dashboard', () => {
   test('stays readable at 320px without overflowing sideways', async ({ page }) => {
     await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: modelRows } }));
     await page.setViewportSize({ width: 320, height: 720 });
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await unlockAdmin(page);
 
     await expect(page.getByTestId('admin-learning-models')).toBeVisible();
@@ -1402,7 +1402,7 @@ test.describe('adaptive learning loop', () => {
       await route.fulfill({ json: { choices: [{ message: { content: bodyFor(model) } }] } });
     });
 
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await uploadExamplePdf(page);
     const card = await recognizeFirstSong(page);
 
@@ -1445,7 +1445,7 @@ test.describe('콘티 dropped anywhere on the page', () => {
   test('is read as the 콘티 even when another step is open, and shows that step', async ({
     page,
   }) => {
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await page.getByTestId('wizard-tab-announcement').click();
     await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
 
@@ -1462,7 +1462,7 @@ test.describe('콘티 dropped anywhere on the page', () => {
   });
 
   test('says so while the file is over the page, and only while it is', async ({ page }) => {
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await page.getByTestId('wizard-tab-bible').click();
     const dataTransfer = await fileDragTransfer(page, [
       { name: 'conti.pdf', mimeType: 'application/pdf', base64: '' },
@@ -1479,7 +1479,7 @@ test.describe('콘티 dropped anywhere on the page', () => {
   });
 
   test('leaves a file dropped on another step\'s own dropzone to that step', async ({ page }) => {
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await page.getByTestId('wizard-tab-additional').click();
 
     // A PDF is exactly the overlap: 추가 자료 takes PDFs too, and the zone the
@@ -1497,7 +1497,7 @@ test.describe('콘티 dropped anywhere on the page', () => {
   });
 
   test('says which files it cannot use instead of silently ignoring them', async ({ page }) => {
-    await page.goto('./');
+    await page.goto('./?service=sunday');
     await dropFilesOn(page, 'body', [
       await fixtureFile(SERMON_PPTX, 'sermon.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
     ]);
