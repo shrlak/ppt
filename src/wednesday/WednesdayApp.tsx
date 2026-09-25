@@ -13,7 +13,8 @@ import { type DeckOverviewItem } from '../lib/utils/deckOverview';
 import { buildWednesdayDeck } from './deckBuilder';
 import { buildWednesdayThumbnail, thumbnailFileName } from './thumbnail';
 import { suggestWednesdayFileName } from './fields';
-import { EMPTY_PASSAGE, parsePassageInput, resolvePassage, type ResolvedPassage } from './passage';
+import { EMPTY_PASSAGE, countVerses, parsePassageInput, resolvePassage, type ResolvedPassage } from './passage';
+import { verseLine } from './bibleSlides';
 import WednesdaySongList, { type SongsUpdate } from './WednesdaySongList';
 import {
   clearWednesdayDraft,
@@ -549,10 +550,10 @@ export default function WednesdayApp() {
                   {!passageLoading && !passageError && passage.verses.length > 0 && (
                     <>
                       <p className="wednesday-passage-range">
-                        {passage.rangeKo} · {passage.verses.length}절 · 말씀 슬라이드 {verseGroupCount}장
+                        {passage.rangeKo} · {countVerses(passage.verses)}절 · 말씀 슬라이드 {verseGroupCount}장
                       </p>
                       <p className="wednesday-passage-first">
-                        {passage.verses[0].verse} {passage.verses[0].text}
+                        {verseLine(passage.verses[0])}
                       </p>
                     </>
                   )}

@@ -106,6 +106,12 @@ describe('formatRangeKoLong', () => {
     expect(formatRangeFromVerses([], verses)).toBe('');
     expect(formatRangeFromVerses([psalms], [])).toBe('');
   });
+
+  it('ends at the last verse a joined verse covers', () => {
+    const joined: Verse = { ...verse(92, 1), endVerse: 3 };
+    expect(formatRangeKoLong(psalms, joined, joined)).toBe('시편 92편 1-3절');
+    expect(formatRangeKoLong(psalms, verse(92, 4), { ...verse(92, 5), endVerse: 6 })).toBe('시편 92편 4-6절');
+  });
 });
 
 describe('substituteTokens', () => {

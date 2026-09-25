@@ -74,3 +74,44 @@ export function getVerseRange(
   }
   return out;
 }
+
+/**
+ * getVerseRange for the Korean text, which prints some verses together
+ * (개역개정 신6:18-19 is one verse "18-19"). The files store such a group as
+ * its text at the first verse and empty slots after it; here each group comes
+ * back as one Verse with `endVerse` set. A range that starts or ends inside a
+ * group is widened to the whole group, so no slide shows half of one.
+ *
+ * Only for Korean text: in the English files an empty slot is a verse the
+ * translation leaves out, not one joined to the verse before it.
+ */
+export function getVerseUnits(
+  bible: Map<number, BookChapters>,
+  bookId: number,
+  startChapter: number,
+  startVerse: number | undefined,
+  endChapter: number,
+  endVerse: number | undefined,
+): Verse[] {
+  const isJoined = (ch: number, vn: number) => bible.get(bookId)?.[ch - 1]?.[vn - 1]?.trim() === '';
+  let from = startVerse;
+  while (from && from > 1 && isJoined(startChapter, from)) from--;
+  let to = endVerse;
+  while (to && isJoined(endChapter, to + 1)) to++;
+
+  const units: Verse[] = [];
+  for (const verse of getVerseRange(bible, bookId, startChapter, from, endChapter, to)) {
+    const previous = units[units.length - 1];
+    if (verse.text === '' && previous?.chapter === verse.chapter) {
+      previous.endVerse = verse.verse;
+    } else {
+      units.push(verse);
+    }
+  }
+  return units;
+}
+
+/** The last verse number a verse's text covers. */
+export function lastVerseOf(verse: Verse): number {
+  return verse.endVerse ?? verse.verse;
+}

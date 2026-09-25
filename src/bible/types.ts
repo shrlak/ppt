@@ -33,6 +33,12 @@ export interface Verse {
   chapter: number;
   verse: number;
   text: string;
+  /**
+   * Set when the translation prints this verse together with the ones after
+   * it (개역개정 신6:18-19 is a single verse "18-19"): the last verse number
+   * the text covers. See bibleData.getVerseUnits.
+   */
+  endVerse?: number;
 }
 
 /** One planned slide's placeholder values (see PLACEHOLDERS in slideBuilder.ts). */

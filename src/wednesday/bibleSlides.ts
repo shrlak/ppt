@@ -7,6 +7,7 @@
 // prototype paragraphs — one verse, one spacer — rather than substituting a
 // string, and shrinks the font when a group runs long.
 import { fitBodyFontSize } from '../lib/pptx/textFit';
+import { lastVerseOf } from '../bible/bibleData';
 import type { Verse } from '../bible/types';
 import { substituteTokens, xmlEscape } from './fields';
 import { WEDNESDAY_TOKENS } from './template';
@@ -27,9 +28,11 @@ export function groupVerses(verses: Verse[], versesPerSlide: number): Verse[][] 
   return groups;
 }
 
-/** How one verse reads on the slide: "7 이에 땅이 진동하고…". */
+/** How one verse reads on the slide: "7 이에 땅이 진동하고…", or "18-19 여호와께서…" for a joined pair. */
 export function verseLine(verse: Verse): string {
-  return `${verse.verse} ${verse.text}`.trim();
+  const last = lastVerseOf(verse);
+  const number = last === verse.verse ? `${verse.verse}` : `${verse.verse}-${last}`;
+  return `${number} ${verse.text}`.trim();
 }
 
 function setParagraphText(paragraphXml: string, text: string): string {

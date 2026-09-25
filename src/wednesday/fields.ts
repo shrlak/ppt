@@ -1,6 +1,7 @@
 // The text that goes into the 수요예배 template's placeholders: the two date
 // spellings the deck uses, the long-form passage reference, the download file
 // name, and the substitution itself.
+import { lastVerseOf } from '../bible/bibleData';
 import type { BibleRef, Verse } from '../bible/types';
 
 /** Parse a YYYY-MM-DD input as a local date, so the day never shifts a timezone. */
@@ -65,13 +66,14 @@ export function chapterUnit(bookId: number): '편' | '장' {
  */
 export function formatRangeKoLong(ref: BibleRef, first: Verse, last: Verse): string {
   const unit = chapterUnit(ref.bookId);
+  const lastVerse = lastVerseOf(last);
   if (first.chapter !== last.chapter) {
-    return `${ref.ko} ${first.chapter}${unit} ${first.verse}절-${last.chapter}${unit} ${last.verse}절`;
+    return `${ref.ko} ${first.chapter}${unit} ${first.verse}절-${last.chapter}${unit} ${lastVerse}절`;
   }
-  if (first.verse === last.verse) {
+  if (first.verse === lastVerse) {
     return `${ref.ko} ${first.chapter}${unit} ${first.verse}절`;
   }
-  return `${ref.ko} ${first.chapter}${unit} ${first.verse}-${last.verse}절`;
+  return `${ref.ko} ${first.chapter}${unit} ${first.verse}-${lastVerse}절`;
 }
 
 /** The whole passage's reference, across however many refs were entered. */

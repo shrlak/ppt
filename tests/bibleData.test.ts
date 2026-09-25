@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getVerseRange, isKnownTranslation, loadTranslation } from '../src/bible/bibleData';
+import { getVerseRange, getVerseUnits, isKnownTranslation, lastVerseOf, loadTranslation } from '../src/bible/bibleData';
 import { BIBLE_BOOKS, TRANSLATIONS } from '../src/bible/books';
 import type { BookChapters } from '../src/bible/types';
 
@@ -71,8 +71,42 @@ describe.each([
   });
 });
 
-it('splits the NIV 3 John 14-15 that the source ran together', () => {
-  const thirdJohn = readTranslation('en_niv.json')[63].chapters[0];
-  expect(thirdJohn[13]).toBe('I hope to see you soon, and we will talk face to face.');
-  expect(thirdJohn[14]).toMatch(/^Peace to you\. The friends here send their greetings\./);
+it('uses the NIV 2011 text, with no section headings run into the verses', () => {
+  const niv = readTranslation('en_niv.json');
+  expect(niv[0].chapters[0][0]).toBe('In the beginning God created the heavens and the earth.');
+  expect(niv[0].chapters[5][0]).toMatch(/^When human beings began to increase in number/);
+  const glued = niv.flatMap((b) => b.chapters.flat()).filter((v) => /[a-z][A-Z][a-z]|[A-Za-z][.,:;!?][A-Za-z“‘]/.test(v));
+  expect(glued).toEqual([]);
+});
+
+describe('getVerseUnits', () => {
+  // 신명기 6장 as 개역개정 prints it: 16, 17, then 18-19 as one verse, then 20.
+  const deuteronomy6 = Array.from({ length: 25 }, (_, i) => `v${i + 1}`);
+  deuteronomy6[17] = 'v18-19';
+  deuteronomy6[18] = '';
+  const korean = new Map<number, BookChapters>([[5, [[], [], [], [], [], deuteronomy6]]]);
+
+  it('returns a joined verse once, covering both numbers', () => {
+    expect(getVerseUnits(korean, 5, 6, 16, 6, 20)).toEqual([
+      { chapter: 6, verse: 16, text: 'v16' },
+      { chapter: 6, verse: 17, text: 'v17' },
+      { chapter: 6, verse: 18, text: 'v18-19', endVerse: 19 },
+      { chapter: 6, verse: 20, text: 'v20' },
+    ]);
+  });
+
+  it('widens a range that starts or ends inside a joined verse to the whole verse', () => {
+    expect(getVerseUnits(korean, 5, 6, 19, 6, 20).map((v) => [v.verse, lastVerseOf(v)])).toEqual([
+      [18, 19],
+      [20, 20],
+    ]);
+    expect(getVerseUnits(korean, 5, 6, 17, 6, 18).map((v) => [v.verse, lastVerseOf(v)])).toEqual([
+      [17, 17],
+      [18, 19],
+    ]);
+  });
+
+  it('leaves getVerseRange reading every slot, so English omitted verses stay their own', () => {
+    expect(getVerseRange(korean, 5, 6, 18, 6, 19).map((v) => v.text)).toEqual(['v18-19', '']);
+  });
 });
