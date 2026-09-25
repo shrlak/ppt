@@ -48,6 +48,24 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Reject with a 408 once `timeoutMs` passes. The request itself is left to
+ * finish in the background — its answer is simply no longer waited for.
+ */
+async function withAttemptTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new RecognitionError('인식 응답 시간 초과', 408)), Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Run an engine call, retrying once after a short pause when the failure is
  * transient (408/5xx/network). One retry rescues brief provider hiccups while
  * the rest of the model pool continues independently.
@@ -184,7 +202,12 @@ export async function recognizeScoreBatch(
  * answer wins (a failed or empty higher model just yields to the next), and
  * whatever the winner missed is filled from the other models' answers.
  */
-export async function recognizeScore(dataUrl: string, settings: AiSettings): Promise<RecognitionResult> {
+export async function recognizeScore(
+  dataUrl: string,
+  settings: AiSettings,
+  /** Cut-off for every model's call; a model past it counts as failed. */
+  timeoutMs: number = ATTEMPT_TIMEOUT_MS,
+): Promise<RecognitionResult> {
   const attempts = planAttempts(settings);
   if (attempts.length === 0) {
     throw new Error('자동 인식이 꺼져 있습니다.');
@@ -215,7 +238,10 @@ export async function recognizeScore(dataUrl: string, settings: AiSettings): Pro
     };
 
     attempts.forEach((attempt, index) => {
-      void withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings))
+      void withAttemptTimeout(
+        withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings)),
+        Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS),
+      )
         .then((score) => {
           answers[index] = score;
         })
@@ -369,16 +395,15 @@ export async function runBatchAttempt(
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
   examples: PromptExample[] = [],
+  /** Cut-off for this call; the job's deadline passes its stage's remaining time. */
+  timeoutMs: number = ATTEMPT_TIMEOUT_MS,
 ): Promise<BatchAttemptResult> {
   const startedAt = Date.now();
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const scores = await Promise.race([
+    const scores = await withAttemptTimeout(
       withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints, examples)),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new RecognitionError('인식 응답 시간 초과', 408)), ATTEMPT_TIMEOUT_MS);
-      }),
-    ]);
+      Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS),
+    );
     return { attempt, scores, latencyMs: Date.now() - startedAt };
   } catch (error) {
     const category = classifyRecognitionError(error);
@@ -386,8 +411,6 @@ export async function runBatchAttempt(
     // the prompt carries lyrics.
     console.warn(`${attempt.engine} (${attempt.model}) 동시 일괄 인식 실패: ${category}`);
     return { attempt, error: category, latencyMs: Date.now() - startedAt };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -455,8 +478,9 @@ export async function recognizeScoreBatchEnsemble(
 export async function recognizeScoreRaced(
   dataUrl: string,
   settings: AiSettings,
+  timeoutMs?: number,
 ): Promise<RecognitionResult> {
-  return recognizeScore(dataUrl, settings);
+  return recognizeScore(dataUrl, settings, timeoutMs);
 }
 
 function hasLyrics(song: Song): boolean {
