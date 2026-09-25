@@ -110,3 +110,60 @@ describe('getVerseUnits', () => {
     expect(getVerseRange(korean, 5, 6, 18, 6, 19).map((v) => v.text)).toEqual(['v18-19', '']);
   });
 });
+
+// The Korean files decide which verses a slide shows, so every chapter must carry every verse at its own
+// number. A verse printed together with the next ones ("18-19") keeps its text at the first number and an
+// empty slot after it; a verse the translation leaves out is printed as "(없음)".
+describe.each([['개역개정', 'ko_nkrv.json']])('%s verse numbering', (_name, file) => {
+  const raw = readTranslation(file);
+
+  it('has every chapter at the English length, except 고후13 which Korean Bibles number 1-13', () => {
+    raw.forEach((book, i) =>
+      book.chapters.forEach((chapter, c) => {
+        const expected = i === 46 && c === 12 ? 13 : nasbRaw[i].chapters[c].length;
+        expect(chapter, `${BIBLE_BOOKS[i].nameKo} ${c + 1}`).toHaveLength(expected);
+      }),
+    );
+  });
+
+  it('only leaves a slot empty right after a verse it is joined to', () => {
+    raw.forEach((book, i) =>
+      book.chapters.forEach((chapter, c) => {
+        expect(chapter[0], `${BIBLE_BOOKS[i].nameKo} ${c + 1}:1`).not.toBe('');
+      }),
+    );
+  });
+
+  it('keeps no markup, footnote markers or doubled spaces from the source page', () => {
+    const verses = raw.flatMap((b) => b.chapters.flat());
+    expect(verses.filter((v) => /[<>]|&[a-z]+;|\d\)|\s{2}|^\s|\s$/.test(v))).toEqual([]);
+  });
+});
+
+describe('개역개정 text', () => {
+  const nkrv = new Map(readTranslation('ko_nkrv.json').map((book, i) => [i + 1, book.chapters]));
+  const text = (bookId: number, chapter: number, verse: number) =>
+    getVerseRange(nkrv, bookId, chapter, verse, chapter, verse)[0]?.text;
+
+  it('joins 신6:18-19 and 시92:1-3 the way 개역개정 prints them', () => {
+    expect(getVerseUnits(nkrv, 5, 6, 17, 6, 20).map((v) => [v.verse, lastVerseOf(v)])).toEqual([
+      [17, 17],
+      [18, 19],
+      [20, 20],
+    ]);
+    expect(text(5, 6, 20)).toMatch(/^후일에 네 아들이/);
+    expect(getVerseUnits(nkrv, 19, 92, 1, 92, 4).map((v) => [v.verse, lastVerseOf(v)])).toEqual([
+      [1, 3],
+      [4, 4],
+    ]);
+    expect(text(19, 92, 1)).toMatch(/^지존자여 십현금과/);
+  });
+
+  it('keeps verses the old file lost, whole and at their own numbers', () => {
+    expect(text(40, 17, 21)).toBe('(없음)');
+    expect(text(40, 17, 22)).toMatch(/^갈릴리에 모일 때에/);
+    expect(text(44, 15, 25)).toMatch(/만장일치로/);
+    // 창35:22 has a section heading in the middle; the verse carries on after it.
+    expect(text(1, 35, 22)).toMatch(/이스라엘이 이를 들었더라 야곱의 아들은 열둘이라$/);
+  });
+});
