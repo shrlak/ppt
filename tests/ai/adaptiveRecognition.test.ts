@@ -217,6 +217,50 @@ describe('recognizeAdaptiveBatch', () => {
     expect(result.scores[1].sections[0].lines).toEqual(['빛으로 인도하시네']);
   });
 
+  it('hands every model call the time left before the deadline', async () => {
+    const timeouts: (number | undefined)[] = [];
+    const provider: BatchProvider = async (attempt, dataUrls, _s, _m, _h, _e, timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return { attempt, scores: dataUrls.map(() => AGREED), latencyMs: 5 };
+    };
+
+    await recognizeAdaptiveBatch(['page-0'], settings, 'full', undefined, [], provider, [], Date.now() + 30_000);
+
+    expect(timeouts.length).toBeGreaterThan(0);
+    for (const timeout of timeouts) {
+      expect(timeout).toBeGreaterThan(25_000);
+      expect(timeout).toBeLessThanOrEqual(30_000);
+    }
+  });
+
+  it('does not escalate to a challenger once too little time is left', async () => {
+    const fakeProvider = fakeProviderFor((attempt) =>
+      attempt.model === CHAMPIONS[0].model ? AGREED : DISAGREED,
+    );
+
+    const result = await recognizeAdaptiveBatch(
+      ['page-0'],
+      settings,
+      'full',
+      undefined,
+      [],
+      fakeProvider.provider,
+      [],
+      Date.now() + 6_000,
+    );
+
+    expect(fakeProvider.challengerPageIndexes).toEqual([]);
+    expect(result.needsReview[0]).toBe(true);
+  });
+
+  it('refuses to start a pass whose deadline has already passed', async () => {
+    const fakeProvider = fakeProviderFor(() => AGREED);
+    await expect(
+      recognizeAdaptiveBatch(['page-0'], settings, 'full', undefined, [], fakeProvider.provider, [], Date.now() - 1),
+    ).rejects.toThrow();
+    expect(fakeProvider.calls).toHaveLength(0);
+  });
+
   it('keeps escalating while a page stays in doubt, one challenger per round', async () => {
     // Models reading a genuinely different sentence never vote, so the page
     // cannot settle and every challenger gets its turn before it is handed to

@@ -25,6 +25,7 @@ import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
 import { applyScoreToSong, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
 import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
+import { MIN_ATTEMPT_MS, createRecognitionDeadline } from '../lib/ai/recognitionBudget';
 import { fetchLearningMemory, fetchModelReliabilities } from '../lib/learning/learningClient';
 import {
   applySafeCorrections,
@@ -664,37 +665,49 @@ export default function LyricsGenerator({
 
       enterPhase('render', tracked.ids);
 
+      // The whole job runs against one clock (see recognitionBudget.ts): each
+      // stage has a point it must be done by, so a slow or silent model can
+      // no longer stretch a conti past two minutes.
+      const deadline = createRecognitionDeadline();
+
       /** Models whose free daily allowance ran out during this conti. */
       const exhausted = new Set<string>();
 
+      // The hand-trained corrector, when this deployment has one. Loading it
+      // pulls in the inference runtime and the model files, which can take a
+      // while, and it is only needed after the lyrics pass — so it loads in
+      // the background while the models read the pages.
+      const correctorPromise = loadActiveCorrectionRunner().catch(() => null);
+
       try {
-        // Rendering and recognition are both batched: no per-song request loop.
+        // Rendering and the setup lookups don't depend on each other, so they
+        // run together instead of one after another.
         let renderedPages = 0;
-        let images = await Promise.all(
-          active.map(async (song) => {
-            // PNG: lossless line art reads far better than JPEG for OCR.
-            const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH, 'png');
-            renderedPages += 1;
-            tracked.realFraction = renderedPages / active.length;
-            return url;
-          }),
-        );
-        // Shared settings: concurrent model pool and the
-        // excluded-title list, synced across every device via the proxy.
-        const settings = await getSyncedAiSettings();
-        // Measured accuracy decides which models read every page and how much
-        // each answer counts. No proxy, or a failed lookup, just means the
-        // catalog's own roles are used.
-        const reliabilities = await fetchModelReliabilities();
-        // What the app already learned to fix. Aliases redirect a title the
-        // models keep misreading to the saved song; examples warn them off
-        // repeating a correction the user already made.
-        const memory = await fetchLearningMemory();
+        const [renderedImages, settings, reliabilities, memory] = await Promise.all([
+          // Rendering and recognition are both batched: no per-song request loop.
+          Promise.all(
+            active.map(async (song) => {
+              // PNG: lossless line art reads far better than JPEG for OCR.
+              const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH, 'png');
+              renderedPages += 1;
+              tracked.realFraction = renderedPages / active.length;
+              return url;
+            }),
+          ),
+          // Shared settings: concurrent model pool and the
+          // excluded-title list, synced across every device via the proxy.
+          getSyncedAiSettings(),
+          // Measured accuracy decides which models read every page and how
+          // much each answer counts. No proxy, or a failed lookup, just means
+          // the catalog's own roles are used.
+          fetchModelReliabilities(),
+          // What the app already learned to fix. Aliases redirect a title the
+          // models keep misreading to the saved song; examples warn them off
+          // repeating a correction the user already made.
+          fetchLearningMemory(),
+        ]);
+        let images = renderedImages;
         memoryRef.current = memory;
-        // The hand-trained corrector, when this deployment has one. Loading it
-        // is what pulls in the inference runtime, so a deployment without an
-        // artifact never downloads it.
-        const corrector = await loadActiveCorrectionRunner();
         // Page hashes tie this run's evidence to the page it came from, so a
         // correction saved next week still knows which reading it corrected.
         let pageHashes = await Promise.all(
@@ -729,6 +742,7 @@ export default function LyricsGenerator({
             reliabilities,
             undefined,
             promptExamplesFor({}, memory),
+            deadline.stageEndsAt('titles'),
           );
           titleScores = titleResult.scores;
           titleConfidence = titleResult.titleConfidence;
@@ -874,6 +888,7 @@ export default function LyricsGenerator({
               },
               memory,
             ),
+            deadline.stageEndsAt('lyrics'),
           );
           lyricScores = lyricResult.scores;
           lyricEngine = lyricResult.engine;
@@ -917,10 +932,17 @@ export default function LyricsGenerator({
         // seen this deployment's own hard pages, so it can propose a fix where
         // every vision model made the same mistake and consensus had nothing
         // to choose between. Every failure leaves consensus exactly as it was.
+        // Waited for only as long as the budget allows: a runtime still
+        // downloading past that point is simply not used this time.
+        const corrector = await Promise.race([
+          correctorPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), deadline.remaining('rescue'))),
+        ]);
         if (corrector) {
           enterPhase('crosscheck', [...scoreById.keys()]);
           for (const [id, score] of [...scoreById.entries()]) {
             if (isCancelled(id)) continue;
+            if (deadline.remaining('rescue') < MIN_ATTEMPT_MS) break;
             const found = evidence.get(id);
             scoreById.set(
               id,
@@ -1004,6 +1026,21 @@ export default function LyricsGenerator({
         enterPhase('rescue', needRescue.map(({ song }) => song.id));
         await Promise.all(
           needRescue.map(async ({ song, image, identity }) => {
+            // Out of time for another model call: a title is still enough for
+            // the web pass to find the lyrics, so hand it straight there.
+            if (deadline.remaining('rescue') < MIN_ATTEMPT_MS) {
+              const lookupTitle = lyricsLookupTitle(song.title, scoreById.get(song.id)?.title ?? identity.title);
+              if (lookupTitle && !/^새 찬양/.test(lookupTitle)) {
+                webQueue.set(song.id, {
+                  score: scoreById.get(song.id) ?? { ...identity, order: [], sections: [] },
+                  engine: lyricEngine,
+                  title: lookupTitle,
+                });
+              } else {
+                failures.set(song.id, '인식 시간이 초과되어 가사를 읽지 못했습니다.');
+              }
+              return;
+            }
             try {
               // Re-render sharper for the retry; fall back to the batch image.
               const rescueImage = await doc
@@ -1011,7 +1048,7 @@ export default function LyricsGenerator({
                 .catch(() => image);
               // Hard page: race the complete model pool and take the first
               // non-empty answer.
-              const single = await recognizeScoreRaced(rescueImage, settings);
+              const single = await recognizeScoreRaced(rescueImage, settings, deadline.remaining('rescue'));
               if (isCancelled(song.id)) return;
               const known = scoreById.get(song.id);
               const merged: ParsedScore = {

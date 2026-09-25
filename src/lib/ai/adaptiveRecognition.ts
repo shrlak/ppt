@@ -33,6 +33,7 @@ import {
   type BatchRecognitionResult,
 } from './scoreRecognition';
 import { buildWeightedConsensus } from './weightedConsensus';
+import { MIN_ATTEMPT_MS, MIN_ESCALATION_MS, msUntil } from './recognitionBudget';
 
 /** Runs one model over one set of images. Injectable so tests can spy on it. */
 export type BatchProvider = (
@@ -42,6 +43,7 @@ export type BatchProvider = (
   mode: BatchRecognitionMode,
   hints?: (string | undefined)[],
   examples?: PromptExample[],
+  timeoutMs?: number,
 ) => Promise<BatchAttemptResult>;
 
 export interface AdaptivePlan {
@@ -159,6 +161,12 @@ export async function recognizeAdaptiveBatch(
   provider: BatchProvider = runBatchAttempt,
   /** Past corrections shown to every model, so it can avoid repeating them. */
   examples: PromptExample[] = [],
+  /**
+   * Epoch ms this pass must be done by. Every model call is cut off there, and
+   * an escalation that could not finish before it is not started. Without one,
+   * each call keeps its own default cap.
+   */
+  deadlineAt?: number,
 ): Promise<AdaptiveRecognitionResult> {
   if (dataUrls.length === 0) {
     return {
@@ -180,12 +188,15 @@ export async function recognizeAdaptiveBatch(
   const allPages = dataUrls.map((_url, index) => index);
   const observations: RecognitionObservation[][] = dataUrls.map(() => []);
 
+  const timeLeft = () => (deadlineAt === undefined ? undefined : msUntil(deadlineAt));
+
   const runRound = async (attempts: RecognitionAttempt[], pages: number[]): Promise<void> => {
     if (attempts.length === 0 || pages.length === 0) return;
     const images = pages.map((page) => dataUrls[page]);
     const pageHints = hints ? pages.map((page) => hints[page]) : undefined;
+    const timeoutMs = timeLeft();
     const results = await Promise.all(
-      attempts.map((attempt) => provider(attempt, images, settings, mode, pageHints, examples)),
+      attempts.map((attempt) => provider(attempt, images, settings, mode, pageHints, examples, timeoutMs)),
     );
     for (const result of results) {
       // A spent daily allowance does not recover within this job, so the model
@@ -199,6 +210,8 @@ export async function recognizeAdaptiveBatch(
 
   const plan = planAdaptiveAttempts(catalog, rankings, unavailable, [], settings.roleOverrides);
   if (plan.champions.length === 0) throw new Error('사용할 수 있는 인식 모델이 없습니다.');
+  const startLeft = timeLeft();
+  if (startLeft !== undefined && startLeft < MIN_ATTEMPT_MS) throw new Error('인식 시간이 부족합니다.');
   await runRound(plan.champions, allPages);
 
   let consensus = observations.map((page) => buildWeightedConsensus(page, reliabilities));
@@ -217,6 +230,10 @@ export async function recognizeAdaptiveBatch(
       .map((result, page) => (result.needsReview ? page : -1))
       .filter((page) => page >= 0);
     if (uncertain.length === 0) break;
+    // The pass has a deadline to keep: a challenger that would be cut off
+    // mid-answer spends quota and settles nothing.
+    const left = timeLeft();
+    if (left !== undefined && left < MIN_ESCALATION_MS) break;
     if (unavailable.has(modelKeyFor(challenger))) continue;
     await runRound([challenger], uncertain);
     for (const page of uncertain) {
