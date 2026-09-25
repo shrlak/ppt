@@ -524,6 +524,20 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 확실한 결과가 없을 때는 **마음대로 고르지 않고** 찾은 것을 보여 주니 맞는 것을 고르시면 됩니다.
 첫 번째 결과에 파일이 없으면 그다음 것을 눌러 보는 식으로 최대 세 개까지 시도합니다.
 
+- **어디서 찾나요** — 찬양 PPT는 **다음·네이버 블로그 검색**(티스토리·네이버 블로그 글)과 웹 검색에서
+  동시에 찾고, 악보 사진은 **네이버 이미지 검색**에서 찾습니다. 네이버 블로그 글은 첨부 파일이 있는
+  모바일 페이지에서 받아 옵니다.
+- **다른 곡을 붙이지 않습니다** — 검색 결과 제목에 곡 제목이 **따로 떨어져** 있어야(따옴표·괄호·`-`
+  사이, 앞뒤에 악보·가사·PPT·코드 정도만) 확실한 결과로 봅니다. 그래서 `은혜`를 찾을 때
+  `하나님의 은혜`, `은혜 아니면`, `은혜로다`는 붙이지 않고 보여 주기만 합니다. 여러 곡이 든
+  **콘티·모음** 글도 자동으로 붙이지 않습니다.
+- **악보다운 사진을 고릅니다** — 글 제목에 악보·코드가 있거나 세로로 긴 큰 사진을 먼저 고르고,
+  작은 썸네일·영상 캡처·유료 악보 미리보기(악보바다·악보통·마피아)·드럼·일렉·반주·인트로 악보는
+  자동으로 붙이지 않습니다. 두 장을 붙일 때는 **같은 글의 같은 크기 사진**만 붙이고, 제목에 키가
+  여러 개(`F, G, A`) 적힌 글은 같은 곡의 다른 키이므로 한 장만 붙입니다.
+- **옛 `.ppt` 파일은 넣을 수 없습니다** — 글에 `.pptx`와 `.ppt`가 같이 있으면 `.pptx`를 받고,
+  `.ppt`만 있으면 그렇다고 알려 드립니다(PowerPoint에서 `.pptx`로 저장해 올리면 됩니다).
+
 - **직접 올리기도 됩니다** — `PPT·악보 사진 올리기` 버튼으로 `.pptx`나 사진(PNG·JPG)을 여러 장
   한꺼번에 올릴 수 있습니다. **로그인이 필요한 네이버 카페처럼 자동으로 받을 수 없는 곳, 직접 찍은
   악보 사진**은 이 방법으로 넣으세요. 언제나 동작하는 경로라 항상 함께 있습니다.
@@ -710,8 +724,10 @@ the deck is made. The operator types the date, sermon title, preacher and a scri
 verses come from the same 개역개정 text, the file is named after that week's Wednesday
 (`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. Typing a song's title is the whole
 interaction: the app searches, downloads and attaches what it is confident about by itself — the
-song's own 찬양 PPT when one is found, otherwise its 악보 사진, one slide per page, centred on the
-deck's canvas. A browser cannot fetch a cross-origin file, so the proxy does it
+song's own 찬양 PPT when one is found (다음·네이버 블로그 search plus the web), otherwise its 악보 사진
+(네이버 이미지 검색), one slide per page, centred on the deck's canvas. A hit counts as sure only when
+its title names the song on its own, so 하나님의 은혜 is never taken for 은혜, and only same-size pages of
+one post are attached together. A browser cannot fetch a cross-origin file, so the proxy does it
 (`GET /wednesday/songs` and `/wednesday/songs/sheets` search; `POST /wednesday/songs/file` and
 `/wednesday/songs/image` relay). Nothing is guessed at: an uncertain search shows what it found
 instead of attaching it, and `.pptx` files or photos can always be uploaded by hand — the only way

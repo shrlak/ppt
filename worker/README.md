@@ -71,11 +71,27 @@ the app needs the file itself. A browser cannot fetch one: search result pages
 and file hosts send no CORS headers, so the request is refused before it
 starts. These two routes do it on its behalf.
 
-`GET /wednesday/songs?title=…` searches the web (the same keyless DuckDuckGo
-HTML endpoints the lyrics route uses) for `"<제목> 찬양 ppt"` and returns the
-hits, **each with an HMAC-signed token in place of its URL**. That keeps the
-`/lyrics` invariant — the browser sends a title, never a URL — so a search
-result cannot be swapped for an address of the caller's choosing.
+`GET /wednesday/songs?title=…` searches for `"<제목> 찬양 ppt"` in three
+places at once — 다음 블로그 검색 (`search.daum.net`, which covers 티스토리),
+네이버 블로그 검색 (`search.naver.com`) and the keyless DuckDuckGo HTML
+endpoints the lyrics route uses — and returns the hits, **each with an
+HMAC-signed token in place of its URL**. That keeps the `/lyrics` invariant —
+the browser sends a title, never a URL — so a search result cannot be swapped
+for an address of the caller's choosing. The two blog searches are there
+because a 찬양 PPT is nearly always a blog post's attachment, because they
+answer a server's plain fetch where DuckDuckGo increasingly turns the Worker
+away, and because their snippets often name the attachment (`첨부파일
+은혜.pptx`), which puts that post first. A post found by more than one search
+is one hit.
+
+Hits are ranked by `rankSongPptHits`. A hit is `auto` — tried by the app
+unasked — only when it names the song: one part of its title, between its
+brackets, quotes, dashes and slashes, is the title and nothing else but the
+words every 찬양 post adds (악보, 가사, ppt, a key). That is what tells 은혜
+from 하나님의 은혜 or 은혜 아니면. A title of five letters or more that is only
+contained in a longer phrase still counts, slightly lower; a shorter one is a
+guess. A post of several songs (콘티, 모음, 메들리) is never `auto`, since its
+PPT would put every song on the slides.
 
 `POST /wednesday/songs/file` takes `{ token }` (or `{ url }`, for an address
 the operator pasted) and returns the `.pptx` bytes. Before anything is
@@ -88,14 +104,33 @@ with HTTP 200 is not a deck. A post URL is followed exactly one step to its
 the attachment is the link whose address ends in `.pptx`, preferring a file
 host we know or the post's own domain, or failing that the link whose visible
 text names a `.pptx` (갓피플 and most 자료실 boards hide the file behind a
-download script).
+download script). A `blog.naver.com/<blog>/<number>` post is read at
+`m.blog.naver.com`, because the desktop address is only a frame around it and
+the attachment is nowhere in that page. Only a `.pptx` is taken: a post that
+offers only the old binary `.ppt` (common on 티스토리), or a file that turns out
+to be one, is refused with a message saying so, since no slide can be made
+from it.
 
 `GET /wednesday/songs/sheets?title=…` and `POST /wednesday/songs/image` are the
 same pair for **악보 사진**, which is how most Korean worship songs are shared.
-Each hit comes back ranked against the title (`scoreSongMatch` in
-`src/songPpt.js`): a hit whose own title or file name carries the song is
-marked `auto`, and the app attaches those by itself; anything below that is
-`review` and is shown to the operator instead of acted on.
+The search is 네이버 이미지 검색 for `"<제목> 악보"`: its page carries every
+result as JSON — the original image's address, the post it is on, that post's
+title and the image's pixel size — and it answers a server's fetch, where
+Bing's image page comes back empty (Bing stays as the fallback). 네이버's own
+file hosts are asked over https; an image offered only over http elsewhere is
+left out.
+
+Each hit comes back ranked (`rankSheetImages`): it is `auto`, and attached by
+the app, when its post names the song (`scoreSongMatch` in `src/songPpt.js`,
+as above) and the picture looks like a 악보 page — its post calls it 악보 or
+코드, or it is a portrait page — and is not a thumbnail, a video still, a
+paid score's watermarked preview (악보바다, 악보통, 마피아), a 콘티, or another
+instrument's part (드럼, 일렉, 반주, 인트로…). The sure hit that looks most like
+a sheet comes first, with the other pages of its post beside it in page order;
+those are attached with it only when they are the same size and the post's
+title does not list several keys — a post of `F, G, A` is one song three
+times, not three pages. Everything else is `review` and is shown to the
+operator instead of acted on.
 
 The image route works the same way — https only, never an address that
 resolves inside, 8 MB cap, the final URL re-checked after redirects, and bytes

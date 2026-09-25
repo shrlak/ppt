@@ -6,6 +6,8 @@ export interface SongPptHit {
   direct: boolean;
   /** True when the host is one known to share 찬양 PPT files. */
   known?: boolean;
+  /** What a blog search's snippet says the post has attached, when it says. */
+  attachment?: 'pptx' | 'ppt';
 }
 
 export interface SongPptCandidate extends SongPptHit {
@@ -55,16 +57,37 @@ export function isKnownSongPptHost(rawUrl: string, env?: Record<string, string |
 export function isNeverFileHost(rawUrl: string): boolean;
 export function isAllowedSongPptUrl(rawUrl: string, env?: Record<string, string | undefined>): boolean;
 export function looksLikePptxUrl(rawUrl: string): boolean;
+export function looksLikeModernPptxUrl(rawUrl: string): boolean;
 export function extractSongPptResults(
   html: string,
   env?: Record<string, string | undefined>,
   limit?: number,
 ): { results: SongPptHit[]; links: SongPptLink[] };
+export function daumBlogSearchUrl(query: string): string;
+export function naverBlogSearchUrl(query: string): string;
+export function attachmentKind(text: string): 'pptx' | 'ppt' | undefined;
+export function extractDaumBlogResults(
+  html: string,
+  env?: Record<string, string | undefined>,
+  limit?: number,
+): { results: SongPptHit[]; links: SongPptLink[] };
+export function extractNaverBlogResults(
+  html: string,
+  env?: Record<string, string | undefined>,
+  limit?: number,
+): { results: SongPptHit[]; links: SongPptLink[] };
+export function mobileNaverBlogUrl(rawUrl: string): string | null;
+export const SET_LIST_TITLE: RegExp;
+export function rankSongPptHits<T extends SongPptHit>(
+  title: string,
+  hits: T[],
+): (T & { score: number; decision: 'auto' | 'review' })[];
 export function findSongPptAttachment(
   html: string,
   pageUrl: string,
   env?: Record<string, string | undefined>,
 ): string | null;
+export function hasLegacyPptAttachment(html: string, pageUrl: string): boolean;
 
 export function signSongPptToken(
   url: string,
