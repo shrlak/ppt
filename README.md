@@ -8,21 +8,21 @@
 
 1. **주일예배** — 이 페이지의 6단계 화면 (`?service=sunday`로 바로 열 수 있습니다)
 2. **찬양집회** — 한글·영어 제목과 가사가 함께 들어가는 찬양집회 PPT (`praise.html`)
-3. **수련회** — 준비 중
+3. **수련회** — 수련회 디자인으로 집회마다 한 PPT씩 (`retreat.html`)
 
 수요예배 생성기는 첫 화면 아래 링크와 주일예배 헤더의 **수요예배** 버튼으로 엽니다.
 
-| | 주일예배 | 찬양집회 | 수요예배 |
-|---|---|---|---|
-| 주소 | <https://shrlak.github.io/ppt/?service=sunday> | <https://shrlak.github.io/ppt/praise.html> | <https://shrlak.github.io/ppt/wednesday.html> |
-| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
-| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
-| 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 설교 PPT·말씀 자료를 **원하는 곡 뒤에** 삽입 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
-| 파일명 | 그 주 **일요일** `MMDD.pptx` | 집회 날짜 `MMDD_PraiseNight.pptx` | 그 주 **수요일** `MMDD.pptx` |
-| 라이브러리 | 매주 일요일 오후 5시 자동 삭제 | **자동 삭제 안 함** — 직접 삭제할 때까지 보관 | 매주 일요일 오후 5시 자동 삭제 |
+| | 주일예배 | 찬양집회 | 수련회 | 수요예배 |
+|---|---|---|---|---|
+| 주소 | <https://shrlak.github.io/ppt/?service=sunday> | <https://shrlak.github.io/ppt/praise.html> | <https://shrlak.github.io/ppt/retreat.html> | <https://shrlak.github.io/ppt/wednesday.html> |
+| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 | 수련회 콘티의 **칸마다** 해당 집회에 넣고, 작년 수련회 곡은 가사까지 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
+| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) | 집회마다 포스터·예배 순서(본문·설교 제목·광고 등) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
+| 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 설교 PPT·말씀 자료를 **원하는 곡 뒤에** 삽입 | 설교말씀(개역개정+ESV)·설교 제목 장, 설교용 빈 화면 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
+| 파일명 | 그 주 **일요일** `MMDD.pptx` | 집회 날짜 `MMDD_PraiseNight.pptx` | 집회 날짜 `MMDD_Retreat_Evening.pptx` 등 | 그 주 **수요일** `MMDD.pptx` |
+| 라이브러리 | 매주 일요일 오후 5시 자동 삭제 | **자동 삭제 안 함** — 직접 삭제할 때까지 보관 | **자동 삭제 안 함** | 매주 일요일 오후 5시 자동 삭제 |
 
 아래 설명은 따로 표시하지 않는 한 주일예배 생성기 기준입니다 (찬양집회는
-[🙌 찬양집회](#-찬양집회), 수요예배는 [🌙 수요예배](#-수요예배) 참고).
+[🙌 찬양집회](#-찬양집회), 수련회는 [⛺ 수련회](#-수련회), 수요예배는 [🌙 수요예배](#-수요예배) 참고).
 
 ## 생성되는 슬라이드 순서
 
@@ -90,7 +90,7 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 - 삭제될 때 각 항목에 삭제 표시가 남아, 브라우저에만 남아 있던 사본도 다음에 라이브러리를 열 때
   함께 정리됩니다(오프라인 사본이 다시 올라가지 않습니다).
 - 삭제 이후에 저장하면 새 주의 항목으로 다시 쌓이기 시작합니다.
-- **찬양집회 PPT는 자동 삭제에서 제외됩니다.** 라이브러리에 `찬양집회 · 자동 삭제 안 함` 표시가 붙고,
+- **찬양집회·수련회 PPT는 자동 삭제에서 제외됩니다.** 라이브러리에 `자동 삭제 안 함` 표시가 붙고,
   항목의 **삭제** 버튼으로 직접 지울 때까지 남습니다 (삭제할 때 한 번 더 확인합니다).
 - 삭제 시각·시간대는 Worker의 `PURGE_TIMEZONE`/`PURGE_HOUR` 설정으로 바꿀 수 있습니다
   (`worker/README.md`의 *Weekly PPT purge* 참고).
@@ -435,6 +435,50 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
   마지막으로 작업한 찬양집회를 기억해 다시 열면 이어서 편집하고, **새 찬양집회 시작**으로 비울 수
   있습니다. 다른 기기에서는 라이브러리의 **편집**으로 엽니다.
 
+## ⛺ 수련회
+
+수련회 PPT는 **별도 페이지**(`/ppt/retreat.html`)에서 **집회마다 한 파일씩** 만듭니다. 2026 빛주사랑
+겨울 수련회 PPT의 디자인(설교 포스터 표지, “2026 빛주사랑 겨울 수련회” 제목, 밤하늘 배경의 찬양,
+성경 사진 위의 설교말씀, 기도·축도·광고 장)을 그대로 씁니다 (`public/retreat-template.pptx`).
+
+### 1단계 · 수련회 정보·콘티
+
+- **수련회 이름·부제·주제** — 제목 슬라이드와 광고 슬라이드 아래 줄에 들어갑니다.
+- **찬양 콘티(PDF)** — 첫 장의 표(금요일 오후 예배 / 금요일 오후 기도회 / 토요일 오전 특강 / 토요일
+  오후 예배 / 토요일 오후 기도회 / 토요일 오후 찬양집회 / 주일 예배)를 읽어 **칸마다 해당 집회의 찬양
+  순서에** 넣습니다. 두 줄로 나뉜 제목은 이어 붙이고 `*` 표시는 지우며, 앞에 `X`를 적은 곡은 뺍니다.
+- 곡 가사는 **작년 수련회 PPT에 나온 20곡**(`public/retreat-songs.json` — 슬라이드 나눔 그대로)에서
+  먼저, 없으면 **찬양 라이브러리**에서 채웁니다. 둘 다 없으면 가사 칸에 붙여넣습니다.
+- **주일 폐회예배**는 주일예배와 같은 디자인이라 **주일예배 생성기**에서 만듭니다. 콘티의 주일 찬양
+  목록과 주일예배 생성기로 가는 버튼이 이 단계에 있습니다.
+
+### 2단계 · 집회 순서
+
+기본으로 2026년 예배 순서대로 세 집회가 준비되어 있고, **집회 추가**로 더 만들 수 있습니다.
+
+| 집회 | 기본 순서 |
+|---|---|
+| 금요일 저녁예배 | 수련회 제목 → 찬양 → 설교말씀 → 설교 → 빈 화면 → 기도회 → 기도 → 축도 → OT \| 광고 |
+| 토요일 오전 특강 | 수련회 제목 → 찬양 → 광고 |
+| 토요일 저녁예배 | 수련회 제목 → 찬양 → 설교말씀 → 설교 → 기도회 → 찬양집회 → 기도 → 축도 → 광고 |
+
+- 집회마다 **이름·날짜·설교 포스터**를 넣습니다. 포스터는 첫 장 가운데에 들어가고 남는 자리는
+  포스터 가장자리 색으로 채웁니다 (포스터가 없으면 제목 장부터 시작).
+- 순서는 카드마다 **위/아래로 옮기거나 빼고**, 아래에서 **순서 추가**로 넣습니다: 수련회 제목, 찬양(구분 장
+  제목 + 곡들), 설교말씀(본문 → 개역개정·ESV 한 절씩), 설교 제목, 빈 화면, 기도, 축도, 광고.
+- 찬양 곡은 제목과 가사를 바로 고칠 수 있습니다 (빈 줄 = 다음 슬라이드, 한 장에 4줄까지 — 넘으면 고르게
+  나눕니다). 곡 제목을 새로 적으면 작년 수련회 곡·찬양 라이브러리에서 가사를 채웁니다.
+- 광고는 `1. <제목>` 다음 줄부터 내용을 적으면 항목마다 한 장씩 만들어집니다.
+- 긴 가사·말씀·광고는 글자를 줄여 상자 안에 맞춥니다.
+
+### 3단계 · 다운로드
+
+- 집회마다 **미리보기**와 **PPT 다운로드**가 있습니다. 파일명은 집회 날짜로 `0116_Retreat_Evening.pptx`,
+  `0117_Retreat_Lecture.pptx`처럼 만들어집니다.
+- 내려받은 PPT는 **라이브러리에 저장되고 매주 자동 삭제에서 제외**됩니다. 각 PPT에 수련회 전체 입력이
+  함께 저장되어 다른 기기에서 **편집**을 누르면 모든 집회가 다시 열립니다. 이 브라우저에서는 새로고침해도
+  입력이 그대로 남고, **새 수련회 시작**으로 비웁니다.
+
 ## 🌙 수요예배
 
 수요예배는 주일예배와 만드는 방식이 완전히 달라 **별도 페이지**(`/ppt/wednesday.html`)에서
@@ -586,6 +630,10 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   `node scripts/prepare-praise-template.mjs <찬양집회.pptx>`로 뽑아낸 파일입니다 (원본은 저장소에 두지
   않습니다). 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
   라이브러리는 Worker의 `/libraries/praise-english` 경로가 담당합니다.
+- 수련회 슬라이드: `public/retreat-template.pptx` (13장)와 작년 수련회 곡 `public/retreat-songs.json`.
+  수련회 PPT들에서 `node scripts/prepare-retreat-template.mjs <첫째날.pptx> [다른 수련회 PPT…]`로
+  뽑아낸 파일입니다 (첫 파일이 디자인 원본, 모든 파일에서 곡을 모읍니다. 원본은 저장소에 두지 않습니다).
+  페이지는 `retreat.html` + `src/retreat/`입니다.
 - 데스크톱 앱(별도 프로젝트): `desktop/` — Tauri 기반 예배 셋리스트 관리 앱, 자세한 내용은
   `desktop/README.md` 참고
 
@@ -624,7 +672,7 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    uploaded PPTX slides keep their own layouts and themes.
 
 **찬양집회 (praise night)** has its own page at `/ppt/praise.html`, reached from the service picker
-that now opens the site (주일예배 / 찬양집회 / 수련회 — the last is not built yet). It reads a conti
+that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a conti
 exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
@@ -634,6 +682,15 @@ saved to the lyrics library as a draft). A bilingual slide that would have to sh
 into two. Files such as a sermon deck can be placed after any song, a 기도/Prayer slide can follow any
 song, and the cover photo gets this year's date over last year's. 찬양집회 decks are saved with `keep`, so
 the weekly Sunday purge never deletes them — only a manual delete does.
+
+**수련회 (retreat)** has its own page at `/ppt/retreat.html` and makes one deck per session in the
+retreat's design (`public/retreat-template.pptx`, 13 designs derived from the 2026 retreat's first-night
+deck by `scripts/prepare-retreat-template.mjs`). The retreat conti's song table is read column by column
+into each session's songs; lyrics come from the 20 songs last year's retreat decks projected
+(`public/retreat-songs.json`), then the lyrics library. Each session is an editable order of service —
+poster cover, title, songs with section dividers, 설교말씀 as 개역개정 + ESV verse slides, sermon title,
+blank, 기도, 축도, 광고. The closing Sunday service is made with the Sunday wizard. Retreat decks are
+saved to the library with `keep`, like 찬양집회 decks.
 
 **수요예배 (Wednesday service)** is prepared differently enough to get its own page at
 `/ppt/wednesday.html`: there is no 콘티 to read, each song's slides are the 악보 pages of that

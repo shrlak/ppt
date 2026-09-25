@@ -30,6 +30,7 @@ import { inspectDeckBytes, saveDeckToLibrary, type SavedDeck, type SavedDeckResu
 import { decodeDeckSource, encodeDeckSource } from './lib/storage/deckSource';
 import { isWednesdaySource } from './wednesday/source';
 import { isPraiseSource } from './praise/source';
+import { isRetreatSource } from './retreat/source';
 import ServicePicker, { type ServiceChoice } from './components/ServicePicker';
 import { getSavedDeck } from './lib/storage/pptLibrary';
 import {
@@ -859,6 +860,11 @@ function SundayApp() {
     if (isPraiseSource(deck.source)) {
       showToast(`'${deck.name}'은(는) 찬양집회 PPT입니다. 찬양집회 생성기로 이동합니다.`);
       window.location.href = `${BASE}praise.html?deck=${encodeURIComponent(deck.id)}`;
+      return;
+    }
+    if (isRetreatSource(deck.source)) {
+      showToast(`'${deck.name}'은(는) 수련회 PPT입니다. 수련회 생성기로 이동합니다.`);
+      window.location.href = `${BASE}retreat.html?deck=${encodeURIComponent(deck.id)}`;
       return;
     }
 

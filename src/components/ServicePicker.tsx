@@ -1,7 +1,6 @@
 // The first screen of the PPT Generator: which kind of service is this deck
 // for? Each kind is its own generator — the Sunday wizard lives on this page,
-// 찬양집회 on praise.html — and 수련회 is listed so it is expected, but not
-// built yet.
+// 찬양집회 on praise.html and 수련회 on retreat.html.
 import Icon, { type IconName } from './Icon';
 
 const BASE: string = import.meta.env.BASE_URL || '/';
@@ -35,7 +34,7 @@ const OPTIONS: Option[] = [
     id: 'retreat',
     title: '수련회',
     english: 'Retreat',
-    description: '준비 중입니다.',
+    description: '수련회 콘티와 집회 순서로 집회마다 수련회 디자인의 PPT를 만듭니다. 자동 삭제되지 않습니다.',
     icon: 'steps',
   },
 ];
@@ -83,11 +82,7 @@ export default function ServicePicker({ onChoose }: Props) {
             );
             return (
               <li key={option.id}>
-                {option.id === 'praise' ? (
-                  <a className="service-option" href={`${BASE}praise.html`} data-testid="service-praise">
-                    {body}
-                  </a>
-                ) : option.id === 'sunday' ? (
+                {option.id === 'sunday' ? (
                   <button
                     type="button"
                     className="service-option"
@@ -97,18 +92,9 @@ export default function ServicePicker({ onChoose }: Props) {
                     {body}
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    className="service-option"
-                    data-testid="service-retreat"
-                    disabled
-                    aria-describedby="service-retreat-note"
-                  >
+                  <a className="service-option" href={`${BASE}${option.id}.html`} data-testid={`service-${option.id}`}>
                     {body}
-                    <span id="service-retreat-note" className="service-option-soon">
-                      준비 중
-                    </span>
-                  </button>
+                  </a>
                 )}
               </li>
             );
