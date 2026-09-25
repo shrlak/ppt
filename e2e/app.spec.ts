@@ -1083,6 +1083,27 @@ test('puts the NASB text on the verse slide when NASB is the English translation
   expect(allText).not.toContain('whoever believes in him should not perish'); // ESV
 });
 
+test('puts the 쉬운성경 text on the verse slide when 쉬운성경 is the Korean translation', async ({ page }, testInfo) => {
+  await page.goto('./?service=sunday');
+
+  await page.getByTestId('wizard-next-lyrics').click();
+  await page.getByTestId('bible-verse-input').fill('요3:16');
+  // The radio itself is hidden inside its chip; people click the chip's label.
+  await page.locator('label.chip-radio', { hasText: '쉬운성경' }).click();
+  await expect(page.getByRole('radio', { name: '쉬운성경' })).toBeChecked();
+  await expect(page.getByRole('radio', { name: '개역개정' })).not.toBeChecked();
+
+  await moveFromBibleToDownload(page);
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const download = await dlPromise;
+
+  const zip = await loadPptx(download, testInfo.outputPath('bible-easy.pptx'));
+  const allText = (await slideTexts(zip)).join('\n');
+  expect(allText).toContain('누구든지 그의 아들을 믿는 사람은 멸망하지 않고 영생을 얻게 하려 하심이다');
+  expect(allText).not.toContain('독생자를 주셨으니'); // 개역개정
+});
+
 test('shows a verse 개역개정 prints as "18-19" on one slide beside both English verses', async ({ page }, testInfo) => {
   await page.goto('./?service=sunday');
 

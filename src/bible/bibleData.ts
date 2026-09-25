@@ -6,6 +6,7 @@ const TRANSLATION_FILES: Record<string, string> = {
   nkrv: 'ko_nkrv.json',
   ko: 'ko_ko.json',
   saenew: 'ko_saenew.json',
+  easy: 'ko_easy.json',
   esv: 'en_esv.json',
   niv: 'en_niv.json',
   nasb: 'en_nasb.json',

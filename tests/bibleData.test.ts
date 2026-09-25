@@ -153,12 +153,17 @@ const KOREAN_CHAPTER_LENGTHS: Record<string, [number, number, number][]> = {
     [47, 13, 13],
     [22, 6, 14], // 개역한글 prints 아가6:13's second half as verse 14
   ],
+  'ko_easy.json': [
+    [47, 13, 13],
+    [66, 12, 18], // 쉬운성경 prints 계12:18 ("용은 바닷가 모래 위에 섰습니다")
+  ],
 };
 
 describe.each([
   ['개역개정', 'ko_nkrv.json'],
   ['새번역', 'ko_saenew.json'],
   ['개역한글', 'ko_ko.json'],
+  ['쉬운성경', 'ko_easy.json'],
 ])('%s verse numbering', (_name, file) => {
   const raw = readTranslation(file);
 
@@ -209,6 +214,54 @@ describe('새번역 text', () => {
     expect(units(26, 15, 6, 8)).toEqual([
       [6, 6],
       [7, 8],
+    ]);
+  });
+});
+
+describe('쉬운성경 text', () => {
+  const easyRaw = readTranslation('ko_easy.json');
+  const easy = new Map(easyRaw.map((book, i) => [i + 1, book.chapters]));
+  const units = (bookId: number, chapter: number, from: number, to: number) =>
+    getVerseUnits(easy, bookId, chapter, from, chapter, to).map((v) => [v.verse, lastVerseOf(v)]);
+
+  it('is offered as a Korean translation the loader knows', () => {
+    expect(TRANSLATIONS.find((t) => t.id === 'easy')).toEqual({ id: 'easy', name: '쉬운성경', language: 'ko' });
+    expect(isKnownTranslation('easy')).toBe(true);
+  });
+
+  it('fetches ko_easy.json and indexes books from 1', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(easyRaw)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bible = await loadTranslation('/ppt/', 'easy');
+
+    expect(fetchMock).toHaveBeenCalledWith('/ppt/bible-text/ko_easy.json');
+    expect(getVerseRange(bible, 43, 3, 16, 3, 16)[0].text).toBe(
+      '이와 같이 하나님께서는 세상을 사랑하여 독생자를 주셨다. 이는 누구든지 그의 아들을 믿는 사람은 멸망하지 않고 영생을 얻게 하려 하심이다.',
+    );
+  });
+
+  it('joins the verses 쉬운성경 prints as one (삿20:22-23, 삼하4:6-7, 왕상8:41-42)', () => {
+    expect(units(7, 20, 21, 24)).toEqual([
+      [21, 21],
+      [22, 23],
+      [24, 24],
+    ]);
+    expect(getVerseRange(easy, 7, 20, 22, 20, 22)[0].text).toMatch(/첫째 날과 같은 대형으로 베냐민 사람들과 마주 섰습니다\.$/);
+    expect(units(10, 4, 6, 8)).toEqual([
+      [6, 7],
+      [8, 8],
+    ]);
+    expect(units(11, 8, 42, 43)).toEqual([
+      [41, 42],
+      [43, 43],
+    ]);
+  });
+
+  it('prints a verse it leaves out as "(없음)", so the next verse keeps its number', () => {
+    expect(getVerseRange(easy, 40, 17, 21, 17, 22).map((v) => v.text)).toEqual([
+      '(없음)',
+      expect.stringMatching(/^제자들이 갈릴리에 모여 있었을 때/),
     ]);
   });
 });
