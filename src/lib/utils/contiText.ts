@@ -542,3 +542,24 @@ export function splitLyricsAndConfessionSongs(
     postSermonSong,
   };
 }
+
+/**
+ * The date a conti's file name carries, for a conti that prints none — a
+ * chord-sheet PDF has no cover. "2026-10-03 찬양집회.pdf", "20261003.pdf",
+ * "10_03_Praise.pdf" and "9.27 EM KM.pdf" all name one; a month-and-day name
+ * is taken in `today`'s year. Written the way a cover writes it
+ * ("2026.10.03"), or undefined when the name holds no date.
+ */
+export function dateFromFileName(name: string, today = new Date()): string | undefined {
+  const stem = name.replace(/\.[a-z0-9]+$/i, '');
+  const full = /(?:^|\D)(20\d{2})[._-]?(\d{1,2})[._-]?(\d{1,2})(?!\d)/.exec(stem);
+  const short = /^(\d{1,2})[._-](\d{1,2})(?!\d)/.exec(stem.trim());
+  const [year, month, day] = full
+    ? [Number(full[1]), Number(full[2]), Number(full[3])]
+    : short
+      ? [today.getFullYear(), Number(short[1]), Number(short[2])]
+      : [0, 0, 0];
+  const date = new Date(year, month - 1, day);
+  if (!year || date.getMonth() !== month - 1 || date.getDate() !== day) return undefined;
+  return `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')}`;
+}

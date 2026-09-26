@@ -95,9 +95,16 @@ describe('Korean spacing model', () => {
 
   it('falls back to particles and endings for a pair it never saw', () => {
     const model = createSpacingModel([]);
-    expect(model('주님의 높', '고')).toBe(false);
-    expect(model('영혼', '이')).toBe(false);
+    expect(model('주', '님의')).toBe(true);
+    expect(model('나의 영혼', '을')).toBe(false);
+    expect(model('주의 영광', '소리쳐')).toBe(true);
     expect(model('이제', '주를')).toBe(true);
+  });
+
+  it('weighs whole words, so a typo in the corpus is outvoted', () => {
+    const model = createSpacingModel(['모든 것 다해', '모든 것 주께', '모든것을', '기뻐 찬양해']);
+    expect(model('모든', '것')).toBe(true);
+    expect(model('기', '뻐')).toBe(false);
   });
 });
 

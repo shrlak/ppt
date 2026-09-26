@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  dateFromFileName,
   classifyPages,
   continuesCover,
   findCoverPages,
@@ -436,5 +437,20 @@ describe('parseCoverText 진행 순서', () => {
 
   it('leaves the fixture covers without an order', () => {
     expect(parseCoverText(coverText)?.songs.every((song) => song.order === undefined)).toBe(true);
+  });
+});
+
+describe('dateFromFileName', () => {
+  const today = new Date(2026, 8, 26);
+  it('reads the date a conti file is named with', () => {
+    expect(dateFromFileName('2026-10-03 찬양집회.pdf', today)).toBe('2026.10.03');
+    expect(dateFromFileName('praise_20261003.pdf', today)).toBe('2026.10.03');
+    expect(dateFromFileName('9_27_EM__KM.pptx', today)).toBe('2026.09.27');
+    expect(dateFromFileName('10.3 콘티.pdf', today)).toBe('2026.10.03');
+  });
+
+  it('finds none where the name holds no date', () => {
+    expect(dateFromFileName('EM_KM_Praise_Night_Chord_Sheets_1.pdf', today)).toBeUndefined();
+    expect(dateFromFileName('13_40_scan.pdf', today)).toBeUndefined();
   });
 });
