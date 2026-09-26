@@ -4,9 +4,11 @@
 // Like the 찬양집회 and 수요예배 snapshots it rides in the library's `source`
 // file, tagged `kind: 'retreat'` (the Sunday decoder refuses other kinds).
 // Every session's deck carries the whole retreat, so 편집 on any of them
-// reopens all of it; the posters travel in the entry's archive.
+// reopens all of it. The posters travel in the entry's archive, and so do
+// the conti's PDFs past the first — the entry's own 콘티 PDF holds that one.
 import { DECK_SOURCE_FILE_NAME, type DeckSourceFile } from '../lib/storage/deckSource';
 import { decodeAdditionalFiles, encodeAdditionalFiles } from '../lib/storage/additionalFilesArchive';
+import type { SavedFile } from '../lib/storage/pptLibrary';
 import type { ContiSlotKey, PosterImage, RetreatBlock, RetreatSession, RetreatSong, RetreatState } from './types';
 
 export const RETREAT_SOURCE_KIND = 'retreat';
@@ -54,9 +56,17 @@ export function encodeRetreatSource(state: RetreatState, sessionId?: string): De
   return { name: DECK_SOURCE_FILE_NAME, data: new TextEncoder().encode(JSON.stringify(snapshot)).buffer as ArrayBuffer };
 }
 
-/** Posters in session order, one archive entry each (null when there are none). */
-export async function encodeRetreatPosters(state: RetreatState) {
-  const files = state.sessions.flatMap((session) =>
+/** The archive refuses a PDF whose bytes do not open with the PDF header. */
+function isPdf(data: ArrayBuffer): boolean {
+  return String.fromCharCode(...new Uint8Array(data, 0, Math.min(4, data.byteLength))) === '%PDF';
+}
+
+/**
+ * Posters in session order, one archive entry each, then the conti PDFs
+ * after the first (null when there is nothing to keep).
+ */
+export async function encodeRetreatFiles(state: RetreatState, extraContis: SavedFile[] = []) {
+  const posters = state.sessions.flatMap((session) =>
     session.poster
       ? [
           {
@@ -69,7 +79,12 @@ export async function encodeRetreatPosters(state: RetreatState) {
         ]
       : [],
   );
-  return encodeAdditionalFiles(files);
+  const contis = extraContis.flatMap((file, index) =>
+    isPdf(file.data)
+      ? [{ id: `conti-${index}`, name: file.name.slice(0, 240) || 'conti.pdf', kind: 'pdf' as const, data: file.data, slideCount: 1 }]
+      : [],
+  );
+  return encodeAdditionalFiles([...posters, ...contis]);
 }
 
 function text(value: unknown, fallback = ''): string {
@@ -188,14 +203,16 @@ export function attachPosters(state: StoredRetreatState, posterData: Map<string,
   };
 }
 
-/** Posters out of a library entry's archive, by session id. */
-export async function decodeRetreatPosters(archive: { name: string; data: ArrayBuffer } | null | undefined) {
+/** Posters (by session id) and the extra conti PDFs out of a library entry's archive. */
+export async function decodeRetreatFiles(archive: { name: string; data: ArrayBuffer } | null | undefined) {
   const posters = new Map<string, ArrayBuffer>();
-  if (!archive) return posters;
+  const contis: SavedFile[] = [];
+  if (!archive) return { posters, contis };
   for (const file of await decodeAdditionalFiles(archive)) {
-    posters.set(file.name.replace(/\.(png|jpe?g)$/i, ''), file.data);
+    if (file.kind === 'pdf') contis.push({ name: file.name, data: file.data });
+    else posters.set(file.name.replace(/\.(png|jpe?g)$/i, ''), file.data);
   }
-  return posters;
+  return { posters, contis };
 }
 
 /** Changes exactly when some session's deck would change. */

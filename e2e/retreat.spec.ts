@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POSTER = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
+const EXAMPLE_CONTI = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 const BUILD_TIMEOUT = 60_000;
 
 async function slideTexts(zip: JSZip): Promise<string[]> {
@@ -86,5 +87,47 @@ test.describe('수련회 generator', () => {
     await page.reload();
     await page.getByTestId('retreat-tab-sessions').click();
     await expect(block(page, 'sermon').getByTestId('retreat-sermon-title')).toHaveValue('Go Beyond the Visible');
+  });
+
+  test('takes a conti as several PDFs, with no song table in any, and keeps them all with the decks', async ({ page }) => {
+    // A second one-page PDF, printed by the browser itself. Both go in as
+    // bytes, not paths: of two paths, one under this test's Korean output
+    // folder, only one reached the page.
+    await page.setContent('<p>Retreat conti, page two</p>');
+    const second = await page.pdf();
+
+    await page.goto('retreat.html');
+    await page.getByTestId('retreat-conti-input').setInputFiles([
+      { name: 'conti-example.pdf', mimeType: 'application/pdf', buffer: await fs.readFile(EXAMPLE_CONTI) },
+      { name: 'conti-2.pdf', mimeType: 'application/pdf', buffer: second },
+    ]);
+    const files = page.getByTestId('retreat-conti-files').locator('li');
+    await expect(files).toHaveText(['conti-example.pdf', 'conti-2.pdf'], { timeout: 30_000 });
+    await expect(page.getByText(/곡 표는 찾지 못해 곡은 집회 순서에서 직접 넣어 주세요/)).toBeVisible();
+    await expect(page.locator('.toast-error')).toHaveCount(0);
+
+    // Both are saved with the deck, and come back with 편집.
+    await page.getByTestId('retreat-tab-download').click();
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
+      page.getByTestId('retreat-download-row').first().getByTestId('retreat-download').click(),
+    ]);
+    await download.path();
+    await expect(page.getByTestId('retreat-download-row').first().getByTestId('retreat-download')).toHaveText(/PPT 다운로드/, {
+      timeout: BUILD_TIMEOUT,
+    });
+
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.getByTestId('retreat-reset').click();
+    await expect(page.getByTestId('retreat-conti-files')).toHaveCount(0);
+
+    await page.getByRole('button', { name: '라이브러리' }).click();
+    await page.getByTestId('library-entry-edit').first().click();
+    await page.getByTestId('retreat-tab-info').click();
+    await expect(files).toHaveText(['conti-example.pdf', 'conti-2.pdf']);
+
+    // A file can be taken out again.
+    await page.getByRole('button', { name: 'conti-2.pdf 빼기' }).click();
+    await expect(files).toHaveText(['conti-example.pdf']);
   });
 });
