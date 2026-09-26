@@ -1,10 +1,19 @@
 // Song lyrics for the 수련회 decks: typed as projected (a blank line between
 // slides) and looked up by title — first among the songs last year's retreat
-// decks projected (public/retreat-songs.json), then in the 찬양 라이브러리.
+// decks projected (public/retreat-songs.json), then in the 찬양 라이브러리,
+// then among the songs this year's 악보 pages were read as.
 import { findLibrarySong, normalizeTitle } from '../lib/storage/library';
 import { planSlides } from '../lib/utils/slidePlanner';
 import type { LibraryEntry } from '../lib/utils/types';
-import { newId, type RetreatSong } from './types';
+import { newId, type RetreatSong, type ScoreSong } from './types';
+
+/** Where a song's lyrics came from, as its card says. */
+export const SONG_SOURCE_LABEL: Record<NonNullable<RetreatSong['source']>, string> = {
+  retreat: '작년 수련회 가사',
+  library: '찬양 라이브러리',
+  score: '악보에서 읽은 가사',
+  manual: '직접 입력',
+};
 
 /** Lines per lyric slide, as the retreat decks project them. */
 export const RETREAT_LINES_PER_SLIDE = 4;
@@ -87,11 +96,18 @@ export function libraryLyricsText(entry: Pick<LibraryEntry, 'title' | 'sections'
 }
 
 /** A song by title, with the lyrics of whichever source knows it first. */
-export function resolveSong(title: string, seeds: RetreatSongSeed[], library: LibraryEntry[]): RetreatSong {
+export function resolveSong(
+  title: string,
+  seeds: RetreatSongSeed[],
+  library: LibraryEntry[],
+  scoreSongs: ScoreSong[] = [],
+): RetreatSong {
   const key = normalizeTitle(title);
   const seed = key ? seeds.find((entry) => normalizeTitle(entry.title) === key) : undefined;
   if (seed) return { id: newId(), title, lyrics: lyricsText(seed.slides), source: 'retreat' };
   const saved = key ? findLibrarySong(library, { title }) : undefined;
   if (saved) return { id: newId(), title, lyrics: libraryLyricsText(saved), source: 'library' };
+  const read = key ? scoreSongs.find((song) => song.lyrics.trim() && normalizeTitle(song.title) === key) : undefined;
+  if (read) return { id: newId(), title, lyrics: read.lyrics, source: 'score' };
   return { id: newId(), title, lyrics: '' };
 }

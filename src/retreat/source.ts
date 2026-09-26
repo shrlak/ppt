@@ -9,7 +9,7 @@
 import { DECK_SOURCE_FILE_NAME, type DeckSourceFile } from '../lib/storage/deckSource';
 import { decodeAdditionalFiles, encodeAdditionalFiles } from '../lib/storage/additionalFilesArchive';
 import type { SavedFile } from '../lib/storage/pptLibrary';
-import type { ContiSlotKey, PosterImage, RetreatBlock, RetreatSession, RetreatSong, RetreatState } from './types';
+import type { ContiSlotKey, PosterImage, RetreatBlock, RetreatSession, RetreatSong, RetreatState, ScoreSong } from './types';
 
 export const RETREAT_SOURCE_KIND = 'retreat';
 export const RETREAT_SOURCE_VERSION = 1;
@@ -105,7 +105,7 @@ function blockOf(raw: unknown): RetreatBlock | null {
         const entry = raw as Record<string, unknown>;
         const source = entry.source;
         const song: RetreatSong = { id: text(entry.id) || `${Math.random()}`, title: text(entry.title), lyrics: text(entry.lyrics) };
-        if (source === 'retreat' || source === 'library' || source === 'manual') song.source = source;
+        if (source === 'retreat' || source === 'library' || source === 'score' || source === 'manual') song.source = source;
         return [song];
       });
       const slot = block.slot as { day?: unknown; part?: unknown } | undefined;
@@ -178,6 +178,11 @@ export function decodeRetreatState(raw: unknown): { state: StoredRetreatState; s
       closingSongs: (Array.isArray(state.closingSongs) ? state.closingSongs : []).filter(
         (title): title is string => typeof title === 'string',
       ),
+      scoreSongs: (Array.isArray(state.scoreSongs) ? state.scoreSongs : []).flatMap((raw): ScoreSong[] => {
+        if (!raw || typeof raw !== 'object') return [];
+        const entry = raw as Record<string, unknown>;
+        return text(entry.title).trim() ? [{ title: text(entry.title), lyrics: text(entry.lyrics) }] : [];
+      }),
     },
     ...(typeof snapshot.sessionId === 'string' ? { sessionId: snapshot.sessionId } : {}),
   };

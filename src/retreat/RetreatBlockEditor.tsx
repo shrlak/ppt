@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Icon from '../components/Icon';
 import type { RetreatPassage } from './scripture';
-import { lyricSlides } from './songs';
+import { lyricSlides, SONG_SOURCE_LABEL } from './songs';
 import { BLOCK_LABELS, type RetreatBlock, type RetreatSong } from './types';
 
 interface Props {
@@ -16,15 +16,9 @@ interface Props {
   onChange: (block: RetreatBlock) => void;
   onMove: (delta: -1 | 1) => void;
   onRemove: () => void;
-  /** Look a title up in last year's decks and the 찬양 라이브러리. */
+  /** Look a title up in last year's decks, the 찬양 라이브러리 and the conti's 악보. */
   resolveSong: (title: string) => RetreatSong;
 }
-
-const SOURCE_LABEL: Record<NonNullable<RetreatSong['source']>, string> = {
-  retreat: '작년 수련회 가사',
-  library: '찬양 라이브러리',
-  manual: '직접 입력',
-};
 
 function SongRow({
   song,
@@ -65,7 +59,7 @@ function SongRow({
           }}
         />
         <span className={`retreat-song-source${song.lyrics.trim() ? '' : ' is-missing'}`} data-testid="retreat-song-source">
-          {song.lyrics.trim() ? `${SOURCE_LABEL[song.source ?? 'manual']} · ${slides}장` : '가사 없음'}
+          {song.lyrics.trim() ? `${SONG_SOURCE_LABEL[song.source ?? 'manual']} · ${slides}장` : '가사 없음'}
         </span>
         <div className="retreat-row-actions">
           <button type="button" className="btn btn-icon" aria-label="위로" disabled={index === 0} onClick={() => onMove(-1)}>
