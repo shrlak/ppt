@@ -27,6 +27,7 @@ interface Props {
 
 const SOURCE_LABEL: Record<NonNullable<PraiseSongExtras['englishSource']>, string> = {
   memory: '저장된 영어 가사',
+  sheet: '코드 악보에서 읽음',
   ai: 'AI 초안 · 확인 필요',
   manual: '직접 입력',
 };

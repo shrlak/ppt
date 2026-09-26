@@ -19,7 +19,7 @@
 | | 주일예배 | 찬양집회 | 수련회 | 수요예배 |
 |---|---|---|---|---|
 | 주소 | <https://shrlak.github.io/ppt/?service=sunday> | <https://shrlak.github.io/ppt/praise.html> | <https://shrlak.github.io/ppt/retreat.html> | <https://shrlak.github.io/ppt/wednesday.html> |
-| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 | 수련회 콘티의 **칸마다** 해당 집회에 넣고, 작년 수련회 곡은 가사까지 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
+| 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 (CCLI 코드 악보는 한글·영어 가사를 PDF에서 바로) | 수련회 콘티의 **칸마다** 해당 집회에 넣고, 작년 수련회 곡은 가사까지 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
 | 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) | 집회마다 포스터·예배 순서(본문·설교 제목·광고 등) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
 | 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 설교 PPT·말씀 자료를 **원하는 곡 뒤에** 삽입 | 설교말씀(개역개정+ESV)·설교 제목 장, 설교용 빈 화면 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
 | 파일명 | 그 주 **일요일** `MMDD.pptx` | 집회 날짜 `MMDD_PraiseNight.pptx` | 집회 날짜 `MMDD_Retreat_Evening.pptx` 등 | 그 주 **수요일** `MMDD.pptx` |
@@ -391,7 +391,32 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 ### 1단계 · 찬양
 
 주일예배와 똑같이 **콘티 PDF를 올리면** 곡 순서·제목·한글 가사를 읽습니다 (찬양 라이브러리에 있는
-곡은 바로 불러오고, 없는 곡은 악보를 인식합니다). 작년이나 이전 찬양집회에서 **한글·영어로 저장된
+곡은 바로 불러오고, 없는 곡은 악보를 인식합니다).
+
+**코드 악보 콘티(CCLI SongSelect의 `Chord Sheets` PDF)** 는 악보 인식 없이 PDF에 적힌 글자를 그대로
+읽습니다. 작년 찬양집회처럼 곡마다 제목·`Key - D | Time - 4/4` 머리말과 CCLI 꼬리말이 있고, 두 단으로
+VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
+
+- **곡 나누기** — 머리말이 있는 쪽에서 새 곡이 시작하고, 머리말 없는 다음 쪽은 앞 곡에 이어 붙입니다
+  (한 곡이 두세 쪽이어도 한 곡). 콘티에 적힌 순서 그대로, 키도 함께 들어갑니다.
+- **가사 줄 복원** — 코드 악보는 코드가 붙은 음절을 따로 적어 두어 글자 순서대로 읽으면 줄이 뒤섞이므로,
+  글자의 **위치**로 줄을 다시 맞추고 코드 줄·`(To Ch.)` 같은 진행 표시·`(1.)`/`(2.)` 반복 표시는 뺍니다.
+  한 줄을 3번 이상 되풀이하면 작년처럼 `좌정하사 다스리소서 (x4)`로 한 번만 적고, 단이 좁아 넘어간
+  영어 줄은 다시 한 줄로 잇습니다.
+- **한글·영어 짝 맞추기** — 한 파트 안에 한글 줄과 영어 줄이 함께 있거나(`VERSE`), 영어 파트와
+  `VERSE 1 (KOREAN)` 파트로 따로 있어도 한 파트의 한글·영어로 묶습니다. 영어만 있는 곡(Who Else,
+  Praise)은 영어 곡, 한글만 있는 곡은 한글 곡이 됩니다.
+- **띄어쓰기** — 코드가 음절보다 넓으면 악보가 그 음절 뒤를 띄워 적어서 PDF만으로는 `높고`와
+  `모든 것`을 구별할 수 없습니다. 이런 자리는 찬양 라이브러리(208곡)와 작년 찬양집회 가사에서 배운
+  띄어쓰기로 정하고, 처음 보는 글자 쌍이면 조사·어미(`은/는/이/고/네`…)일 때만 붙입니다. 드물게 틀릴 수
+  있으니 업로드 뒤 가사를 한 번 확인하세요.
+- **제목** — 영어 제목만 적힌 곡(`Goodness Of God`, `Beautiful Saviour`)은 영어 가사 라이브러리에서
+  같은 곡을 찾아 **한글 제목**(주님의 선하심, 예수 아름다우신)을 붙이고, 악보의 제목은 영어 제목이 됩니다.
+  제목 철자가 조금 달라도(Saviour/Savior), 올해 제목이 더 길어도(나의 슬픔을 → 나의 슬픔을 주가
+  기쁨으로), 한글 가사가 같으면 찾습니다. 찾지 못하면 영어 제목으로 두고 알려 줍니다.
+
+주일예배 페이지에 같은 코드 악보를 올리면 한글 가사만(영어로만 부르는 곡은 영어) 넣고, 공동체
+고백송·설교 후 찬양 구분도 여느 콘티처럼 적용합니다. 작년이나 이전 찬양집회에서 **한글·영어로 저장된
 곡**이면 그 저장본을 먼저 불러와 영어까지 한 번에 채웁니다. 찬양집회에는 공동체 고백송·설교 후 찬양 구분이
 없어서 콘티의 **모든 곡이 적힌 순서대로** 들어가고, 한글 아래에 영어가 들어가므로 새 곡은
 **슬라이드당 3줄**로 시작합니다 (곡마다 바꿀 수 있습니다).
@@ -399,6 +424,11 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 ### 2단계 · 영어 가사
 
 곡마다 **영어 제목**과, 한글 슬라이드 한 장마다 그 아래에 들어갈 **영어 가사 칸**이 나옵니다.
+
+- **코드 악보에서 바로 채워집니다** — 코드 악보 콘티로 올린 곡은 악보에 적힌 영어가 한글 슬라이드마다
+  들어가고 `코드 악보에서 읽음`으로 표시됩니다. 한 파트의 한글과 영어는 같은 장에 남도록 나뉘며
+  (영어를 고르게 나눈 뒤 한글을 **같은 분량**만큼 끊어서, 예: 한글 4줄·영어 8줄 → 2+4 두 장), 슬라이드당
+  줄 수를 바꿔 다시 나뉘어도 영어가 그 한글을 따라갑니다.
 
 - **자동으로 채워집니다** — 작년 찬양집회에서 부른 10곡(춤추는 세대, 주 하나님 지으신 모든 세계,
   예수 우리 왕이여, Who Else, 예수 아름다우신, 여호와께 돌아가자, 주님의 선하심, 부르신 곳에서,
@@ -716,7 +746,13 @@ that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a co
 exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
-and matched by text, so different line breaks still line up — or pasted, typed, or drafted by AI. Every
+and matched by text, so different line breaks still line up — or pasted, typed, or drafted by AI. A CCLI
+SongSelect chord-sheet PDF is read from its text layer instead of recognized (`src/lib/utils/chordSheet.ts`):
+lines are rebuilt from where each piece of text sits (two columns, chord rows dropped, chord-attached
+syllables put back), songs run over pages until the next `Key - …` header, `VERSE` and `VERSE (KOREAN)`
+become one bilingual part, and the Korean word breaks a chord's padding hides are settled by a spacing
+model learned from the lyrics library. Each part is divided into slides that keep its English with its
+Korean. Every
 song's Korean and English are saved automatically; other services only ever load the Korean (it is also
 saved to the lyrics library as a draft). A bilingual slide that would have to shrink below 28pt is split
 into two. Files such as a sermon deck can be placed after any song, a 기도/Prayer slide can follow any

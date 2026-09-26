@@ -4,6 +4,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ContiInfo, ParsedConti } from './types';
 import { classifyPages, matchSongsToPages, parseCoverText, parseSermonInfoText } from './contiText';
+import { looksLikeChordSheetText, type PositionedPage, type PositionedText } from './chordSheet';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -38,8 +39,10 @@ interface TextItemLike {
   width?: number;
 }
 
-async function extractPageText(page: pdfjs.PDFPageProxy): Promise<string> {
+async function extractPageText(page: pdfjs.PDFPageProxy): Promise<{ text: string; positioned: PositionedPage }> {
   const content = await page.getTextContent();
+  const viewport = page.getViewport({ scale: 1 });
+  const positioned: PositionedPage = { width: viewport.width, height: viewport.height, items: [] };
   let text = '';
   let lastY: number | null = null;
   let lastEndX: number | null = null;
@@ -50,6 +53,10 @@ async function extractPageText(page: pdfjs.PDFPageProxy): Promise<string> {
     const x = tf ? tf[4] : null;
     const y = tf ? tf[5] : null;
     const fontSize = tf ? Math.abs(tf[0]) || Math.abs(tf[3]) || 10 : 10;
+    if (x !== null && y !== null && item.str.trim()) {
+      const piece: PositionedText = { str: item.str, x, y, width: item.width ?? 0, size: tf ? Math.hypot(tf[2], tf[3]) || fontSize : fontSize };
+      positioned.items.push(piece);
+    }
     if (text.length > 0 && !text.endsWith('\n')) {
       if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {
         text += '\n';
@@ -69,7 +76,7 @@ async function extractPageText(page: pdfjs.PDFPageProxy): Promise<string> {
     if (y !== null) lastY = y;
     lastEndX = x !== null ? x + (item.width ?? 0) : null;
   }
-  return text;
+  return { text, positioned };
 }
 
 export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
@@ -78,12 +85,16 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   const doc = await loadingTask.promise;
 
   const pageTexts: string[] = [];
+  const positionedPages: PositionedPage[] = [];
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
     try {
-      pageTexts.push(await extractPageText(page));
+      const { text, positioned } = await extractPageText(page);
+      pageTexts.push(text);
+      positionedPages.push(positioned);
     } catch {
       pageTexts.push('');
+      positionedPages.push({ width: 0, height: 0, items: [] });
     }
   }
 
@@ -113,6 +124,9 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   matchSongsToPages(info, pageTexts, musicPages);
 
   const parsed: ParsedConti = { info, numPages: doc.numPages, pageTexts, musicPages };
+  // A chord-sheet PDF carries its lyrics as text; where each piece of it
+  // sits is what puts the lines back together (see chordSheet.ts).
+  if (looksLikeChordSheetText(pageTexts.join('\n'))) parsed.chordSheetPages = positionedPages;
 
   return {
     parsed,

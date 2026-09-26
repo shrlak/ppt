@@ -1,5 +1,6 @@
 // Shared data model for the praise lyrics slide generator.
 // All modules (parser, planner, pptx builder, UI) code against these types.
+import type { PositionedPage } from './chordSheet';
 
 /** One labeled part of a song: V1/V2 (verse), PC (pre-chorus), C (chorus), B (bridge), etc. */
 export interface Section {
@@ -122,6 +123,12 @@ export interface ParsedConti {
   pageTexts: string[];
   /** 1-based indices of pages classified as sheet-music pages */
   musicPages: number[];
+  /**
+   * Every page's text with its position, kept only when the PDF is a chord
+   * sheet (CCLI SongSelect / ChordPro), whose lyrics are read from the text
+   * layer instead of recognized from the score.
+   */
+  chordSheetPages?: PositionedPage[];
 }
 
 /**
