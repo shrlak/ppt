@@ -546,6 +546,30 @@ function postKey(url) {
 }
 
 /**
+ * True when two hits on one blog are the same post under two addresses.
+ *
+ * A 티스토리 post opens at /145 and at /entry/<its title> alike, and Google
+ * gives one while 다음 gives the other, so the address cannot tell. Two posts
+ * of one blog with the same title can: they are the same post. Google cuts a
+ * long title short with "...", so a cut title that begins the other one
+ * counts too, once it is long enough to name more than the song.
+ */
+export function isSamePost(a, b) {
+  if (!a?.host || a.host !== b?.host) return false;
+  const cut = /(\.\.\.|…)\s*$/;
+  const left = normalizeForMatch(String(a.title ?? '').replace(cut, ''));
+  const right = normalizeForMatch(String(b.title ?? '').replace(cut, ''));
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const prefixOf = (short, long, title) =>
+    cut.test(title) && short.length >= MIN_CUT_TITLE_LENGTH && long.startsWith(short);
+  return prefixOf(left, right, a.title ?? '') || prefixOf(right, left, b.title ?? '');
+}
+
+/** A cut title this long (letters, spaces aside) says more than a song's name. */
+const MIN_CUT_TITLE_LENGTH = 12;
+
+/**
  * Titles of posts that carry several songs at once — a week's 콘티, a
  * 모음 — whose PPT would put every one of them on the slides.
  */
@@ -986,7 +1010,7 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
     for (const found of await Promise.all(searches.map((search) => runSearch(search, query)))) {
       for (const hit of found.results) {
         const key = postKey(hit.url);
-        const existing = seen.get(key);
+        const existing = seen.get(key) ?? results.find((other) => isSamePost(other, hit));
         if (existing) {
           // The other search may have seen the snippet that names the file.
           existing.attachment ??= hit.attachment;

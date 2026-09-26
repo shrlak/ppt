@@ -84,7 +84,9 @@ because a 찬양 PPT is nearly always a blog post's attachment, because they
 answer a server's plain fetch where DuckDuckGo increasingly turns the Worker
 away, and because their snippets often name the attachment (`첨부파일
 은혜.pptx`), which puts that post first. A post found by more than one search
-is one hit.
+is one hit — also when the searches give it under two addresses, as a 티스토리
+post's `/145` and `/entry/<title>`: two hits on one blog with the same title
+(or a title Google cut short with "...") are the same post.
 
 Google is asked through [SerpApi](https://serpapi.com), which returns Google's
 own results as JSON: Google answers a server's plain fetch of its results page
