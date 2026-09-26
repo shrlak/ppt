@@ -246,6 +246,29 @@ describe('buildWednesdayDeck', () => {
   );
 
   it(
+    'puts a song deck\'s slides on plain white, and leaves the service\'s own alone',
+    async () => {
+      const build = async (songs: WednesdaySong[]) => {
+        const { deck } = await buildWednesdayDeck({ template, service, songs, verses: verses.slice(0, 3), rangeKo });
+        const zip = await JSZip.loadAsync(deck);
+        return Promise.all((await slideOrderOf(zip)).map((name) => zip.file(`ppt/slides/${name}`)!.async('string')));
+      };
+      const slides = await build([songFrom('s1', '배경 있는 곡', toArrayBuffer(foreignDeck), 4)]);
+      const without = await build([{ id: 's1', title: '배경 있는 곡' }]);
+
+      // 표지·인트로·경배와 찬양·찬양 제목, then the song's own slides.
+      const songEnd = 4 + slides.length - without.length;
+      expect(songEnd).toBeGreaterThan(4);
+      for (const xml of slides.slice(4, songEnd)) {
+        expect(xml).toContain('<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/>');
+        expect(xml).toMatch(/<p:sld\b[^>]*\sshowMasterSp="0"/);
+      }
+      expect([...slides.slice(0, 4), ...slides.slice(songEnd)]).toEqual(without);
+    },
+    30_000,
+  );
+
+  it(
     'keeps a song listed by title when its file is not attached yet',
     async () => {
       const { deck, overview } = await buildWednesdayDeck({

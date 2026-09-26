@@ -2,9 +2,10 @@
 //
 // Two ways in, by design:
 //
-//  1. Search — the proxy searches the web for "<제목> 찬양 ppt", hands back the
-//     hits it is willing to fetch, and downloads the chosen one on the
-//     browser's behalf. A browser cannot do this itself: no file host sends
+//  1. Search — the proxy searches for "<제목> 악보 ppt" (Google on 티스토리·
+//     갓피플 first, then the blog and web searches), hands back the hits it is
+//     willing to fetch, and downloads the chosen one on the browser's behalf.
+//     Only a deck with the 악보 on its slides is kept (see songDeck.ts). A browser cannot do this itself: no file host sends
 //     CORS headers, so `fetch(url).arrayBuffer()` from the app's origin is
 //     refused before it starts.
 //  2. Upload — the operator downloads the file themselves and drops it in.
@@ -21,6 +22,7 @@
 // a .pptx or a PNG/JPEG. See worker/src/songPpt.js and worker/src/songSheet.js.
 import { cloudLibraryBaseUrl, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { inspectDeckBytes } from '../lib/storage/pptLibrary';
+import { hasSheetMusic } from './songDeck';
 
 /**
  * How long a search or a download may take before the page stops waiting. A
@@ -141,9 +143,17 @@ export async function searchSongPpt(title: string, signal?: AbortSignal): Promis
   }
 }
 
+/** Why a downloaded 찬양 PPT was not attached: it has the 가사 but not the 악보. */
+export const NO_SHEET_MUSIC_MESSAGE =
+  '이 PPT에는 악보가 없습니다 (가사만 있는 PPT). 악보가 있는 PPT를 고르거나 파일을 직접 올려 주세요.';
+
 /**
  * Have the proxy download a chosen hit. Throws with a Korean message the card
  * shows, because the operator asked for this one specifically.
+ *
+ * Only a deck with the 악보 on its slides is taken — the church puts up the
+ * 악보, never the 가사 alone — so a 가사 PPT is refused here, and the
+ * automatic search moves on to the next hit or to the 악보 사진.
  */
 export async function downloadSongPpt(
   candidate: Pick<SongPptCandidate, 'token' | 'url'>,
@@ -168,6 +178,7 @@ export async function downloadSongPpt(
     }
     const { slideCount } = await inspectDeckBytes(deck);
     if (slideCount < 1) throw new Error('받은 파일에 슬라이드가 없습니다.');
+    if (!(await hasSheetMusic(deck))) throw new Error(NO_SHEET_MUSIC_MESSAGE);
     return { deck, slideCount, fileName: fileNameFromUrl(candidate.url) };
   } finally {
     clearTimeout(timer);
@@ -330,9 +341,10 @@ export type AutoAttachResult =
 /**
  * Find a song's slides and bring them back, without asking anything.
  *
- * A 찬양 PPT wins when one is confidently this song, because it is the whole
- * song in the church's own format. Otherwise the 악보 사진 the search is sure
- * about are downloaded, since most songs are shared as sheet-music images.
+ * A 찬양 PPT wins when one is confidently this song and has the 악보 on its
+ * slides, because it is the whole song in the church's own format. Otherwise
+ * the 악보 사진 the search is sure about are downloaded, since most songs are
+ * shared as sheet-music images.
  * When nothing is certain, nothing is attached: the hits come back for the
  * operator to choose from, next to the upload button that always works.
  *

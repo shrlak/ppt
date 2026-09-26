@@ -24,6 +24,7 @@ import { buildImageDeck } from '../lib/pptx/imageDeckBuilder';
 import { expandDeckSegment, type DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Verse } from '../bible/types';
 import { buildWednesdayVerseSlide, groupVerses } from './bibleSlides';
+import { removeSongBackgrounds } from './songDeck';
 import { clearRemainingTokens, formatDateDot, formatDateKo, substituteTokens } from './fields';
 import { WEDNESDAY_IMAGE_CARRIER, WEDNESDAY_SLIDES } from './template';
 import { isAttached, songSlideCount, type WednesdayService, type WednesdaySong } from './types';
@@ -259,8 +260,9 @@ export async function buildWednesdayDeck(input: WednesdayDeckInput): Promise<Wed
 }
 
 /**
- * The slides one song contributes: its own 찬양 PPT, or one slide per 악보
- * 사진 built on the service template so the pages sit on the deck's own
+ * The slides one song contributes: its own 찬양 PPT with its background taken
+ * off (plain white, like the church's own 악보 slides), or one slide per 악보
+ * 사진 built on the service template so the pages sit on that same plain
  * background at the deck's own size.
  */
 async function songSlides(
@@ -282,7 +284,8 @@ async function songSlides(
     );
   }
 
-  const { data, rescaled, from } = await rescaleDeckToSize(song.deck, templateSize, 'STORE');
+  const plain = await removeSongBackgrounds(song.deck, 'STORE');
+  const { data, rescaled, from } = await rescaleDeckToSize(plain, templateSize, 'STORE');
   if (rescaled) {
     warnings.push(
       `"${song.title || '제목 없음'}" 곡 PPT는 슬라이드 크기가 달라(${from.cx}×${from.cy}) 이 예배 PPT 크기에 맞게 자동으로 맞췄습니다. 위치를 한 번 확인해 주세요.`,

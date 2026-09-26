@@ -4,7 +4,9 @@ import {
   MAX_SONG_PPT_BYTES,
   attachmentKind,
   buildSongPptQueries,
+  GOOGLE_SEARCH_ENDPOINT,
   extractDaumBlogResults,
+  extractGoogleResults,
   extractNaverBlogResults,
   extractSongPptResults,
   fetchSongPptCandidates,
@@ -14,10 +16,12 @@ import {
   isAllowedSongPptUrl,
   isKnownSongPptHost,
   isNeverFileHost,
+  isPreferredSongPptHost,
   isPptxBytes,
   looksLikeModernPptxUrl,
   looksLikePptxUrl,
   mobileNaverBlogUrl,
+  pptVersionRank,
   rankSongPptHits,
   sanitizeWednesdaySongEntries,
   sanitizeWednesdaySongEntry,
@@ -110,11 +114,11 @@ describe('song PPT host policy', () => {
 });
 
 describe('search result parsing', () => {
-  it('asks for the file, not the lyrics', () => {
+  it('asks for the file with the 악보 first, not the lyrics', () => {
     expect(buildSongPptQueries(' 나의 반석이신 하나님 ')).toEqual([
+      '나의 반석이신 하나님 악보 ppt',
       '나의 반석이신 하나님 찬양 ppt',
       '나의 반석이신 하나님 ppt 다운로드',
-      '나의 반석이신 하나님 악보 ppt',
     ]);
     expect(buildSongPptQueries('   ')).toEqual([]);
   });
@@ -142,7 +146,9 @@ describe('search result parsing', () => {
       title: '나의 반석이신 하나님 ppt',
       direct: true,
       known: true,
+      sheet: false,
     });
+    expect(results[1].sheet).toBe(true);
     expect(results[2].known).toBe(false);
     // A video page can never hold the file, so it is not worth a fetch.
     expect(results.some((hit: { host: string }) => hit.host.includes('youtube'))).toBe(false);
@@ -213,6 +219,40 @@ describe('search result parsing', () => {
     expect(findSongPptAttachment('<a href="/bbs/download.php?no=1">은혜.ppt</a>', TISTORY)).toBeNull();
     expect(looksLikeModernPptxUrl(modern)).toBe(true);
     expect(looksLikeModernPptxUrl(legacy)).toBe(false);
+  });
+
+  it('takes the file with the 악보, and without a background, when a post has several', () => {
+    // A 티스토리 post shows each attachment as a fileblock named after the file.
+    const file = (id: string, name: string) =>
+      `<figure class="fileblock"><a href="https://blog.kakaocdn.net/dna/${id}/${encodeURIComponent(name)}?credential=x&amp;attach=1&amp;knm=tfile.pptx">` +
+      `<div class="desc"><div class="filename"><span class="name">${name}</span></div><div class="size">2.29MB</div></div></a></figure>`;
+    const html = [
+      file('a', '은혜 가사.pptx'),
+      file('b', '은혜 악보.pptx'),
+      file('c', '은혜 악보 (무배경).pptx'),
+    ].join('');
+    expect(findSongPptAttachment(html, TISTORY)).toContain('/dna/c/');
+    // Without a 무배경 one, the 악보 one; a file that does not say comes before 가사 only.
+    expect(findSongPptAttachment(file('a', '은혜 가사.pptx') + file('b', '은혜 악보.pptx'), TISTORY)).toContain('/dna/b/');
+    expect(findSongPptAttachment(file('a', '은혜 가사.pptx') + file('d', '은혜.pptx'), TISTORY)).toContain('/dna/d/');
+
+    // The same choice when only the link's text names the file (갓피플 자료실).
+    const board = [
+      '<a href="/bbs/download.php?no=1"><span>은혜_가사.pptx</span></a>',
+      '<a href="/bbs/download.php?no=2"><span>은혜_악보.pptx</span></a>',
+    ].join('');
+    expect(findSongPptAttachment(board, 'https://www.godpeople.com/bbs/view?no=44')).toBe(
+      'https://www.godpeople.com/bbs/download.php?no=2',
+    );
+  });
+
+  it('ranks a post\'s files by what their names say they are', () => {
+    expect(pptVersionRank('은혜 악보 무배경.pptx')).toBeLessThan(pptVersionRank('은혜 악보.pptx'));
+    expect(pptVersionRank('은혜 악보(배경X).pptx')).toBe(pptVersionRank('은혜 악보 무배경.pptx'));
+    expect(pptVersionRank('은혜 악보.pptx')).toBeLessThan(pptVersionRank('은혜.pptx'));
+    expect(pptVersionRank('은혜.pptx')).toBeLessThan(pptVersionRank('은혜 가사.pptx'));
+    // A file with both the 악보 and the 가사 on it is a 악보 file.
+    expect(pptVersionRank('은혜 악보+가사.pptx')).toBe(pptVersionRank('은혜 악보.pptx'));
   });
 });
 
@@ -303,10 +343,11 @@ describe('블로그 검색 parsing', () => {
     ]);
 
     expect(ranked.map((entry) => [entry.url, entry.decision])).toEqual([
-      // Named .pptx attachment, then a post on a site we know, then a post
-      // whose only file is the old .ppt.
-      ['https://blog.naver.com/e/5', 'auto'],
+      // 티스토리 before 네이버 블로그, even against a named .pptx, and a post
+      // whose only file is the old .ppt last, wherever it is. Guesses go best
+      // match first, whatever their site.
       ['https://b.tistory.com/2', 'auto'],
+      ['https://blog.naver.com/e/5', 'auto'],
       ['https://a.tistory.com/1', 'auto'],
       // A week's 콘티 carries every song of that week, so it is only offered.
       ['https://blog.naver.com/d/4', 'review'],
@@ -314,6 +355,127 @@ describe('블로그 검색 parsing', () => {
     ]);
   });
 });
+
+describe('티스토리·갓피플 first, and the 악보 version', () => {
+  const hit = (url: string, title: string, extra: object = {}) => ({
+    url,
+    host: new URL(url).hostname,
+    title,
+    direct: false,
+    known: true,
+    ...extra,
+  });
+
+  it('knows 티스토리 and 갓피플, their subdomains and 티스토리\'s file CDN', () => {
+    expect(isPreferredSongPptHost('https://praise.tistory.com/7')).toBe(true);
+    expect(isPreferredSongPptHost('https://blog.kakaocdn.net/dna/a/song.pptx')).toBe(true);
+    expect(isPreferredSongPptHost('https://www.godpeople.com/bbs/view?no=1')).toBe(true);
+    expect(isPreferredSongPptHost('https://cnts.godpeople.co.kr/1')).toBe(true);
+    expect(isPreferredSongPptHost(BLOG)).toBe(false);
+    expect(isPreferredSongPptHost('https://nottistory.com/1')).toBe(false);
+  });
+
+  it('tries a post that says it has the 악보 first, then 티스토리·갓피플, then the rest', () => {
+    const ranked = rankSongPptHits('은혜로다', [
+      hit('https://blog.naver.com/a/1', '은혜로다 PPT'),
+      hit('https://praise.tistory.com/2', '은혜로다 PPT'),
+      hit('https://blog.naver.com/c/3', '은혜로다 악보 PPT', { sheet: true }),
+      hit('https://www.godpeople.com/bbs/view?no=4', '은혜로다 악보 PPT', { sheet: true }),
+    ]);
+    expect(ranked.map((entry) => entry.url)).toEqual([
+      'https://www.godpeople.com/bbs/view?no=4',
+      'https://blog.naver.com/c/3',
+      'https://praise.tistory.com/2',
+      'https://blog.naver.com/a/1',
+    ]);
+    expect(ranked.every((entry) => entry.decision === 'auto')).toBe(true);
+  });
+
+  it('never lets a preferred site make a guess sure', () => {
+    const ranked = rankSongPptHits('은혜', [
+      hit('https://praise.tistory.com/1', '하나님의 은혜 악보 PPT', { sheet: true }),
+      hit('https://blog.naver.com/b/2', '은혜 PPT'),
+    ]);
+    expect(ranked.map((entry) => [entry.url, entry.decision])).toEqual([
+      ['https://blog.naver.com/b/2', 'auto'],
+      ['https://praise.tistory.com/1', 'review'],
+    ]);
+  });
+
+  it('reads Google\'s results as Serper returns them', () => {
+    const { results, links } = extractGoogleResults({
+      organic: [
+        { title: '[찬양PPT] 은혜 악보 PPT', link: 'https://praise.tistory.com/12', snippet: '첨부파일 은혜.pptx' },
+        { title: '은혜 &amp; 가사', link: 'https://www.godpeople.com/bbs/view?no=3#top', snippet: '은혜 가사' },
+        { title: '은혜 - YouTube', link: 'https://www.youtube.com/watch?v=x', snippet: '' },
+        { title: 'no link' },
+      ],
+    });
+    expect(results).toEqual([
+      {
+        url: 'https://praise.tistory.com/12',
+        host: 'praise.tistory.com',
+        title: '[찬양PPT] 은혜 악보 PPT',
+        direct: false,
+        known: true,
+        attachment: 'pptx',
+        sheet: true,
+      },
+      {
+        url: 'https://www.godpeople.com/bbs/view?no=3',
+        host: 'www.godpeople.com',
+        title: '은혜 & 가사',
+        direct: false,
+        known: true,
+        attachment: undefined,
+        sheet: false,
+      },
+    ]);
+    expect(links).toEqual([]);
+    expect(extractGoogleResults(null)).toEqual({ results: [], links: [] });
+  });
+
+  it('asks Google for 티스토리 and 갓피플 when the deployment has a key, and ranks what it finds first', async () => {
+    const google: { key: string | null; body: { q: string; gl: string; hl: string } }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === GOOGLE_SEARCH_ENDPOINT) {
+          google.push({
+            key: new Headers(init?.headers).get('X-API-KEY'),
+            body: JSON.parse(String(init?.body)),
+          });
+          return Response.json({
+            organic: [{ title: '나의 반석이신 하나님 악보 PPT', link: 'https://praise.tistory.com/7', snippet: '' }],
+          });
+        }
+        if (url.startsWith('https://search.naver.com/')) {
+          return new Response(`<a href="${BLOG}">나의 반석이신 하나님 PPT</a>`);
+        }
+        return new Response('', { status: 403 });
+      }),
+    );
+
+    const { candidates } = await fetchSongPptCandidates('나의 반석이신 하나님', { SERPER_API_KEY: 'key-1' }, 'secret');
+    expect(init(google[0])).toEqual({
+      key: 'key-1',
+      body: { q: '나의 반석이신 하나님 악보 ppt (site:tistory.com OR site:godpeople.com)', gl: 'kr', hl: 'ko' },
+    });
+    expect(candidates.map((candidate) => candidate.url)).toEqual(['https://praise.tistory.com/7', BLOG]);
+
+    // No key, no Google: the blog and web searches still run.
+    google.length = 0;
+    const without = await fetchSongPptCandidates('나의 반석이신 하나님', {}, 'secret');
+    expect(google).toEqual([]);
+    expect(without.candidates.map((candidate) => candidate.url)).toEqual([BLOG]);
+  });
+});
+
+/** The parts of a Google request a test compares: its key and query. */
+function init(request: { key: string | null; body: { q: string; gl: string; hl: string } }) {
+  return { key: request.key, body: { q: request.body.q, gl: request.body.gl, hl: request.body.hl } };
+}
 
 describe('searching for a song PPT', () => {
   it('asks the blog searches and the web search together and merges what they find', async () => {
@@ -341,10 +503,10 @@ describe('searching for a song PPT', () => {
 
     const { candidates } = await fetchSongPptCandidates('나의 반석이신 하나님', {}, 'secret');
     expect(asked).toEqual(expect.arrayContaining(['search.daum.net', 'search.naver.com', 'html.duckduckgo.com']));
-    // One post found by both searches is one hit.
+    // One post found by both searches is one hit, and 티스토리 is tried first.
     expect(candidates.map((candidate) => candidate.url)).toEqual([
-      'https://m.blog.naver.com/church/12345',
       'https://praise.tistory.com/7',
+      'https://m.blog.naver.com/church/12345',
     ]);
     expect(candidates.every((candidate) => candidate.decision === 'auto' && candidate.token)).toBe(true);
   });
@@ -593,8 +755,11 @@ describe('the song PPT routes', () => {
     const payload = (await response.json()) as {
       candidates: { url: string; token: string }[];
       hosts: string[];
+      googleSearch: boolean;
     };
     expect(payload.candidates).toHaveLength(1);
+    // Google needs SERPER_API_KEY, which this deployment does not have.
+    expect(payload.googleSearch).toBe(false);
     expect(payload.candidates[0].token).toBeTruthy();
     expect(payload.hosts).toContain('blog.naver.com');
     // The token stands on its own: it verifies against the deployment's secret.

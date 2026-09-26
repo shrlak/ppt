@@ -71,11 +71,13 @@ the app needs the file itself. A browser cannot fetch one: search result pages
 and file hosts send no CORS headers, so the request is refused before it
 starts. These two routes do it on its behalf.
 
-`GET /wednesday/songs?title=…` searches for `"<제목> 찬양 ppt"` in three
-places at once — 다음 블로그 검색 (`search.daum.net`, which covers 티스토리),
-네이버 블로그 검색 (`search.naver.com`) and the keyless DuckDuckGo HTML
-endpoints the lyrics route uses — and returns the hits, **each with an
-HMAC-signed token in place of its URL**. That keeps the `/lyrics` invariant —
+`GET /wednesday/songs?title=…` searches for `"<제목> 악보 ppt"` (then
+`찬양 ppt`, `ppt 다운로드`) in up to four places at once — **Google, restricted
+to 티스토리 and 갓피플** (`site:tistory.com OR site:godpeople.com`), 다음 블로그
+검색 (`search.daum.net`, which covers 티스토리), 네이버 블로그 검색
+(`search.naver.com`) and the keyless DuckDuckGo HTML endpoints the lyrics
+route uses — and returns the hits, **each with an HMAC-signed token in place
+of its URL**. The response's `googleSearch` says whether Google was asked. That keeps the `/lyrics` invariant —
 the browser sends a title, never a URL — so a search result cannot be swapped
 for an address of the caller's choosing. The two blog searches are there
 because a 찬양 PPT is nearly always a blog post's attachment, because they
@@ -84,6 +86,13 @@ away, and because their snippets often name the attachment (`첨부파일
 은혜.pptx`), which puts that post first. A post found by more than one search
 is one hit.
 
+Google is asked through [Serper](https://serper.dev), which returns Google's
+own results as JSON: Google answers a server's plain fetch of its results page
+with a CAPTCHA (`/sorry/`), and its Custom Search JSON API takes no new
+sign-ups and shuts down on 2027-01-01. Set the `SERPER_API_KEY` secret to turn
+it on (Serper's free tier is 2,500 searches, and a song usually costs one);
+without it the other three searches run exactly as before.
+
 Hits are ranked by `rankSongPptHits`. A hit is `auto` — tried by the app
 unasked — only when it names the song: one part of its title, between its
 brackets, quotes, dashes and slashes, is the title and nothing else but the
@@ -91,7 +100,10 @@ words every 찬양 post adds (악보, 가사, ppt, a key). That is what tells �
 from 하나님의 은혜 or 은혜 아니면. A title of five letters or more that is only
 contained in a longer phrase still counts, slightly lower; a shorter one is a
 guess. A post of several songs (콘티, 모음, 메들리) is never `auto`, since its
-PPT would put every song on the slides.
+PPT would put every song on the slides. Among the `auto` hits, a post whose
+title or snippet says 악보 is tried first, then 티스토리 and 갓피플 before any
+other site (`PREFERRED_SONG_PPT_HOSTS`), and a post whose only file is the old
+`.ppt` last; guesses are listed best match first, whatever their site.
 
 `POST /wednesday/songs/file` takes `{ token }` (or `{ url }`, for an address
 the operator pasted) and returns the `.pptx` bytes. Before anything is
@@ -104,7 +116,11 @@ with HTTP 200 is not a deck. A post URL is followed exactly one step to its
 the attachment is the link whose address ends in `.pptx`, preferring a file
 host we know or the post's own domain, or failing that the link whose visible
 text names a `.pptx` (갓피플 and most 자료실 boards hide the file behind a
-download script). A `blog.naver.com/<blog>/<number>` post is read at
+download script). When a post has several (`은혜 악보.pptx`, `은혜 가사.pptx`,
+`은혜 악보 무배경.pptx`), the file's name picks one (`pptVersionRank`): the one
+with the 악보, and 무배경 over the same with a background. The browser then
+checks the deck itself and refuses one with no 악보 on its slides — see
+`src/wednesday/songDeck.ts`. A `blog.naver.com/<blog>/<number>` post is read at
 `m.blog.naver.com`, because the desktop address is only a frame around it and
 the attachment is nowhere in that page. Only a `.pptx` is taken: a post that
 offers only the old binary `.ppt` (common on 티스토리), or a file that turns out
@@ -283,6 +299,8 @@ run a CLI command or touch the raw key outside GitHub's own secret UI.
    - `CLOUDFLARE_ACCOUNT_ID` — from step 1
    - `GEMINI_API_KEY` — your Gemini key (optional; skip to share only the other providers)
    - `OPENROUTER_API_KEY` — a key from <https://openrouter.ai/settings/keys>
+   - `SERPER_API_KEY` — a key from <https://serper.dev> (optional; turns on
+     the Google search for 수요예배 찬양 PPT on 티스토리·갓피플)
 
 4. Edit `wrangler.toml` in this repo — set `ALLOWED_ORIGINS` to your deployed
    site's origin (e.g. `https://<your-username>.github.io`, no trailing
@@ -410,6 +428,7 @@ Sunday could never train anything; see `wrangler.toml`.
 | `GEMINI_API_KEY` | secret | Gemini free-tier key |
 | `OPENROUTER_API_KEY` | secret | OpenRouter key, used only for `:free` vision models |
 | `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
+| `SERPER_API_KEY` | secret | Optional. Turns on the Google search (티스토리·갓피플) for 수요예배 찬양 PPT, through [Serper](https://serper.dev) |
 | `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
 | `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
 
