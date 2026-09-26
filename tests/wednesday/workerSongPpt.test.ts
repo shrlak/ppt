@@ -18,6 +18,7 @@ import {
   isNeverFileHost,
   isPreferredSongPptHost,
   isPptxBytes,
+  isSamePost,
   looksLikeModernPptxUrl,
   looksLikePptxUrl,
   mobileNaverBlogUrl,
@@ -472,6 +473,47 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
     const without = await fetchSongPptCandidates('나의 반석이신 하나님', {}, 'secret');
     expect(google).toEqual([]);
     expect(without.candidates.map((candidate) => candidate.url)).toEqual([BLOG]);
+  });
+
+  it('knows one 티스토리 post under its two addresses by its title', () => {
+    const post = (host: string, title: string) => ({ host, title });
+    const title = '[악보/가사/자막/PPT/새 번역] 주님의 선하심(Goodness of GOD) G/A/Bb Key';
+    expect(isSamePost(post('jinutus.tistory.com', title), post('jinutus.tistory.com', title))).toBe(true);
+    // Google cuts a long title short.
+    expect(
+      isSamePost(post('jinutus.tistory.com', '[악보/가사/자막/PPT/새 번역] 주님의 선하심(Goodness ...'), post('jinutus.tistory.com', title)),
+    ).toBe(true);
+    // Another blog's post of the same song is another post.
+    expect(isSamePost(post('praise.tistory.com', title), post('jinutus.tistory.com', title))).toBe(false);
+    // So is another post of the same blog, and a cut title too short to tell.
+    expect(isSamePost(post('a.tistory.com', '주님의 선하심 G키'), post('a.tistory.com', '주님의 선하심 A키'))).toBe(false);
+    expect(isSamePost(post('a.tistory.com', '주님의 선하심...'), post('a.tistory.com', '주님의 선하심 A키'))).toBe(false);
+    expect(isSamePost(post('a.tistory.com', ''), post('a.tistory.com', ''))).toBe(false);
+  });
+
+  it('lists a post Google and 다음 give under two addresses once', async () => {
+    const title = '[악보/가사/자막/PPT/새 번역] 주님의 선하심(Goodness of GOD) G/A/Bb Key';
+    const entry = 'https://jinutus.tistory.com/entry/%EC%A3%BC%EB%8B%98%EC%9D%98-%EC%84%A0%ED%95%98%EC%8B%AC';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith(`${GOOGLE_SEARCH_ENDPOINT}?`)) {
+          return Response.json({ organic_results: [{ title, link: entry, snippet: '' }] });
+        }
+        if (url.startsWith('https://search.daum.net/')) {
+          return new Response(`
+            <c-title data-href="https://jinutus.tistory.com/145">${title}</c-title>
+            <c-contents-desc data-href="https://jinutus.tistory.com/145">첨부파일 주님의 선하심.pptx</c-contents-desc>`);
+        }
+        return new Response('', { status: 403 });
+      }),
+    );
+
+    const { candidates } = await fetchSongPptCandidates('주님의 선하심', { SERPAPI_API_KEY: 'key-1' }, 'secret');
+    expect(candidates.map((candidate) => candidate.url)).toEqual([entry]);
+    // What 다음's snippet said about the post is kept.
+    expect(candidates[0].attachment).toBe('pptx');
   });
 });
 

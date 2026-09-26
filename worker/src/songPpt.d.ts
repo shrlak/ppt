@@ -93,6 +93,10 @@ export function extractNaverBlogResults(
   limit?: number,
 ): { results: SongPptHit[]; links: SongPptLink[] };
 export function mobileNaverBlogUrl(rawUrl: string): string | null;
+export function isSamePost(
+  a: { host?: string; title?: string } | null | undefined,
+  b: { host?: string; title?: string } | null | undefined,
+): boolean;
 export const SET_LIST_TITLE: RegExp;
 export function rankSongPptHits<T extends SongPptHit>(
   title: string,
