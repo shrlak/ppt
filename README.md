@@ -529,9 +529,10 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
   **다음·네이버 블로그 검색**과 웹 검색도 동시에 찾습니다. 확실한 결과 중에서는 **악보가 있다고 적힌
   글 → 티스토리·갓피플 → 그 밖의 사이트** 순서로 받아 봅니다. 악보 사진은 **네이버 이미지 검색**에서
   찾습니다. 네이버 블로그 글은 첨부 파일이 있는 모바일 페이지에서 받아 옵니다.
-  - 구글 검색은 Worker에 `SERPER_API_KEY`(<https://serper.dev>, 무료 2,500회)가 있어야 동작합니다.
-    구글은 서버에서 직접 검색하면 자동 접속 확인(CAPTCHA) 페이지로 막고, 구글 공식 검색 API는 신규
-    가입을 받지 않기 때문입니다. 키가 없으면 다음·네이버·웹 검색만으로 찾습니다.
+  - 구글 검색은 Worker에 `SERPAPI_API_KEY`(<https://serpapi.com>, **매달 무료 250회**, 매달 다시
+    채워짐)가 있어야 동작합니다. 구글은 서버에서 직접 검색하면 자동 접속 확인(CAPTCHA) 페이지로 막고,
+    구글 공식 검색 API는 신규 가입을 받지 않기 때문입니다. 키가 없거나 그달 횟수를 다 쓰면
+    다음·네이버·웹 검색만으로 찾습니다.
 - **악보가 있는 PPT만 받습니다** — 한 글에 PPT가 여러 개(`악보`·`가사`·`무배경`)면 파일 이름을 보고
   **악보가 있는 것**, 그중에서도 **무배경**을 받습니다. 받은 PPT는 슬라이드를 직접 열어 보고, 악보(그림)
   없이 **가사만 있는 PPT면 넣지 않고** 다음 결과를 받아 보거나 악보 사진으로 넘어갑니다. 직접 고른
@@ -738,8 +739,8 @@ the deck is made. The operator types the date, sermon title, preacher and a scri
 verses come from the same 개역개정 text, the file is named after that week's Wednesday
 (`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. Typing a song's title is the whole
 interaction: the app searches, downloads and attaches what it is confident about by itself — the
-song's own 찬양 PPT when one is found (Google restricted to 티스토리·갓피플 via Serper when
-`SERPER_API_KEY` is set, plus 다음·네이버 블로그 search and the web; 악보 posts first, then 티스토리·갓피플),
+song's own 찬양 PPT when one is found (Google restricted to 티스토리·갓피플 via SerpApi when
+`SERPAPI_API_KEY` is set, plus 다음·네이버 블로그 search and the web; 악보 posts first, then 티스토리·갓피플),
 otherwise its 악보 사진 (네이버 이미지 검색), one slide per page, centred on the deck's canvas. Only a
 찬양 PPT with the 악보 on its slides is taken (a 가사-only deck is refused and the next hit tried), and
 every song deck is put on plain white — slide, layout and master backgrounds and a photo sent to the

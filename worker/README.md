@@ -86,12 +86,13 @@ away, and because their snippets often name the attachment (`첨부파일
 은혜.pptx`), which puts that post first. A post found by more than one search
 is one hit.
 
-Google is asked through [Serper](https://serper.dev), which returns Google's
+Google is asked through [SerpApi](https://serpapi.com), which returns Google's
 own results as JSON: Google answers a server's plain fetch of its results page
 with a CAPTCHA (`/sorry/`), and its Custom Search JSON API takes no new
-sign-ups and shuts down on 2027-01-01. Set the `SERPER_API_KEY` secret to turn
-it on (Serper's free tier is 2,500 searches, and a song usually costs one);
-without it the other three searches run exactly as before.
+sign-ups and shuts down on 2027-01-01. Set the `SERPAPI_API_KEY` secret to turn
+it on. SerpApi's free plan is 250 searches a month, renewed every month, and a
+song usually costs one; without the key, or once the month's searches have run
+out, the other three searches run exactly as before.
 
 Hits are ranked by `rankSongPptHits`. A hit is `auto` — tried by the app
 unasked — only when it names the song: one part of its title, between its
@@ -299,7 +300,7 @@ run a CLI command or touch the raw key outside GitHub's own secret UI.
    - `CLOUDFLARE_ACCOUNT_ID` — from step 1
    - `GEMINI_API_KEY` — your Gemini key (optional; skip to share only the other providers)
    - `OPENROUTER_API_KEY` — a key from <https://openrouter.ai/settings/keys>
-   - `SERPER_API_KEY` — a key from <https://serper.dev> (optional; turns on
+   - `SERPAPI_API_KEY` — a key from <https://serpapi.com> (optional; turns on
      the Google search for 수요예배 찬양 PPT on 티스토리·갓피플)
 
 4. Edit `wrangler.toml` in this repo — set `ALLOWED_ORIGINS` to your deployed
@@ -428,7 +429,7 @@ Sunday could never train anything; see `wrangler.toml`.
 | `GEMINI_API_KEY` | secret | Gemini free-tier key |
 | `OPENROUTER_API_KEY` | secret | OpenRouter key, used only for `:free` vision models |
 | `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
-| `SERPER_API_KEY` | secret | Optional. Turns on the Google search (티스토리·갓피플) for 수요예배 찬양 PPT, through [Serper](https://serper.dev) |
+| `SERPAPI_API_KEY` | secret | Optional. Turns on the Google search (티스토리·갓피플) for 수요예배 찬양 PPT, through [SerpApi](https://serpapi.com) (free: 250 searches a month) |
 | `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
 | `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
 

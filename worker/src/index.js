@@ -1549,7 +1549,7 @@ export default {
           hosts: songPptHosts(env),
           hostsOnly: songPptHostsOnly(env),
           // Whether Google (티스토리·갓피플) was asked, or only the blog and
-          // web searches — it needs SERPER_API_KEY.
+          // web searches — it needs SERPAPI_API_KEY.
           googleSearch: Boolean(googleSearchKey(env)),
           ...(found.candidates.length === 0
             ? {
