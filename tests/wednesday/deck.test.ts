@@ -363,3 +363,34 @@ describe('buildWednesdayThumbnail', () => {
     expect(thumbnailFileName('0916')).toBe('0916 썸네일.pptx');
   });
 });
+
+describe('song title slide', () => {
+  async function songTitleSlide(): Promise<string> {
+    const zip = await JSZip.loadAsync(template);
+    const names = await slideOrderOf(zip);
+    return zip.file(`ppt/slides/${names[WEDNESDAY_SLIDES.songTitle - 1]}`)!.async('string');
+  }
+
+  function titleShape(xml: string): string {
+    return [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]).find((s) => s.includes('{{SONG_TITLE}}'))!;
+  }
+
+  it('keeps a short title at the template size, and never lets any title wrap', async () => {
+    const { singleLineTitleShape } = await import('../../src/wednesday/deckBuilder');
+    const shape = titleShape(singleLineTitleShape(await songTitleSlide(), '{{SONG_TITLE}}', '은혜'));
+    expect(shape).toContain('wrap="none"');
+    expect(shape.match(/<a:rPr[^>]*\bsz="(\d+)"/)![1]).toBe('7200');
+  });
+
+  it('shrinks a long title just enough to stay on one line', async () => {
+    const { singleLineTitleShape } = await import('../../src/wednesday/deckBuilder');
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const title = '주님 다시 오실 때까지 나는 이 길을 가리라 할렐루야';
+    const shape = titleShape(singleLineTitleShape(await songTitleSlide(), '{{SONG_TITLE}}', title));
+    const sz = Number(shape.match(/<a:rPr[^>]*\bsz="(\d+)"/)![1]);
+    const cx = Number(shape.match(/<a:ext cx="(\d+)"/)![1]);
+    expect(sz).toBeLessThan(7200);
+    expect(shape).toContain('wrap="none"');
+    expect((titleWidthEm(title) * sz) / 100).toBeLessThanOrEqual((cx - 2 * 91440) / 12700);
+  });
+});

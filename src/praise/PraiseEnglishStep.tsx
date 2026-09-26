@@ -2,15 +2,19 @@
 //
 // Each Korean slide the deck will print gets its own English box right next
 // to it, so what is typed here is exactly what appears under that slide.
-// English the 영어 가사 library already knows (last year's deck, or a song
-// saved since) is filled in automatically; the rest can be pasted in one go,
-// asked of the AI, or typed.
+// English the conti prints (a chord sheet) goes in first, then English the
+// 영어 가사 library already knows (last year's deck, or a song saved since),
+// then — for what is still missing — English found on the web by searching
+// "<곡 제목> 영어 가사". The rest can be pasted in one go, asked of the AI,
+// or typed.
 import { useState } from 'react';
 import Icon from '../components/Icon';
 import type { Song } from '../lib/utils/types';
 import { showToast } from '../lib/utils/toast';
 import { fetchEnglishWithAi } from './englishAi';
 import { findEnglishEntry, type EnglishSongEntry } from './englishLibrary';
+import { webEnglishReference, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
+import { normalizeTitle } from '../lib/storage/library';
 import { distributeEnglish } from './englishText';
 import { planPraiseSong } from './planner';
 import { extrasFor, type PraiseSongExtras } from './types';
@@ -23,11 +27,27 @@ interface Props {
   /** Replace a song's Korean with the library's copy (and its English). */
   onLoadFromLibrary: (song: Song, entry: EnglishSongEntry) => void;
   onSaveToLibrary: (song: Song) => Promise<void>;
+  /** When each song's Korean and English were last auto-saved, by song id. */
+  savedAt?: Record<string, string>;
+  /** Web lookups, by normalized song title. */
+  webLookups?: Record<string, WebEnglishLookup>;
+  /** What each lookup did for its song, by song id. */
+  webOutcomes?: Record<string, WebEnglishOutcome>;
+  /** Search the web for a song's English again; absent when no search server is set up. */
+  onWebSearch?: (song: Song) => void;
+}
+
+function clock(at: string): string {
+  const date = new Date(at);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 const SOURCE_LABEL: Record<NonNullable<PraiseSongExtras['englishSource']>, string> = {
   memory: '저장된 영어 가사',
   sheet: '코드 악보에서 읽음',
+  web: '웹에서 가져옴 · 확인 필요',
   ai: 'AI 초안 · 확인 필요',
   manual: '직접 입력',
 };
@@ -44,11 +64,19 @@ function SongEnglishCard({
   onExtrasChange,
   onLoadFromLibrary,
   onSaveToLibrary,
+  savedAt,
+  webLookup,
+  webOutcome,
+  onWebSearch,
 }: {
   song: Song;
   index: number;
   extras: PraiseSongExtras;
   entry: EnglishSongEntry | undefined;
+  savedAt: string | undefined;
+  webLookup: WebEnglishLookup | undefined;
+  webOutcome: WebEnglishOutcome | undefined;
+  onWebSearch: Props['onWebSearch'];
   onExtrasChange: Props['onExtrasChange'];
   onLoadFromLibrary: Props['onLoadFromLibrary'];
   onSaveToLibrary: Props['onSaveToLibrary'];
@@ -75,9 +103,12 @@ function SongEnglishCard({
   async function fillWithAi() {
     setAiBusy(true);
     try {
+      // English a post gave for the song is the AI's source, not its own recall.
+      const reference = webLookup?.status === 'done' ? webEnglishReference(webLookup.candidates) : [];
       const result = await fetchEnglishWithAi(
         song.title,
         plan.slides.map((slide) => slide.lines),
+        reference,
       );
       update((current) => {
         const slides = { ...current.english.slides };
@@ -153,7 +184,40 @@ function SongEnglishCard({
               : `영어 ${done}/${plan.slides.length}장`}
           {!plan.englishOnly && extras.englishSource ? ` · ${SOURCE_LABEL[extras.englishSource]}` : ''}
         </span>
+        {savedAt && (
+          <span className="song-autosave is-saved" data-testid="praise-english-autosave" role="status">
+            <Icon name="check" />
+            자동 저장됨 · {clock(savedAt)}
+          </span>
+        )}
       </header>
+
+      {!plan.englishOnly && webLookup && (
+        <p className="praise-web-status" data-testid="praise-web-status" role="status">
+          <Icon name={webLookup.status === 'searching' ? 'refresh' : webOutcome?.filled ? 'check' : 'info'} />
+          <span>
+            {webLookup.status === 'searching'
+              ? `웹에서 ‘${song.title} 영어 가사’를 찾는 중…`
+              : webLookup.status === 'error'
+                ? `웹 검색에 실패했습니다 (${webLookup.message}).`
+                : webOutcome?.filled
+                  ? '웹에서 찾은 영어 가사를 넣었습니다. 띄우기 전에 한 번 확인해 주세요.'
+                  : webOutcome?.pasteText
+                    ? '웹에서 영어 가사를 찾았지만 슬라이드에 맞춰 넣지 못했습니다. 아래 붙여넣기로 나눠 넣어 주세요.'
+                    : webLookup.candidates.length > 0
+                      ? '웹에서 찾은 영어 가사가 이 콘티의 한글 가사와 맞지 않아 넣지 않았습니다.'
+                      : '웹에서 이 곡의 영어 가사를 찾지 못했습니다.'}
+            {webOutcome?.url && (
+              <>
+                {' '}
+                <a href={webOutcome.url} target="_blank" rel="noreferrer noopener" data-testid="praise-web-source">
+                  출처: {webOutcome.host ?? '웹'}
+                </a>
+              </>
+            )}
+          </span>
+        </p>
+      )}
 
       <div className="praise-song-tools">
         {entry && (
@@ -180,12 +244,28 @@ function SongEnglishCard({
               <Icon name="refresh" />
               {aiBusy ? 'AI가 찾는 중…' : 'AI로 빈 칸 채우기'}
             </button>
+            {onWebSearch && (
+              <button
+                type="button"
+                className="btn"
+                disabled={webLookup?.status === 'searching'}
+                data-testid="praise-web-search"
+                title={`‘${song.title} 영어 가사’를 웹에서 검색해 비어 있는 슬라이드에 넣습니다.`}
+                onClick={() => onWebSearch(song)}
+              >
+                <Icon name="search" />
+                {webLookup?.status === 'searching' ? '웹에서 찾는 중…' : '웹에서 영어 가사 찾기'}
+              </button>
+            )}
             <button
               type="button"
               className="btn"
               aria-expanded={pasteOpen}
               data-testid="praise-paste-toggle"
-              onClick={() => setPasteOpen((open) => !open)}
+              onClick={() => {
+                if (!pasteOpen && !pasteText.trim() && webOutcome?.pasteText) setPasteText(webOutcome.pasteText);
+                setPasteOpen((open) => !open);
+              }}
             >
               <Icon name="lyrics" />
               영어 가사 한 번에 붙여넣기
@@ -296,6 +376,10 @@ export default function PraiseEnglishStep({
   onExtrasChange,
   onLoadFromLibrary,
   onSaveToLibrary,
+  savedAt = {},
+  webLookups = {},
+  webOutcomes = {},
+  onWebSearch,
 }: Props) {
   if (songs.length === 0) {
     return (
@@ -318,6 +402,10 @@ export default function PraiseEnglishStep({
           onExtrasChange={onExtrasChange}
           onLoadFromLibrary={onLoadFromLibrary}
           onSaveToLibrary={onSaveToLibrary}
+          savedAt={savedAt[song.id]}
+          webLookup={webLookups[normalizeTitle(song.title)]}
+          webOutcome={webOutcomes[song.id]}
+          onWebSearch={onWebSearch}
         />
       ))}
     </div>

@@ -194,6 +194,17 @@ function bestRun(cells: LineCell[], wanted: string, threshold: number): { start:
 }
 
 /**
+ * True when `koLines` read as a stretch of `songLines` — the same Korean,
+ * however the lines are broken and give or take a syllable.
+ */
+export function koreanFoundIn(koLines: string[], songLines: string[], threshold = MATCH_THRESHOLD): boolean {
+  const wanted = koLines.map(normalizeLyricLine).join('');
+  if (wanted.length < 4) return false;
+  const cells = cellsOf({ title: '', englishTitle: '', slides: [{ ko: songLines, en: [] }] });
+  return bestRun(cells, wanted, threshold) !== null;
+}
+
+/**
  * The English for one Korean slide, read off a saved song, or null when no
  * stretch of that song's lyrics matches the slide closely enough.
  */

@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import type { Song, SlidePlan } from '../utils/types';
 import { planAllSlides } from '../utils/slidePlanner';
 import { removeContentTypeOverridesWhere, setContentTypeOverride } from './contentTypes';
+import { fitTitleFontSize, singleLineBody, withFontSize } from './textFit';
 
 const SLIDE_REL_TYPE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
@@ -89,11 +90,36 @@ function setTextOfFirstRun(xml: string, from: number, text: string): string {
   return xml.slice(0, open + 5) + text + xml.slice(close);
 }
 
-/** Build one title slide from the template title slide (slide1). The
- * template's own font size (sz="5000") is left untouched — every title
- * slide renders at the same size, regardless of how long the title is. */
+/** The smallest a song title is drawn at before it would take a second line. */
+const TITLE_MIN_SZ = 1800;
+const LABEL_MIN_SZ = 1000;
+
+/**
+ * Put `title` in the first run at or after `from`, and keep the shape holding
+ * it to ONE line: a song title never wraps. It keeps the template's size
+ * when it fits the box on one line and shrinks just enough when it does not,
+ * and the box is set not to wrap at all.
+ */
+function setSingleLineTitle(xml: string, from: number, title: string): string {
+  const at = xml.indexOf('<a:t>', from);
+  const start = xml.lastIndexOf('<p:sp>', at);
+  const end = xml.indexOf('</p:sp>', at);
+  if (at === -1 || start === -1 || end === -1) return setTextOfFirstRun(xml, from, xmlEscape(title));
+  const shape = xml.slice(start, end + '</p:sp>'.length);
+  const baseSz = Number(shape.match(/<a:rPr\b[^>]*\bsz="(\d+)"/)?.[1] ?? 0);
+  let filled = setTextOfFirstRun(shape, 0, xmlEscape(title));
+  if (baseSz > 0) {
+    const minSz = baseSz >= 4000 ? TITLE_MIN_SZ : LABEL_MIN_SZ;
+    filled = withFontSize(filled, fitTitleFontSize(shape, title, baseSz, Math.min(minSz, baseSz)));
+  }
+  return xml.slice(0, start) + singleLineBody(filled) + xml.slice(end + '</p:sp>'.length);
+}
+
+/** Build one title slide from the template title slide (slide1): the title
+ * at the template's own size (sz="5000") whenever it fits on one line, and
+ * only as much smaller as it takes to stay on one line when it does not. */
 function buildTitleSlide(titleTpl: string, title: string): string {
-  return setTextOfFirstRun(titleTpl, 0, xmlEscape(title));
+  return setSingleLineTitle(titleTpl, 0, title);
 }
 
 /** Build one lyrics slide from the template lyrics slide (slide2). */
@@ -127,12 +153,12 @@ function buildLyricsSlide(lyricsTpl: string, title: string, lines: string[]): st
   const newBody = body.slice(0, firstP) + paragraphs + body.slice(lastP + '</a:p>'.length);
   let xml = lyricsTpl.slice(0, bodyStart) + newBody + lyricsTpl.slice(bodyEnd);
 
-  // Second shape holds the corner label with the song title.
+  // Second shape holds the corner label with the song title — on one line.
   const labelBody = xml.indexOf('<p:txBody>', bodyStart + newBody.length);
   if (labelBody === -1) {
     throw new Error('템플릿 가사 슬라이드에서 제목 라벨을 찾지 못했습니다.');
   }
-  xml = setTextOfFirstRun(xml, labelBody, xmlEscape(title));
+  xml = setSingleLineTitle(xml, labelBody, title);
   return xml;
 }
 

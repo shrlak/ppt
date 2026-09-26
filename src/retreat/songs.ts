@@ -1,7 +1,7 @@
 // Song lyrics for the 수련회 decks: typed as projected (a blank line between
 // slides) and looked up by title — first among the songs last year's retreat
 // decks projected (public/retreat-songs.json), then in the 찬양 라이브러리.
-import { findLibrarySong, normalizeTitle } from '../lib/storage/library';
+import { findLibrarySong, isGroundTruth, normalizeTitle } from '../lib/storage/library';
 import { planSlides } from '../lib/utils/slidePlanner';
 import type { LibraryEntry } from '../lib/utils/types';
 import { newId, type RetreatSong } from './types';
@@ -94,4 +94,38 @@ export function resolveSong(title: string, seeds: RetreatSongSeed[], library: Li
   const saved = key ? findLibrarySong(library, { title }) : undefined;
   if (saved) return { id: newId(), title, lyrics: libraryLyricsText(saved), source: 'library' };
   return { id: newId(), title, lyrics: '' };
+}
+
+/** True when an entry names its parts (V, C, B …) rather than numbering its slides. */
+function hasLabelledParts(entry: Pick<LibraryEntry, 'sections'>): boolean {
+  return entry.sections.some((section) => !/^\d+$/.test(section.label.trim()));
+}
+
+/**
+ * A 수련회 song typed or corrected here, as the 찬양 라이브러리 entry it
+ * should be saved as — each slide one numbered part, like a 찬양집회 save —
+ * or null when there is nothing to save or saving would lose something.
+ *
+ * Lyrics that only came from last year's retreat or from the library itself
+ * are not saved back. Nor is a song whose confirmed library copy names its
+ * parts (V, C, B …): the Sunday page lays a conti's 진행 순서 over those
+ * names, and numbered slides would undo that. Anything else — a new song, a
+ * draft, a copy saved from another retreat or 찬양집회 — takes the words
+ * typed here.
+ */
+export function libraryEntryForRetreatSong(song: RetreatSong, previous: LibraryEntry | undefined): LibraryEntry | null {
+  if (song.source !== 'manual') return null;
+  const title = song.title.trim();
+  const slides = lyricSlides(song.lyrics);
+  if (!title || slides.length === 0) return null;
+  if (previous && isGroundTruth(previous) && hasLabelledParts(previous)) return null;
+  const sections = slides.map((lines, index) => ({ label: String(index + 1), lines }));
+  return {
+    title,
+    sections,
+    order: sections.map((section) => section.label),
+    verification: 'edited',
+    version: (previous?.version ?? 0) + 1,
+    updatedAt: new Date().toISOString(),
+  };
 }

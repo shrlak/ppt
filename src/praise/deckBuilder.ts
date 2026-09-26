@@ -11,16 +11,23 @@ import { mergePptxDecks } from '../lib/pptx/pptxMerge';
 import { readSlideSize, rescaleDeckToSize } from '../lib/pptx/slideGeometry';
 import { removeContentTypeOverridesWhere, setContentTypeOverride, ensureDefaultExtension } from '../lib/pptx/contentTypes';
 import { xmlEscape } from '../lib/pptx/pptxBuilder';
-import { fitBodyFontSize } from '../lib/pptx/textFit';
+import { fitBodyFontSize, fitTitleFontSize, singleLineBody, withFontSize } from '../lib/pptx/textFit';
 import type { AdditionalFile } from '../lib/additionalFiles/types';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Song } from '../lib/utils/types';
 import { planPraiseDeck, type PlacedAdditional, type PraiseSlidePlan } from './planner';
 import {
   PRAISE_COVER_SHAPES,
+  PRAISE_HEADER_BASE_SZ,
+  PRAISE_HEADER_BOX,
+  PRAISE_HEADER_MIN_SZ,
   PRAISE_LYRICS_BASE_SZ,
+  PRAISE_LYRICS_BODY,
   PRAISE_LYRICS_MIN_SZ,
   PRAISE_SLIDES,
+  PRAISE_TITLE_BASE_SZ,
+  PRAISE_TITLE_BOX,
+  PRAISE_TITLE_MIN_SZ,
   PRAISE_TOKENS,
 } from './template';
 import type { PraiseCoverImage, PraiseSongExtras } from './types';
@@ -143,30 +150,81 @@ export function buildCoverSlide(xml: string, date: string, customCover: boolean)
   return replaceToken(xml, PRAISE_TOKENS.coverDate, formatCoverDate(date));
 }
 
-export function buildTitleSlide(xml: string, titleKo: string, titleEn: string): string {
-  let out = replaceToken(xml, PRAISE_TOKENS.titleKo, titleKo);
-  if (titleEn) return replaceToken(out, PRAISE_TOKENS.titleEn, titleEn);
-  // One title: drop the English line so the Korean stays centred on its own.
-  const paragraph = paragraphHolding(out, PRAISE_TOKENS.titleEn);
-  out = out.slice(0, paragraph.start) + out.slice(paragraph.end);
-  return out;
+/** A shape moved sideways to `x` and made `cx` wide; its height and top stay. */
+function withHorizontalBox(shapeXml: string, box: { x: number; cx: number }): string {
+  return shapeXml.replace(
+    /<a:off x="\d+" y="(\d+)"\/><a:ext cx="\d+" cy="(\d+)"\/>/,
+    `<a:off x="${box.x}" y="$1"/><a:ext cx="${box.cx}" cy="$2"/>`,
+  );
+}
+
+/** A shape put at `box` with its text anchored to the box's vertical middle. */
+function centredIn(shapeXml: string, box: { x: number; y: number; cx: number; cy: number }): string {
+  return shapeXml
+    .replace(
+      /<a:off x="\d+" y="\d+"\/><a:ext cx="\d+" cy="\d+"\/>/,
+      `<a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/>`,
+    )
+    .replace(/(<a:bodyPr\b[^>]*?)\s+anchor="[^"]*"/, '$1')
+    .replace(/<a:bodyPr\b/, '<a:bodyPr anchor="ctr"');
+}
+
+/** Replace a span of `xml` with `value`. */
+function splice(xml: string, span: { start: number; end: number }, value: string): string {
+  return xml.slice(0, span.start) + value + xml.slice(span.end);
 }
 
 /**
- * Korean lines, a blank line, then the English — last year's layout. The
- * font starts at the template's size and shrinks only when the slide holds
- * more than the box can show (the planner has already split any slide that
- * would need to shrink past readable), so nothing runs off the screen.
+ * The paragraph holding `token` in `shapeXml`, filled with `value` at the
+ * largest size (up to `baseSz`) that keeps it on one line of that shape.
+ */
+function fillTitleParagraph(shapeXml: string, token: string, value: string, baseSz: number, minSz: number): string {
+  const paragraph = paragraphHolding(shapeXml, token);
+  const sz = fitTitleFontSize(shapeXml, value, baseSz, minSz);
+  return splice(shapeXml, paragraph, withFontSize(replaceToken(paragraph.xml, token, value), sz));
+}
+
+/**
+ * Korean title over English title, each on ONE line: a title never wraps —
+ * it shrinks just enough to fit the (widened) box instead, the Korean and
+ * the English each on its own, and the box is set not to wrap at all.
+ */
+export function buildTitleSlide(xml: string, titleKo: string, titleEn: string): string {
+  const shape = shapeHolding(xml, PRAISE_TOKENS.titleKo);
+  let box = singleLineBody(withHorizontalBox(shape.xml, PRAISE_TITLE_BOX));
+  box = fillTitleParagraph(box, PRAISE_TOKENS.titleKo, titleKo, PRAISE_TITLE_BASE_SZ, PRAISE_TITLE_MIN_SZ);
+  if (titleEn) {
+    box = fillTitleParagraph(box, PRAISE_TOKENS.titleEn, titleEn, PRAISE_TITLE_BASE_SZ, PRAISE_TITLE_MIN_SZ);
+  } else {
+    // One title: drop the English line so the Korean stays centred on its own.
+    box = splice(box, paragraphHolding(box, PRAISE_TOKENS.titleEn), '');
+  }
+  return splice(xml, shape, box);
+}
+
+/**
+ * The corner label — "한글 | English" — on one line across the top of the
+ * slide, then the lyrics: Korean lines, a blank line, then the English (last
+ * year's layout) in a box centred on the slide, anchored to its middle, so
+ * the lyrics always sit in the centre of the screen however many lines a
+ * slide has. The font starts at the template's size and shrinks only when
+ * the slide holds more than the box can show (the planner has already split
+ * any slide that would need to shrink past readable), so nothing runs off
+ * the screen.
  */
 export function buildLyricsSlide(xml: string, header: string, lines: string[], english: string[]): string {
-  let out = replaceToken(xml, PRAISE_TOKENS.header, header);
+  const label = shapeHolding(xml, PRAISE_TOKENS.header);
+  let labelXml = singleLineBody(withHorizontalBox(label.xml, PRAISE_HEADER_BOX));
+  labelXml = fillTitleParagraph(labelXml, PRAISE_TOKENS.header, header, PRAISE_HEADER_BASE_SZ, PRAISE_HEADER_MIN_SZ);
+  let out = splice(xml, label, labelXml);
+
   const body = shapeHolding(out, PRAISE_TOKENS.line);
-  const paragraph = paragraphHolding(body.xml, PRAISE_TOKENS.line);
+  const bodyXml = centredIn(body.xml, PRAISE_LYRICS_BODY);
+  const paragraph = paragraphHolding(bodyXml, PRAISE_TOKENS.line);
   const rendered = english.length > 0 && lines.length > 0 ? [...lines, '', ...english] : [...lines, ...english];
-  const sz = fitBodyFontSize(body.xml, rendered, PRAISE_LYRICS_BASE_SZ, PRAISE_LYRICS_MIN_SZ);
+  const sz = fitBodyFontSize(bodyXml, rendered, PRAISE_LYRICS_BASE_SZ, PRAISE_LYRICS_MIN_SZ);
   const paragraphs = rendered.map((line) => lyricParagraph(paragraph.xml, line, sz)).join('');
-  const newBody = body.xml.slice(0, paragraph.start) + paragraphs + body.xml.slice(paragraph.end);
-  out = out.slice(0, body.start) + newBody + out.slice(body.end);
+  out = splice(out, body, splice(bodyXml, paragraph, paragraphs));
   return out;
 }
 

@@ -11,6 +11,7 @@
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
 //   GET  /lyrics          -> scored lyric candidates for a recognized 찬양
+//   GET  /praise/english  -> a 찬양집회 song's English lyrics, as posts' lyric blocks
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
@@ -102,6 +103,7 @@ import {
 } from './trainingCorpus.js';
 import { purgeDecision, purgeSchedule, staleTombstoneKeys, zonedParts } from './purge.js';
 import { fetchLyricsCandidates } from './lyrics.js';
+import { fetchEnglishLyricsCandidates } from './praiseEnglishWeb.js';
 import {
   fetchSongPptCandidates,
   fetchSongPptFile,
@@ -1516,6 +1518,43 @@ export default {
         host: best?.host,
       };
       const body = JSON.stringify(payload);
+      if (found.candidates.length > 0) {
+        await cache.put(
+          cacheKey,
+          new Response(body, {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=604800' },
+          }),
+        );
+      }
+      return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+    }
+
+    // 찬양집회 영어 가사: search "<곡 제목> 영어 가사" and hand back each post's
+    // Korean and English lyric blocks, for the browser to lay under this
+    // conti's Korean slides. Like /lyrics, only a title crosses the wire.
+    if (request.method === 'GET' && url.pathname === '/praise/english') {
+      const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
+      if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+      // Posts do not change from one rehearsal to the next: serve repeats from
+      // the edge. `v` changes whenever what a candidate carries does.
+      const cacheKey = new Request(`${url.origin}/praise/english?v=1&title=${encodeURIComponent(title)}`, {
+        method: 'GET',
+      });
+      const cache = caches.default;
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        return new Response(await cached.text(), {
+          status: 200,
+          headers: { ...headers, 'Content-Type': 'application/json' },
+        });
+      }
+      let found = { query: '', candidates: [] };
+      try {
+        found = await fetchEnglishLyricsCandidates(title, env);
+      } catch (error) {
+        console.warn('english lyrics lookup failed:', error instanceof Error ? error.message : error);
+      }
+      const body = JSON.stringify({ title, query: found.query, candidates: found.candidates });
       if (found.candidates.length > 0) {
         await cache.put(
           cacheKey,

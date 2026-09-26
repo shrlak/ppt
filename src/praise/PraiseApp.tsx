@@ -33,7 +33,9 @@ import {
   AUTO_SAVE_RETRY_MS,
   type AutoSaveStatus,
 } from '../lib/storage/deckAutoSave';
+import { useSaveSoon } from '../lib/storage/saveSoon';
 import PraiseEnglishStep from './PraiseEnglishStep';
+import { englishFromWeb, fetchWebEnglish, hasWebEnglishLookup, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
 import { buildPraiseDeck, formatCoverDate, isoDateFromConti, suggestPraiseFileName } from './deckBuilder';
 import {
   englishFromSheet,
@@ -62,10 +64,10 @@ import {
 import { extrasFor, type PraiseCoverImage, type PraiseSongExtras } from './types';
 
 const BASE = import.meta.env.BASE_URL || '/';
+/** How long the song list must sit still before its songs are looked up on the web. */
+const WEB_LOOKUP_DELAY_MS = 1500;
 /** The deck this browser was last working on, reopened on the next visit. */
 const LAST_DECK_KEY = 'praise-last-deck-id';
-/** How long a song's lyrics must stay unchanged before they are saved. */
-const LYRICS_SAVE_DEBOUNCE_MS = 2500;
 
 function slidesHaveKorean(song: Song): boolean {
   return song.sections.some((section) => section.lines.some((line) => /[가-힣]/.test(line)));
@@ -161,6 +163,14 @@ export default function PraiseApp() {
   // The songs of the chord sheet this night was read from, both languages:
   // English goes back under the Korean from here however a song is re-split.
   const [sheetLibrary, setSheetLibrary] = useState<EnglishSongEntry[]>([]);
+  // When each song's two languages were last written to the 영어 가사 library.
+  const [englishSavedAt, setEnglishSavedAt] = useState<Record<string, string>>({});
+  const [libraryLoaded, setLibraryLoaded] = useState(false);
+  // Web lookups by song title, and what each did for the song it was for.
+  const [webEnglish, setWebEnglish] = useState<Record<string, WebEnglishLookup>>({});
+  const [webOutcome, setWebOutcome] = useState<Record<string, WebEnglishOutcome>>({});
+  // What was last written for each song, so one edit is one write.
+  const englishWrittenRef = useRef<Map<string, string>>(new Map());
 
   const [restore, setRestore] = useState<{ version: number; songs: Song[] | null; conti: { name: string; data: ArrayBuffer } | null }>(
     { version: 0, songs: null, conti: null },
@@ -205,7 +215,9 @@ export default function PraiseApp() {
       if (cancelled) return;
       setEnglishLibrary(mergeEnglishLibraries(seed, loadSavedEnglish()));
       const synced = await synchronizeEnglishLibrary();
-      if (!cancelled) setEnglishLibrary(mergeEnglishLibraries(seed, synced.entries));
+      if (cancelled) return;
+      setEnglishLibrary(mergeEnglishLibraries(seed, synced.entries));
+      setLibraryLoaded(true);
     })();
     return () => {
       cancelled = true;
@@ -237,6 +249,106 @@ export default function PraiseApp() {
       return changed ? next : previous;
     });
   }, [songs, englishLibrary, sheetLibrary]);
+
+  // ---- 영어 가사 from the web, for what the conti and the library lack ----
+  // A song whose English the conti does not print and nothing saved knows is
+  // looked up the way the operator would: "<곡 제목> 영어 가사" on the web.
+  // Whatever English a post gives goes under the Korean slides it matches —
+  // only into empty ones, like the library's — and the card links the post.
+  const extrasRef = useRef(extras);
+  extrasRef.current = extras;
+  const webEnglishRef = useRef(webEnglish);
+  webEnglishRef.current = webEnglish;
+  const webInFlight = useRef(new Set<string>());
+
+  const lookUpWebEnglish = useCallback(async (title: string) => {
+    const key = normalizeTitle(title);
+    if (!key || webInFlight.current.has(key)) return;
+    webInFlight.current.add(key);
+    setWebEnglish((previous) => ({ ...previous, [key]: { status: 'searching' } }));
+    try {
+      const candidates = await fetchWebEnglish(title);
+      setWebEnglish((previous) => ({ ...previous, [key]: { status: 'done', candidates } }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setWebEnglish((previous) => ({ ...previous, [key]: { status: 'error', message } }));
+    } finally {
+      webInFlight.current.delete(key);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !libraryLoaded || !hasWebEnglishLookup() || songs.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const wanted = songs.filter((song) => {
+        const title = song.title.trim();
+        if (!title || /^새 찬양/.test(title) || !slidesHaveKorean(song)) return false;
+        if (webEnglishRef.current[normalizeTitle(title)]) return false;
+        return missingEnglishCount(song, extrasFor(extrasRef.current, song.id)) > 0;
+      });
+      // Two at a time: ten songs are ten searches, not one burst of ten.
+      void (async () => {
+        for (let at = 0; at < wanted.length; at += 2) {
+          await Promise.all(wanted.slice(at, at + 2).map((song) => lookUpWebEnglish(song.title)));
+        }
+      })();
+    }, WEB_LOOKUP_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [ready, libraryLoaded, songs, lookUpWebEnglish]);
+
+  useEffect(() => {
+    if (songs.length === 0) return;
+    const outcomes: Record<string, WebEnglishOutcome> = {};
+    for (const song of songs) {
+      const lookup = webEnglish[normalizeTitle(song.title)];
+      if (!lookup || lookup.status !== 'done') continue;
+      const result = englishFromWeb(song, extrasFor(extrasRef.current, song.id).english, lookup.candidates);
+      if (result.filled > 0 || result.titleFilled) {
+        outcomes[song.id] = { ...(result.source ?? {}), filled: result.filled };
+      } else if (result.pasteText) {
+        outcomes[song.id] = { ...(result.source ?? {}), filled: 0, pasteText: result.pasteText };
+      }
+    }
+    // Once a post has filled a song, the card keeps saying so.
+    setWebOutcome((previous) => {
+      const next = { ...previous };
+      for (const [id, outcome] of Object.entries(outcomes)) {
+        if (outcome.filled > 0 || !previous[id]?.filled) next[id] = outcome;
+      }
+      return next;
+    });
+    setExtras((previous) => {
+      let changed = false;
+      const next = { ...previous };
+      for (const song of songs) {
+        const lookup = webEnglish[normalizeTitle(song.title)];
+        if (!lookup || lookup.status !== 'done') continue;
+        const current = extrasFor(previous, song.id);
+        const result = englishFromWeb(song, current.english, lookup.candidates);
+        if (result.filled === 0 && !result.titleFilled) continue;
+        next[song.id] = {
+          ...current,
+          english: result.english,
+          englishSource: current.englishSource ?? 'web',
+          ...(result.source && !current.englishSourceUrl ? { englishSourceUrl: result.source.url } : {}),
+        };
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [songs, webEnglish]);
+
+  const searchWebAgain = useCallback(
+    (song: Song) => {
+      const key = normalizeTitle(song.title);
+      setWebEnglish((previous) => {
+        const { [key]: _dropped, ...rest } = previous;
+        return rest;
+      });
+      void lookUpWebEnglish(song.title);
+    },
+    [lookUpWebEnglish],
+  );
 
   // ---- chord-sheet 콘티: both languages straight from the sheet ----
   // Latest library, for callbacks that must stay referentially stable.
@@ -286,43 +398,54 @@ export default function PraiseApp() {
     [englishLibrary],
   );
 
-  // Every song on a 찬양집회 conti is kept in both languages as soon as its
-  // lyrics settle — no button to press. The Korean also reaches the 찬양
-  // 라이브러리 through the 찬양 step's own draft save, and that is all the
-  // Sunday page ever reads: other services load the Korean only.
-  useEffect(() => {
+  // Every song on a 찬양집회 conti is kept in both languages the moment its
+  // lyrics change — no button to press, and at once if the tab is closed.
+  // The Korean also reaches the 찬양 라이브러리 through the 찬양 step's own
+  // save, and that is all the Sunday page ever reads: other services load
+  // the Korean only.
+  useSaveSoon(() => {
     if (!ready || songs.length === 0) return;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        let saved: EnglishSongEntry[] | null = null;
-        for (const song of songs) {
-          const title = song.title.trim();
-          if (!title || /^새 찬양/.test(title)) continue;
-          const current = extrasFor(extras, song.id);
-          const entry = entryFromSong(song, current.english);
-          if (entry.slides.length === 0) continue;
-          const existing = englishLibraryRef.current.find(
-            (candidate) => normalizeTitle(candidate.title) === normalizeTitle(title),
-          );
-          if (existing && sameEntry(existing, entry)) continue;
-          // A partial reading (lyrics that only partly lined up) must not wipe
-          // out a saved copy with more English; a complete one, or anything
-          // typed, replaces it.
-          const complete = missingEnglishCount(song, current) === 0;
-          if (
-            existing &&
-            !complete &&
-            current.englishSource !== 'manual' &&
-            englishLineCount(entry) < englishLineCount(existing)
-          ) {
-            continue;
-          }
-          saved = await saveEnglishEntry(entry);
-        }
-        if (saved) setEnglishLibrary(mergeEnglishLibraries(seedRef.current, saved));
-      })().catch(() => undefined);
-    }, LYRICS_SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+    const at = new Date().toISOString();
+    const settled: Record<string, string> = {};
+    const writes: Promise<void>[] = [];
+    for (const song of songs) {
+      const title = song.title.trim();
+      if (!title || /^새 찬양/.test(title)) continue;
+      const current = extrasFor(extras, song.id);
+      const entry = entryFromSong(song, current.english);
+      if (entry.slides.length === 0) continue;
+      const existing = englishLibraryRef.current.find(
+        (candidate) => normalizeTitle(candidate.title) === normalizeTitle(title),
+      );
+      const written = JSON.stringify(entry);
+      if ((existing && sameEntry(existing, entry)) || englishWrittenRef.current.get(song.id) === written) {
+        if (englishWrittenRef.current.get(song.id) !== written) settled[song.id] = at;
+        englishWrittenRef.current.set(song.id, written);
+        continue;
+      }
+      // A partial reading (lyrics that only partly lined up) must not wipe
+      // out a saved copy with more English; a complete one, or anything
+      // typed, replaces it.
+      const complete = missingEnglishCount(song, current) === 0;
+      if (
+        existing &&
+        !complete &&
+        current.englishSource !== 'manual' &&
+        englishLineCount(entry) < englishLineCount(existing)
+      ) {
+        continue;
+      }
+      // The local copy is written at once (the server copy follows), so a
+      // closed tab never loses it.
+      writes.push(saveEnglishEntry(entry).then(() => undefined));
+      englishWrittenRef.current.set(song.id, written);
+      settled[song.id] = at;
+    }
+    if (Object.keys(settled).length > 0) setEnglishSavedAt((previous) => ({ ...previous, ...settled }));
+    if (writes.length === 0) return;
+    void Promise.allSettled(writes).then(() =>
+      setEnglishLibrary(mergeEnglishLibraries(seedRef.current, loadSavedEnglish())),
+    );
   }, [ready, songs, extras]);
 
   const updateExtras = useCallback(
@@ -568,6 +691,7 @@ export default function PraiseApp() {
     setFileNameOverride(null);
     setContiFile(null);
     setSheetLibrary([]);
+    setWebOutcome({});
     setOverview(null);
     setSongs([]);
     setRestore((previous) => ({ version: previous.version + 1, songs: [], conti: null }));
@@ -680,6 +804,10 @@ export default function PraiseApp() {
               onExtrasChange={updateExtras}
               onLoadFromLibrary={loadSongFromLibrary}
               onSaveToLibrary={(song) => rememberEnglish([song])}
+              savedAt={englishSavedAt}
+              webLookups={webEnglish}
+              webOutcomes={webOutcome}
+              onWebSearch={hasWebEnglishLookup() ? searchWebAgain : undefined}
             />
             <StepNav steps={STEPS} index={1} onMove={setStep} testIdPrefix="praise" />
           </section>

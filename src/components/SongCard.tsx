@@ -43,6 +43,17 @@ const PHASE_LABELS: Record<RecognitionPhase, string> = {
   web: '웹에서 가사 확인 중',
 };
 
+/** The 찬양 라이브러리 auto-save, as a song's card shows it. */
+export type SongCardAutoSave = { state: 'pending' } | { state: 'saved'; at?: string };
+
+function savedTime(at: string | undefined): string {
+  if (!at) return '';
+  const date = new Date(at);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : ` · ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 interface Props {
   song: Song;
   index: number;
@@ -55,6 +66,8 @@ interface Props {
   onMove: (id: string, delta: -1 | 1) => void;
   onRemove: (id: string) => void;
   onSaveToLibrary: (song: Song) => void;
+  /** Where the auto-save stands for this song; absent when there is nothing to save. */
+  autoSave?: SongCardAutoSave;
   onZoom: () => void;
   onTitleBlur: (title: string) => void;
   /** Web-lookup candidates awaiting a choice, when there are any. */
@@ -89,6 +102,7 @@ export default function SongCard({
   onMove,
   onRemove,
   onSaveToLibrary,
+  autoSave,
   onZoom,
   onTitleBlur,
   webReview,
@@ -493,6 +507,16 @@ export default function SongCard({
                 ))}
               </select>
             </label>
+            {autoSave && (
+              <span
+                className={`song-autosave${autoSave.state === 'saved' ? ' is-saved' : ''}`}
+                data-testid="song-autosave"
+                role="status"
+              >
+                <Icon name={autoSave.state === 'saved' ? 'check' : 'refresh'} />
+                {autoSave.state === 'saved' ? `가사 자동 저장됨${savedTime(autoSave.at)}` : '자동 저장 중…'}
+              </span>
+            )}
             <button
               type="button"
               className="btn"

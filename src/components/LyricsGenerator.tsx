@@ -28,7 +28,8 @@ import {
   upsertEntry,
 } from '../lib/storage/library';
 import { hasCloudLibrary } from '../lib/storage/cloudLibrary';
-import SongCard, { type RecogState } from './SongCard';
+import { useSaveSoon } from '../lib/storage/saveSoon';
+import SongCard, { type RecogState, type SongCardAutoSave } from './SongCard';
 import Modal from './Modal';
 import LibraryManager from './LibraryManager';
 import LibraryAddSearch from './LibraryAddSearch';
@@ -93,8 +94,36 @@ function songHasLyrics(song: Song): boolean {
   return song.sections.some((s) => s.lines.some((l) => l.trim().length > 0));
 }
 
-/** Idle time after the last change before a song is written to 찬양 라이브러리. */
-const LIBRARY_AUTO_SAVE_DEBOUNCE_MS = 1500;
+/** A song's lyrics as the auto-save last wrote them to the 찬양 라이브러리. */
+interface AutoSavedLyrics {
+  content: string;
+  at: string;
+  /** A machine reading left out because a confirmed copy is already saved. */
+  skipped?: boolean;
+}
+
+/** Only a titled song with lyrics is written to the 찬양 라이브러리. */
+function isAutoSavable(song: Song): boolean {
+  return Boolean(song.title.trim()) && !/^새 찬양/.test(song.title) && songHasLyrics(song);
+}
+
+/**
+ * What a song's card says about its auto-save: written (and when), or about
+ * to be. Nothing for a song there is nothing to write for — untitled, no
+ * lyrics yet, or a reopened deck's copy nobody has changed.
+ */
+function libraryAutoSave(
+  song: Song,
+  saved: AutoSavedLyrics | undefined,
+  lastWritten: string | undefined,
+): SongCardAutoSave | undefined {
+  if (!isAutoSavable(song)) return undefined;
+  const content = libraryContentKey(song);
+  if (saved && saved.content === content) return saved.skipped ? undefined : { state: 'saved', at: saved.at };
+  if (lastWritten === content) return undefined;
+  return { state: 'pending' };
+}
+
 
 /**
  * The user's copy of a song, measured against what recognition produced.
@@ -320,6 +349,8 @@ export default function LyricsGenerator({
   // What each song last wrote to 찬양 라이브러리, so an unchanged song is
   // never written twice.
   const librarySavedRef = useRef<Map<string, string>>(new Map());
+  // What the auto-save last wrote for each song, so its card can say so.
+  const [autoSaved, setAutoSaved] = useState<Record<string, AutoSavedLyrics>>({});
   // Songs whose scan result should be discarded (library lyrics arrived first).
   const scanCancelledRef = useRef<Set<string>>(new Set());
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
@@ -482,8 +513,9 @@ export default function LyricsGenerator({
 
   /**
    * Auto-save to 찬양 라이브러리: every change to a song — a lyric line, the
-   * title, the key, the 진행 순서 the conti wrote — is written back once edits
-   * settle, without pressing 저장.
+   * title, the key, the 진행 순서 the conti wrote — is written back the moment
+   * typing pauses (and at once if the tab is closed first), without pressing
+   * 저장. Each card shows that it was.
    *
    * The trust level follows who made the change. A song the user edited is
    * saved as the user's copy (verified or edited, exactly like 저장). A song
@@ -491,49 +523,54 @@ export default function LyricsGenerator({
    * A fresh machine reading is a draft, which never replaces a confirmed
    * entry. Training feedback still goes out only on an explicit 저장.
    */
-  useEffect(() => {
+  useSaveSoon(() => {
     const reading = new Set(readingIds.split(','));
-    const timer = window.setTimeout(() => {
-      const updates = new Map<string, Pick<Song, 'verification' | 'version'>>();
-      const drafts: string[] = [];
-      for (const song of songs) {
-        if (!song.title.trim() || /^새 찬양/.test(song.title) || !songHasLyrics(song)) continue;
-        // A page still being read is not settled yet.
-        if (reading.has(song.id)) continue;
-        const content = libraryContentKey(song);
-        if (librarySavedRef.current.get(song.id) === content) continue;
-        const previous = findEntry(libraryRef.current, song.title);
-        if (previous && libraryContentKey(previous) === content) {
-          librarySavedRef.current.set(song.id, content);
-          continue;
-        }
-        const verification: VerificationState = userEditedRef.current.has(song.id)
-          ? userReading(song).verification
-          : previous
-            ? entryVerification(previous)
-            : 'draft';
+    const updates = new Map<string, Pick<Song, 'verification' | 'version'>>();
+    const settled: Record<string, AutoSavedLyrics> = {};
+    const at = new Date().toISOString();
+    const drafts: string[] = [];
+    for (const song of songs) {
+      if (!isAutoSavable(song)) continue;
+      // A page still being read is not settled yet.
+      if (reading.has(song.id)) continue;
+      const content = libraryContentKey(song);
+      if (librarySavedRef.current.get(song.id) === content) continue;
+      const previous = findEntry(libraryRef.current, song.title);
+      if (previous && libraryContentKey(previous) === content) {
         librarySavedRef.current.set(song.id, content);
-        // A machine draft never overwrites a confirmed entry.
-        if (verification === 'draft' && previous && isGroundTruth(previous)) continue;
-        const entry = saveToLibrary(song, verification);
-        if (!entry) continue;
-        updates.set(song.id, { verification, version: entry.version });
-        if (!previous && verification === 'draft') drafts.push(song.title);
+        settled[song.id] = { content, at };
+        continue;
       }
-      // One notice for the whole batch: a conti of ten new songs is one save.
-      if (drafts.length === 1) showToast(`'${drafts[0]}' 을(를) 초안으로 저장했습니다.`);
-      else if (drafts.length > 1) {
-        showToast(`새 곡 ${drafts.length}곡(${drafts.map((title) => `'${title}'`).join(', ')})을 초안으로 저장했습니다.`);
+      const verification: VerificationState = userEditedRef.current.has(song.id)
+        ? userReading(song).verification
+        : previous
+          ? entryVerification(previous)
+          : 'draft';
+      librarySavedRef.current.set(song.id, content);
+      // A machine draft never overwrites a confirmed entry.
+      if (verification === 'draft' && previous && isGroundTruth(previous)) {
+        settled[song.id] = { content, at, skipped: true };
+        continue;
       }
-      if (updates.size === 0) return;
-      setSongs((current) =>
-        current.map((song) => {
-          const update = updates.get(song.id);
-          return update ? { ...song, ...update } : song;
-        }),
-      );
-    }, LIBRARY_AUTO_SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+      const entry = saveToLibrary(song, verification);
+      if (!entry) continue;
+      settled[song.id] = { content, at };
+      updates.set(song.id, { verification, version: entry.version });
+      if (!previous && verification === 'draft') drafts.push(song.title);
+    }
+    // One notice for the whole batch: a conti of ten new songs is one save.
+    if (drafts.length === 1) showToast(`'${drafts[0]}' 을(를) 초안으로 저장했습니다.`);
+    else if (drafts.length > 1) {
+      showToast(`새 곡 ${drafts.length}곡(${drafts.map((title) => `'${title}'`).join(', ')})을 초안으로 저장했습니다.`);
+    }
+    if (Object.keys(settled).length > 0) setAutoSaved((current) => ({ ...current, ...settled }));
+    if (updates.size === 0) return;
+    setSongs((current) =>
+      current.map((song) => {
+        const update = updates.get(song.id);
+        return update ? { ...song, ...update } : song;
+      }),
+    );
   }, [songs, readingIds, saveToLibrary]);
 
   /**
@@ -1521,6 +1558,10 @@ export default function LyricsGenerator({
       const entry = saveToLibrary(song, verification);
       if (!entry) return;
       librarySavedRef.current.set(song.id, libraryContentKey(entry));
+      setAutoSaved((current) => ({
+        ...current,
+        [song.id]: { content: libraryContentKey(entry), at: new Date().toISOString() },
+      }));
       setSongs((current) =>
         current.map((candidate) =>
           candidate.id === song.id
@@ -2009,6 +2050,7 @@ export default function LyricsGenerator({
               onMove={moveSong}
               onRemove={removeSong}
               onSaveToLibrary={handleSaveToLibrary}
+              autoSave={recog[song.id]?.status === 'running' ? undefined : libraryAutoSave(song, autoSaved[song.id], librarySavedRef.current.get(song.id))}
               webReview={webReview[song.id]}
               onSelectWebCandidate={(candidateId) => selectWebCandidate(song.id, candidateId)}
               onZoom={() => setZoomSongId(song.id)}
@@ -2115,6 +2157,7 @@ export default function LyricsGenerator({
                 onMove={moveSong}
                 onRemove={removeSong}
                 onSaveToLibrary={handleSaveToLibrary}
+                autoSave={recog[zoomSong.id]?.status === 'running' ? undefined : libraryAutoSave(zoomSong, autoSaved[zoomSong.id], librarySavedRef.current.get(zoomSong.id))}
                 webReview={webReview[zoomSong.id]}
                 onSelectWebCandidate={(candidateId) => selectWebCandidate(zoomSong.id, candidateId)}
                 onZoom={() => {}}

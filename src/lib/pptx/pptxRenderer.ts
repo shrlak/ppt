@@ -51,6 +51,10 @@ export interface RenderedTextShape extends ShapeBase {
   fill?: string;
   /** The shape's outline (`a:ln`), when it draws one. */
   outline?: { color: string; widthEmu: number };
+  /** Vertical anchor its body sets (`a:bodyPr@anchor`); absent when it sets none. */
+  anchor?: 't' | 'ctr' | 'b';
+  /** `a:bodyPr@wrap="none"`: every paragraph stays on one line. */
+  noWrap?: boolean;
   paragraphs: RenderedParagraph[];
 }
 
@@ -298,6 +302,11 @@ function readTextShape(sp: Element, box: ShapeBase, ctx: TextInheritContext): Re
   const outline = readOutline(spPr);
   if (!txBody) return fill || outline ? { kind: 'text', ...box, fill, outline, paragraphs: [] } : null;
 
+  const bodyPr = firstEl(txBody, 'a:bodyPr');
+  const anchorAttr = bodyPr?.getAttribute('anchor');
+  const anchor = anchorAttr === 't' || anchorAttr === 'ctr' || anchorAttr === 'b' ? anchorAttr : undefined;
+  const noWrap = bodyPr?.getAttribute('wrap') === 'none' || undefined;
+
   const paragraphs: RenderedParagraph[] = [];
   for (const p of allEls(txBody, 'a:p')) {
     const align = readAlign(firstEl(p, 'a:pPr'));
@@ -326,7 +335,7 @@ function readTextShape(sp: Element, box: ShapeBase, ctx: TextInheritContext): Re
     if (runs.length > 0 || paragraphs.length > 0) paragraphs.push({ align, runs });
   }
   if (paragraphs.length === 0 && !fill && !outline) return null;
-  return { kind: 'text', ...box, fill, outline, paragraphs };
+  return { kind: 'text', ...box, fill, outline, ...(anchor ? { anchor } : {}), ...(noWrap ? { noWrap } : {}), paragraphs };
 }
 
 /** Map a slide's r:embed relationship id to the actual (possibly renamed) media part path. */

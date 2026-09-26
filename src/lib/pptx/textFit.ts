@@ -66,3 +66,73 @@ export function fitBodyFontSize(
   }
   return minSz;
 }
+
+// ---- song titles: one line, always ------------------------------------------
+//
+// A song title is never allowed to wrap onto a second line, on any slide of
+// any deck. fitBodyFontSize above is happy to wrap a line when the box is
+// tall enough for two, so titles are sized by width alone, against a
+// deliberately generous estimate of how wide the title will draw — and the
+// box is also told not to wrap at all, so even a font wider than the estimate
+// can never push a word onto a second line.
+
+/**
+ * Width of a title in em, estimated on the wide side: bold Arial / Nanum
+ * Gothic / Calibri capitals, lowercase and Hangul all come in under these,
+ * so a title fitted with this never needs more room than it was given.
+ */
+export function titleWidthEm(text: string): number {
+  let em = 0;
+  for (const ch of text) {
+    if (/[ᄀ-ᇿ⺀-꓏가-힣豈-﫿＀-￯]/.test(ch)) em += 1;
+    else if (/\s/.test(ch)) em += 0.3;
+    else if (/[A-Z]/.test(ch)) em += 0.74;
+    else if (/[a-z0-9]/.test(ch)) em += 0.6;
+    else if (/[.,:;'’|!ilI()[\]]/.test(ch)) em += 0.34;
+    else em += 0.62;
+  }
+  return em * 1.04;
+}
+
+/** The inner width (pt) of a shape's text box: its extent less the left/right insets. */
+function boxWidthPt(shapeXml: string): number | null {
+  const ext = shapeXml.match(/<a:ext cx="(\d+)" cy="\d+"\/>/);
+  if (!ext) return null;
+  const bodyPr = shapeXml.match(/<a:bodyPr\b[^>]*/)?.[0] ?? '';
+  const inset = (name: string) => Number(bodyPr.match(new RegExp(`\\b${name}="(\\d+)"`))?.[1] ?? 91440);
+  return (Number(ext[1]) - inset('lIns') - inset('rIns')) / EMU_PER_POINT;
+}
+
+/**
+ * The largest font size (1/100 pt, steps of 100, at most `baseSz`) at which
+ * `text` fits the shape's width on ONE line. Never below `minSz`; a title so
+ * long it would need less still stays on one line (see singleLineBody).
+ */
+export function fitTitleFontSize(shapeXml: string, text: string, baseSz: number, minSz: number): number {
+  const widthPt = boxWidthPt(shapeXml);
+  const em = titleWidthEm(text.trim());
+  if (widthPt === null || em === 0) return baseSz;
+  for (let sz = baseSz; sz >= minSz; sz -= 100) {
+    if ((em * sz) / 100 <= widthPt) return sz;
+  }
+  return minSz;
+}
+
+/**
+ * A text shape told never to wrap: `wrap="none"` on its body, and any
+ * PowerPoint autofit that would re-flow or rescale it switched off. The
+ * size fitTitleFontSize picked is then the size that is drawn.
+ */
+export function singleLineBody(shapeXml: string): string {
+  return shapeXml
+    .replace(/<a:bodyPr\b[^>]*?(\/?)>/, (tag, selfClosing: string) => {
+      const open = tag.slice(0, tag.length - (selfClosing ? 2 : 1)).replace(/\s+wrap="[^"]*"/, '');
+      return `${open} wrap="none"${selfClosing ? '/>' : '>'}`;
+    })
+    .replace(/<a:normAutofit\b[^>]*\/>|<a:spAutoFit\/>/g, '<a:noAutofit/>');
+}
+
+/** Every run size in one paragraph (or shape) set to `sz`. */
+export function withFontSize(xml: string, sz: number): string {
+  return xml.replace(/\bsz="\d+"/g, `sz="${sz}"`);
+}
