@@ -127,14 +127,19 @@ export function naverBlogSearchUrl(query) {
  *
  * Google answers a server's own fetch of its results page with a CAPTCHA
  * (/sorry/), and its Custom Search API takes no new sign-ups and ends on
- * 2027-01-01, so the search goes through Serper, which returns Google's own
- * results as JSON. A deployment without SERPER_API_KEY skips it, and the blog
- * and web searches below still run.
+ * 2027-01-01, so the search goes through SerpApi, which returns Google's own
+ * results as JSON. Its free plan renews every month (250 searches), and a
+ * week's songs take a handful. A deployment without SERPAPI_API_KEY skips it,
+ * and the blog and web searches below still run; so does one whose searches
+ * for the month have run out, since SerpApi then answers with an error.
  */
-export const GOOGLE_SEARCH_ENDPOINT = 'https://google.serper.dev/search';
+export const GOOGLE_SEARCH_ENDPOINT = 'https://serpapi.com/search.json';
+
+/** SerpApi takes a few seconds more than a results page; still well inside the page's wait. */
+const GOOGLE_SEARCH_TIMEOUT_MS = 8000;
 
 export function googleSearchKey(env = {}) {
-  return String(env.SERPER_API_KEY || '').trim();
+  return String(env.SERPAPI_API_KEY || '').trim();
 }
 
 /** A phrasing, restricted to the sites the Google search asks. */
@@ -142,12 +147,21 @@ export function googleSongPptQuery(query) {
   return `${query} (${GOOGLE_SONG_PPT_SITES.map((site) => `site:${site}`).join(' OR ')})`;
 }
 
-export function fetchGoogleSearch(query, env = {}) {
-  return fetchWithTimeout(GOOGLE_SEARCH_ENDPOINT, {
-    method: 'POST',
-    headers: { 'X-API-KEY': googleSearchKey(env), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: googleSongPptQuery(query), gl: 'kr', hl: 'ko', num: 10 }),
+/** The SerpApi request for one phrasing: Google Korea, in Korean. */
+export function googleSearchUrl(query, env = {}) {
+  const params = new URLSearchParams({
+    engine: 'google',
+    q: googleSongPptQuery(query),
+    hl: 'ko',
+    gl: 'kr',
+    google_domain: 'google.co.kr',
+    api_key: googleSearchKey(env),
   });
+  return `${GOOGLE_SEARCH_ENDPOINT}?${params}`;
+}
+
+export function fetchGoogleSearch(query, env = {}) {
+  return fetchWithTimeout(googleSearchUrl(query, env), { timeoutMs: GOOGLE_SEARCH_TIMEOUT_MS });
 }
 
 /**
@@ -427,8 +441,8 @@ function blogPostHits(labels, isPost, env, limit) {
 
 /**
  * Pull hits out of a Google search answered as JSON (see fetchGoogleSearch):
- * `organic` is the results page, each with its address, title and snippet.
- * The same rules as the HTML searches decide what may be fetched.
+ * `organic_results` is the results page, each with its address, title and
+ * snippet. The same rules as the HTML searches decide what may be fetched.
  */
 export function extractGoogleResults(payload, env = {}, limit = MAX_SONG_PPT_CANDIDATES * 2) {
   const results = [];
@@ -437,7 +451,7 @@ export function extractGoogleResults(payload, env = {}, limit = MAX_SONG_PPT_CAN
     decodeEntities(String(value ?? ''))
       .replace(/\s+/g, ' ')
       .trim();
-  for (const item of Array.isArray(payload?.organic) ? payload.organic : []) {
+  for (const item of Array.isArray(payload?.organic_results) ? payload.organic_results : []) {
     if (results.length >= limit) break;
     const url = typeof item?.link === 'string' ? item.link.split('#')[0] : '';
     let host;
@@ -883,13 +897,11 @@ export async function verifySongPptToken(token, secret, { now = Date.now() } = {
 
 // ---- fetching -----------------------------------------------------------
 
-export async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {}, method, body } = {}) {
+export async function fetchWithTimeout(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {} } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
-      method,
-      body,
       signal: controller.signal,
       headers: {
         // Some hosts serve an empty shell to clients with no UA at all.

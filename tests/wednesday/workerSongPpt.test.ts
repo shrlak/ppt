@@ -402,9 +402,9 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
     ]);
   });
 
-  it('reads Google\'s results as Serper returns them', () => {
+  it('reads Google\'s results as SerpApi returns them', () => {
     const { results, links } = extractGoogleResults({
-      organic: [
+      organic_results: [
         { title: '[찬양PPT] 은혜 악보 PPT', link: 'https://praise.tistory.com/12', snippet: '첨부파일 은혜.pptx' },
         { title: '은혜 &amp; 가사', link: 'https://www.godpeople.com/bbs/view?no=3#top', snippet: '은혜 가사' },
         { title: '은혜 - YouTube', link: 'https://www.youtube.com/watch?v=x', snippet: '' },
@@ -433,21 +433,20 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
     ]);
     expect(links).toEqual([]);
     expect(extractGoogleResults(null)).toEqual({ results: [], links: [] });
+    // What SerpApi answers once the month's searches have run out.
+    expect(extractGoogleResults({ error: 'Your account has run out of searches.' })).toEqual({ results: [], links: [] });
   });
 
   it('asks Google for 티스토리 and 갓피플 when the deployment has a key, and ranks what it finds first', async () => {
-    const google: { key: string | null; body: { q: string; gl: string; hl: string } }[] = [];
+    const google: URLSearchParams[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: string | Request, init?: RequestInit) => {
+      vi.fn(async (input: string | Request) => {
         const url = typeof input === 'string' ? input : input.url;
-        if (url === GOOGLE_SEARCH_ENDPOINT) {
-          google.push({
-            key: new Headers(init?.headers).get('X-API-KEY'),
-            body: JSON.parse(String(init?.body)),
-          });
+        if (url.startsWith(`${GOOGLE_SEARCH_ENDPOINT}?`)) {
+          google.push(new URL(url).searchParams);
           return Response.json({
-            organic: [{ title: '나의 반석이신 하나님 악보 PPT', link: 'https://praise.tistory.com/7', snippet: '' }],
+            organic_results: [{ title: '나의 반석이신 하나님 악보 PPT', link: 'https://praise.tistory.com/7', snippet: '' }],
           });
         }
         if (url.startsWith('https://search.naver.com/')) {
@@ -457,10 +456,14 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
       }),
     );
 
-    const { candidates } = await fetchSongPptCandidates('나의 반석이신 하나님', { SERPER_API_KEY: 'key-1' }, 'secret');
-    expect(init(google[0])).toEqual({
-      key: 'key-1',
-      body: { q: '나의 반석이신 하나님 악보 ppt (site:tistory.com OR site:godpeople.com)', gl: 'kr', hl: 'ko' },
+    const { candidates } = await fetchSongPptCandidates('나의 반석이신 하나님', { SERPAPI_API_KEY: 'key-1' }, 'secret');
+    expect(Object.fromEntries(google[0])).toEqual({
+      engine: 'google',
+      q: '나의 반석이신 하나님 악보 ppt (site:tistory.com OR site:godpeople.com)',
+      hl: 'ko',
+      gl: 'kr',
+      google_domain: 'google.co.kr',
+      api_key: 'key-1',
     });
     expect(candidates.map((candidate) => candidate.url)).toEqual(['https://praise.tistory.com/7', BLOG]);
 
@@ -471,11 +474,6 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
     expect(without.candidates.map((candidate) => candidate.url)).toEqual([BLOG]);
   });
 });
-
-/** The parts of a Google request a test compares: its key and query. */
-function init(request: { key: string | null; body: { q: string; gl: string; hl: string } }) {
-  return { key: request.key, body: { q: request.body.q, gl: request.body.gl, hl: request.body.hl } };
-}
 
 describe('searching for a song PPT', () => {
   it('asks the blog searches and the web search together and merges what they find', async () => {
@@ -758,7 +756,7 @@ describe('the song PPT routes', () => {
       googleSearch: boolean;
     };
     expect(payload.candidates).toHaveLength(1);
-    // Google needs SERPER_API_KEY, which this deployment does not have.
+    // Google needs SERPAPI_API_KEY, which this deployment does not have.
     expect(payload.googleSearch).toBe(false);
     expect(payload.candidates[0].token).toBeTruthy();
     expect(payload.hosts).toContain('blog.naver.com');

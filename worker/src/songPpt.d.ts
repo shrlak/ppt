@@ -48,6 +48,7 @@ export function buildSongPptQueries(title: string): string[];
 export function mentionsSheet(text: string): boolean;
 export function googleSearchKey(env?: Record<string, string | undefined>): string;
 export function googleSongPptQuery(query: string): string;
+export function googleSearchUrl(query: string, env?: Record<string, string | undefined>): string;
 export function fetchGoogleSearch(query: string, env?: Record<string, string | undefined>): Promise<Response>;
 export function extractGoogleResults(
   payload: unknown,
@@ -62,7 +63,7 @@ export function rankSongMatches<T extends { title?: string; url?: string }>(
 ): (T & { score: number; decision: 'auto' | 'review' })[];
 export function fetchWithTimeout(
   url: string,
-  options?: { timeoutMs?: number; headers?: Record<string, string>; method?: string; body?: string },
+  options?: { timeoutMs?: number; headers?: Record<string, string> },
 ): Promise<Response>;
 export function readBoundedText(response: Response): Promise<string>;
 export function songPptHosts(env?: Record<string, string | undefined>): string[];
