@@ -1,6 +1,7 @@
 // Reads a 수련회 찬양 콘티's song table.
 //
-// The conti's first page is one table: a column per part of the retreat
+// The table is one page of the conti (the first, in 2026's), or of one of
+// the several PDFs a conti can come as: a column per part of the retreat
 // (금요일 오후 예배, 금요일 오후 기도회, 토요일 오전 특강, … 주일 예배), each
 // holding a numbered song list. The PDF's text comes out column by column —
 // every header first, then each column's list — with long titles wrapped
@@ -83,4 +84,28 @@ export function parseRetreatConti(text: string): ContiSlot[] {
         .filter(Boolean),
     };
   });
+}
+
+/**
+ * The song table out of every page of every conti file, in upload order.
+ * A retreat conti can come as several PDFs, or as one whose table is not on
+ * its first page, so each page is read and the ones that name a part of the
+ * retreat (a 금요일/토요일/주일 header over a list) are the table. A column
+ * that two pages both name keeps its first reading. Empty when no page has
+ * the table: the songs are then put in by hand.
+ */
+export function parseRetreatContiPages(pageTexts: string[]): ContiSlot[] {
+  const slots: ContiSlot[] = [];
+  const seen = new Set<string>();
+  for (const text of pageTexts) {
+    const page = parseRetreatConti(text);
+    if (!page.some((slot) => slot.key)) continue;
+    for (const slot of page) {
+      const id = slot.key ? `${slot.key.day}/${slot.key.part}` : null;
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      slots.push(slot);
+    }
+  }
+  return slots;
 }
