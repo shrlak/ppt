@@ -3,6 +3,12 @@ import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
+import {
+  parseChordSheet,
+  songFromChordSheet,
+  type ChordSheetSong,
+  type SheetSlide,
+} from '../lib/utils/chordSheet';
 import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
 import {
   entryVerification,
@@ -235,6 +241,23 @@ interface Props {
    * Sunday page can load its Korean lyrics too.
    */
   preferredSongs?: LibraryEntry[];
+  /**
+   * The title a chord-sheet song goes by on this page, when it should not be
+   * the one the sheet prints — the 찬양집회 page gives a song the sheet names
+   * in English ("Goodness Of God") the Korean title it was sung under before.
+   */
+  chordSheetTitle?: (sheet: ChordSheetSong) => string | undefined;
+  /**
+   * Fired after a chord-sheet 콘티 (CCLI SongSelect / ChordPro) was read from
+   * its text, with each song it made and the slides the sheet divides it
+   * into — for the 찬양집회 page, the English printed under every Korean slide.
+   */
+  onChordSheetLoaded?: (songs: { song: Song; sheet: ChordSheetSong; slides: SheetSlide[] }[]) => void;
+}
+
+/** Korean lines whose word spacing can be trusted, to space a chord sheet's lyrics by. */
+function spacingCorpus(entries: LibraryEntry[]): string[] {
+  return entries.flatMap((entry) => entry.sections.flatMap((section) => section.lines));
 }
 
 export default function LyricsGenerator({
@@ -249,6 +272,8 @@ export default function LyricsGenerator({
   service = 'sunday',
   replaceSong = null,
   preferredSongs,
+  chordSheetTitle,
+  onChordSheetLoaded,
 }: Props) {
   const linesPerSlide = defaultLinesPerSlide(service);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
@@ -1562,6 +1587,73 @@ export default function LyricsGenerator({
       // Wait for the song library before matching titles, so a conti uploaded
       // right after page load still pulls saved lyrics instead of scanning.
       const lib = library.length > 0 ? library : ((await libraryPromiseRef.current) ?? []);
+      const shared = await getSyncedAiSettings();
+
+      // Score previews render in the background, for the split-screen view.
+      const renderPreviews = () =>
+        void (async () => {
+          for (const page of parsed.musicPages) {
+            try {
+              const url = await doc.renderPage(page, 700);
+              setPageImages((imgs) => ({ ...imgs, [page]: url }));
+            } catch {
+              // preview is best-effort
+            }
+          }
+        })();
+
+      // A chord sheet prints every song's lyrics as text: they are read from
+      // it directly, in the sheet's order, and no page is recognized.
+      const sheet = parsed.chordSheetPages
+        ? parseChordSheet(parsed.chordSheetPages, { corpus: spacingCorpus([...lib, ...(preferredSongs ?? [])]) })
+        : null;
+      if (sheet) {
+        const imported = sheet.map((entry) => {
+          const built = songFromChordSheet(entry, {
+            id: crypto.randomUUID(),
+            linesPerSlide,
+            bilingual: service === 'praise',
+          });
+          built.song.title = chordSheetTitle?.(entry) ?? built.song.title;
+          return { ...built, sheet: entry };
+        });
+        const listed = imported.filter(({ song }) => !isExcludedTitle(song.title, shared.excludedTitles));
+        const excluded = imported.filter((item) => !listed.includes(item));
+        if (excluded.length > 0) {
+          showToast(
+            `${excluded.map(({ song }) => `'${song.title}'`).join(', ')}은(는) 제외 목록에 있어 찬양 편집에서 제외했습니다.`,
+          );
+        }
+        // The Sunday deck sets the 공동체 고백송 and the 설교 후 찬양 apart,
+        // exactly as it does for a conti's cover list.
+        const entries = listed.map(({ song }) => ({ title: song.title }));
+        const roles =
+          service === 'praise' ? null : splitLyricsAndConfessionSongs(entries, shared.confessionSong);
+        const kept = listed.filter((_, index) => entries[index] !== roles?.confessionSong);
+        const postSermon = listed.find((_, index) => entries[index] === roles?.postSermonSong);
+        if (postSermon) postSermon.song.postSermon = true;
+        if (roles?.confessionSong) {
+          showToast(`'${roles.confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다 (백 슬라이드에 포함).`);
+        }
+        infoRef.current = null;
+        setInfo(null);
+        setSongs(kept.map(({ song }) => song));
+        setEdited(false);
+        setPageImages({});
+        setRecog({});
+        autoAttemptedRef.current.clear();
+        // Nothing to recognize: the lyrics are the sheet's own text.
+        for (const { song } of kept) autoAttemptedRef.current.add(song.id);
+        onDateDetected?.(undefined);
+        onChordSheetLoaded?.(kept);
+        showToast(
+          `코드 악보에서 ${kept.length}곡의 가사를 그대로 읽었습니다` +
+            (service === 'praise' ? ' (한글·영어).' : '.') +
+            ' 띄어쓰기와 줄 나눔을 확인해 주세요.',
+        );
+        renderPreviews();
+        return;
+      }
 
       const next: Song[] = [];
       const assigned = new Set<number>();
@@ -1571,9 +1663,9 @@ export default function LyricsGenerator({
       const baseSongs = hasCover
         ? parsed.info.songs
         : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, lib);
-      // Which song is the 공동체 고백송 is an administrator setting, and it
-      // also decides which entry is the 설교 후 찬양 (the one listed after it).
-      const shared = await getSyncedAiSettings();
+      // Which song is the 공동체 고백송 is an administrator setting (read
+      // above), and it also decides which entry is the 설교 후 찬양 (the one
+      // listed after it).
       // A 찬양집회 conti is all praise: nothing is set aside as the 공동체
       // 고백송, and nothing moves after a sermon.
       const { lyricsSongs, confessionSong, postSermonSong } =
@@ -1687,17 +1779,7 @@ export default function LyricsGenerator({
         showToast(`'${postSermonKept.title}'은 설교 후 찬양으로 두었습니다 (설교 뒤 기도 슬라이드 다음).`);
       }
 
-      // Render score previews in the background.
-      void (async () => {
-        for (const page of parsed.musicPages) {
-          try {
-            const url = await doc.renderPage(page, 700);
-            setPageImages((imgs) => ({ ...imgs, [page]: url }));
-          } catch {
-            // preview is best-effort
-          }
-        }
-      })();
+      renderPreviews();
 
       // New songs are auto-recognized by the reactive effect above once
       // recognition is ready (on upload, or later when a key is added).

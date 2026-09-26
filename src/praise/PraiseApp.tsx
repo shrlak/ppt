@@ -18,6 +18,7 @@ import PptLibraryPanel from '../components/PptLibraryPanel';
 import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
 import type { LibraryEntry, Song } from '../lib/utils/types';
+import type { ChordSheetSong, SheetSlide } from '../lib/utils/chordSheet';
 import { normalizeTitle } from '../lib/storage/library';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { AdditionalFile } from '../lib/additionalFiles/types';
@@ -35,12 +36,15 @@ import {
 import PraiseEnglishStep from './PraiseEnglishStep';
 import { buildPraiseDeck, formatCoverDate, isoDateFromConti, suggestPraiseFileName } from './deckBuilder';
 import {
+  englishFromSheet,
+  entryFromSheet,
   entryFromSong,
   fetchSeedEnglish,
   fillEnglishFromLibrary,
   loadSavedEnglish,
   mergeEnglishLibraries,
   saveEnglishEntry,
+  sheetTitles,
   songFromEnglishEntry,
   synchronizeEnglishLibrary,
   type EnglishSongEntry,
@@ -62,6 +66,10 @@ const BASE = import.meta.env.BASE_URL || '/';
 const LAST_DECK_KEY = 'praise-last-deck-id';
 /** How long a song's lyrics must stay unchanged before they are saved. */
 const LYRICS_SAVE_DEBOUNCE_MS = 2500;
+
+function slidesHaveKorean(song: Song): boolean {
+  return song.sections.some((section) => section.lines.some((line) => /[가-힣]/.test(line)));
+}
 
 function englishLineCount(entry: EnglishSongEntry): number {
   return entry.slides.reduce((sum, slide) => sum + slide.en.length, 0);
@@ -150,6 +158,9 @@ export default function PraiseApp() {
   const [fileNameOverride, setFileNameOverride] = useState<string | null>(null);
   const [englishLibrary, setEnglishLibrary] = useState<EnglishSongEntry[]>([]);
   const seedRef = useRef<EnglishSongEntry[]>([]);
+  // The songs of the chord sheet this night was read from, both languages:
+  // English goes back under the Korean from here however a song is re-split.
+  const [sheetLibrary, setSheetLibrary] = useState<EnglishSongEntry[]>([]);
 
   const [restore, setRestore] = useState<{ version: number; songs: Song[] | null; conti: { name: string; data: ArrayBuffer } | null }>(
     { version: 0, songs: null, conti: null },
@@ -202,22 +213,60 @@ export default function PraiseApp() {
   }, []);
 
   // English the library already knows goes in by itself — only into empty
-  // slides, never over anything typed, pasted or asked of the AI.
+  // slides, never over anything typed, pasted or asked of the AI. This year's
+  // chord sheet is asked first, then everything saved before.
   useEffect(() => {
-    if (englishLibrary.length === 0 || songs.length === 0) return;
+    const sources = [sheetLibrary, englishLibrary].filter((entries) => entries.length > 0);
+    if (sources.length === 0 || songs.length === 0) return;
     setExtras((previous) => {
       let changed = false;
       const next = { ...previous };
       for (const song of songs) {
         const current = extrasFor(previous, song.id);
-        const { english, filled, titleFilled } = fillEnglishFromLibrary(song, current.english, englishLibrary);
-        if (filled === 0 && !titleFilled) continue;
+        let english = current.english;
+        let found = false;
+        for (const entries of sources) {
+          const result = fillEnglishFromLibrary(song, english, entries);
+          english = result.english;
+          found ||= result.filled > 0 || result.titleFilled;
+        }
+        if (!found) continue;
         next[song.id] = { ...current, english, englishSource: current.englishSource ?? 'memory' };
         changed = true;
       }
       return changed ? next : previous;
     });
-  }, [songs, englishLibrary]);
+  }, [songs, englishLibrary, sheetLibrary]);
+
+  // ---- chord-sheet 콘티: both languages straight from the sheet ----
+  // Latest library, for callbacks that must stay referentially stable.
+  const englishLibraryRef = useRef(englishLibrary);
+  englishLibraryRef.current = englishLibrary;
+  const chordSheetTitle = useCallback(
+    (sheet: ChordSheetSong) => sheetTitles(sheet, englishLibraryRef.current).title,
+    [],
+  );
+  const handleChordSheetLoaded = useCallback(
+    (imported: { song: Song; sheet: ChordSheetSong; slides: SheetSlide[] }[]) => {
+      const entries: EnglishSongEntry[] = [];
+      const english: Record<string, PraiseSongExtras> = {};
+      for (const { song, sheet, slides } of imported) {
+        const { englishTitle } = sheetTitles(sheet, englishLibraryRef.current);
+        english[song.id] = { english: englishFromSheet(slides, englishTitle), englishSource: 'sheet' };
+        entries.push(entryFromSheet(song.title, englishTitle, slides));
+      }
+      setSheetLibrary(entries);
+      setExtras(english);
+      const unnamed = imported.filter(({ song }) => !/[가-힣]/.test(song.title) && slidesHaveKorean(song));
+      if (unnamed.length > 0) {
+        showToast(
+          `${unnamed.map(({ song }) => `'${song.title}'`).join(', ')}은(는) 한글 제목을 찾지 못해 영어 제목으로 두었습니다. 찬양 단계에서 한글 제목을 넣어 주세요.`,
+          'warn',
+        );
+      }
+    },
+    [],
+  );
 
   // The bilingual songs, offered to the 찬양 step ahead of the 찬양 라이브러리:
   // a conti naming one loads its Korean split exactly as its English was.
@@ -236,8 +285,6 @@ export default function PraiseApp() {
   // lyrics settle — no button to press. The Korean also reaches the 찬양
   // 라이브러리 through the 찬양 step's own draft save, and that is all the
   // Sunday page ever reads: other services load the Korean only.
-  const englishLibraryRef = useRef(englishLibrary);
-  englishLibraryRef.current = englishLibrary;
   useEffect(() => {
     if (!ready || songs.length === 0) return;
     const timer = window.setTimeout(() => {
@@ -515,6 +562,7 @@ export default function PraiseApp() {
     setCoverImage(null);
     setFileNameOverride(null);
     setContiFile(null);
+    setSheetLibrary([]);
     setOverview(null);
     setSongs([]);
     setRestore((previous) => ({ version: previous.version + 1, songs: [], conti: null }));
@@ -590,6 +638,8 @@ export default function PraiseApp() {
               restoreConti={restore.conti}
               replaceSong={replaceSong}
               preferredSongs={preferredSongs}
+              chordSheetTitle={chordSheetTitle}
+              onChordSheetLoaded={handleChordSheetLoaded}
               onContiDropAnywhere={showSongsStep}
             />
             <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="praise" />

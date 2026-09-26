@@ -14,6 +14,7 @@
 import { cloudLibraryJson, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { normalizeTitle } from '../lib/storage/library';
 import type { Song } from '../lib/utils/types';
+import { isBilingualSheetSong, type ChordSheetSong, type SheetSlide } from '../lib/utils/chordSheet';
 import { normalizeLyricLine, planPraiseSong, slideKey } from './planner';
 import type { PraiseEnglish } from './types';
 
@@ -429,4 +430,76 @@ export async function synchronizeEnglishLibrary(): Promise<EnglishLibrarySyncRes
   } catch (error) {
     return { entries: local, state: 'error', message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// ---- chord-sheet 콘티 ---------------------------------------------------------
+
+/** How alike two titles must be to name the same song ("Savior" / "Saviour"). */
+const TITLE_MATCH = 0.85;
+
+/**
+ * The saved song a chord-sheet song is, if any: by either of its titles, by a
+ * title spelled a little differently, or — for a sheet that names the song
+ * only in English — by its Korean lyrics.
+ */
+export function findEntryForSheet(entries: EnglishSongEntry[], sheet: ChordSheetSong): EnglishSongEntry | undefined {
+  for (const title of [sheet.title, sheet.altTitle ?? '']) {
+    const found = title ? findEnglishEntry(entries, title) : undefined;
+    if (found) return found;
+  }
+  const wanted = normalizeTitle(sheet.title);
+  if (wanted.length >= 4) {
+    // "나의 슬픔을" last year, "나의 슬픔을 주가 기쁨으로" on this sheet.
+    const close = entries.find((entry) =>
+      [entry.title, entry.englishTitle].some((title) => {
+        const known = title ? normalizeTitle(title) : '';
+        if (known.length < 4) return false;
+        return known.startsWith(wanted) || wanted.startsWith(known) || textSimilarity(known, wanted) >= TITLE_MATCH;
+      }),
+    );
+    if (close) return close;
+  }
+  // The same Korean lyrics, however the lines are broken: most of the sheet's
+  // parts read as a stretch of the saved song.
+  const parts = sheet.parts.map((part) => part.ko.map(normalizeLyricLine).join('')).filter((text) => text.length >= 6);
+  if (parts.length === 0) return undefined;
+  return entries.find((entry) => {
+    const cells = cellsOf(entry);
+    if (cells.length === 0) return false;
+    const matched = parts.filter((text) => bestRun(cells, text, MATCH_THRESHOLD));
+    return matched.length * 2 >= parts.length;
+  });
+}
+
+/**
+ * The two titles a chord-sheet song goes by on the 찬양집회 deck. A sheet
+ * titled in Korean keeps that title and borrows the English one it was sung
+ * under before; a bilingual song the sheet titles in English ("Goodness Of
+ * God") takes the Korean title it was saved under, with the sheet's title as
+ * its English one.
+ */
+export function sheetTitles(sheet: ChordSheetSong, entries: EnglishSongEntry[]): { title: string; englishTitle: string } {
+  const entry = findEntryForSheet(entries, sheet);
+  if (/[가-힣]/.test(sheet.title)) return { title: sheet.title, englishTitle: entry?.englishTitle ?? '' };
+  if (!isBilingualSheetSong(sheet)) return { title: sheet.title, englishTitle: '' };
+  return entry && /[가-힣]/.test(entry.title)
+    ? { title: entry.title, englishTitle: sheet.title }
+    : { title: sheet.title, englishTitle: '' };
+}
+
+/** A chord-sheet song's English, keyed by the Korean slide each part was divided into. */
+export function englishFromSheet(slides: SheetSlide[], englishTitle: string): PraiseEnglish {
+  const byKey: Record<string, string[]> = {};
+  for (const slide of slides) {
+    if (slide.ko.length > 0 && slide.en.length > 0) byKey[slideKey(slide.ko)] = [...slide.en];
+  }
+  return { title: englishTitle, slides: byKey };
+}
+
+/**
+ * The sheet's song as a library entry, so English can be matched back to the
+ * Korean however the song is later split into slides.
+ */
+export function entryFromSheet(title: string, englishTitle: string, slides: SheetSlide[]): EnglishSongEntry {
+  return { title, englishTitle, slides: slides.map((slide) => ({ ko: [...slide.ko], en: [...slide.en] })) };
 }

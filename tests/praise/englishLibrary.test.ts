@@ -3,15 +3,19 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   englishForSlide,
+  englishFromSheet,
+  entryFromSheet,
   entryFromSong,
   fillEnglishFromLibrary,
   findEnglishEntry,
   mergeEnglishLibraries,
   sanitizeEnglishEntries,
+  sheetTitles,
   songFromEnglishEntry,
   type EnglishSongEntry,
 } from '../../src/praise/englishLibrary';
-import { planPraiseSong } from '../../src/praise/planner';
+import { planPraiseSong, slideKey } from '../../src/praise/planner';
+import { songFromChordSheet, type ChordSheetSong } from '../../src/lib/utils/chordSheet';
 import type { Song } from '../../src/lib/utils/types';
 
 const seed = sanitizeEnglishEntries(
@@ -133,5 +137,70 @@ describe('matching lyrics that break lines differently', () => {
 
   it('does not borrow English for lyrics the song never had', () => {
     expect(englishForSlide(['완전히 다른 곡의 가사 첫 줄', '그리고 전혀 상관없는 둘째 줄'], howGreat)).toBeNull();
+  });
+});
+
+describe('a chord-sheet 콘티', () => {
+  const sheet = (title: string, parts: ChordSheetSong['parts'], altTitle?: string): ChordSheetSong => ({
+    title,
+    ...(altTitle ? { altTitle } : {}),
+    pages: [1],
+    parts,
+  });
+
+  it('gives a song the sheet titles in English the Korean title it was sung under', () => {
+    const goodness = sheet('Goodness Of God', [
+      { label: 'V', heading: 'VERSE 1', ko: ['사랑해요 신실하신 나의 주님'], en: ['I love You Lord oh Your mercy never fails me'] },
+    ]);
+    expect(sheetTitles(goodness, seed)).toEqual({ title: '주님의 선하심', englishTitle: 'Goodness Of God' });
+    // "Saviour" on the sheet, "Savior" last year.
+    const beautiful = sheet('Beautiful Saviour', [
+      { label: 'V', heading: 'VERSE', ko: ['예수 아름다우신'], en: ['Jesus beautiful Saviour'] },
+    ]);
+    expect(sheetTitles(beautiful, seed).title).toBe('예수 아름다우신');
+    // A song only ever sung in English keeps its one title.
+    const whoElse = sheet('Who Else', [{ label: 'C', heading: 'CHORUS', ko: [], en: ['Who else is worthy'] }]);
+    expect(sheetTitles(whoElse, seed)).toEqual({ title: 'Who Else', englishTitle: '' });
+  });
+
+  it('borrows the English title for a Korean title printed longer than last year’s', () => {
+    const mourning = sheet('나의 슬픔을 주가 기쁨으로', [
+      { label: 'C', heading: 'CHORUS', ko: ['나의 슬픔을 주가 기쁨으로'], en: ['He’s turned my mourning into dancing again'] },
+    ]);
+    expect(sheetTitles(mourning, seed)).toEqual({ title: '나의 슬픔을 주가 기쁨으로', englishTitle: 'Mourning into Dancing' });
+  });
+
+  it('finds a song by its Korean lyrics when neither title matches', () => {
+    const unnamed = sheet('Jesus We Enthrone You (Live)', [
+      { label: 'V', heading: 'VERSE', ko: ['예수 우리 왕이여', '이곳에 오소서', '보좌로 주여 임하사', '찬양을 받아 주소서'], en: ['Jesus, we enthrone You'] },
+    ]);
+    expect(sheetTitles(unnamed, seed).title).toBe('예수 우리 왕이여');
+  });
+
+  it('keeps each slide’s English under the Korean it was printed with, however the song is re-split', () => {
+    const howGreat = sheet('주 하나님 지으신 모든 세계', [
+      {
+        label: 'V',
+        heading: 'VERSE 1',
+        ko: ['주 하나님 지으신 모든 세계', '내 마음 속에 그리어 볼 때', '하늘의 별 울려 퍼지는 뇌성', '주님의 권능 우주에 찼네'],
+        en: ['O Lord my God', 'When I in awesome wonder', 'I see the stars,', 'I hear the rolling thunder,'],
+      },
+    ]);
+    const { song, slides } = songFromChordSheet(howGreat, { id: 'how-great', linesPerSlide: 3, bilingual: true });
+    const english = englishFromSheet(slides, 'How Great Thou Art');
+    expect(english.title).toBe('How Great Thou Art');
+    expect(english.slides[slideKey(['주 하나님 지으신 모든 세계', '내 마음 속에 그리어 볼 때'])]).toEqual([
+      'O Lord my God',
+      'When I in awesome wonder',
+    ]);
+    expect(planPraiseSong(song, { english }).slides.every((slide) => slide.english.length === 2)).toBe(true);
+
+    // All four lines on one slide: the sheet's entry still has English for it.
+    const joined: Song = { ...song, sections: [{ label: 'V', lines: howGreat.parts[0].ko }], linesPerSlide: 4 };
+    const refilled = fillEnglishFromLibrary(joined, { title: '', slides: {} }, [
+      entryFromSheet(song.title, 'How Great Thou Art', slides),
+    ]);
+    expect(refilled.filled).toBe(1);
+    expect(Object.values(refilled.english.slides)[0]).toHaveLength(4);
   });
 });
