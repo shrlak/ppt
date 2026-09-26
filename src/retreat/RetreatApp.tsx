@@ -1,8 +1,9 @@
 // 수련회 PPT 생성기 — one deck per 집회, in the retreat's own design.
 //
-// Three steps: 수련회 정보·콘티 (the retreat's name, and the 찬양 콘티 whose
-// columns fill each session's songs) → 집회 순서 (each session's order of
-// service: poster, songs, 설교말씀, 설교, 기도회, 축도, 광고…) → 다운로드.
+// Three steps: 수련회 정보·콘티 (the retreat's name, and the 찬양 콘티 — one
+// PDF or several — whose table's columns fill each session's songs) →
+// 집회 순서 (each session's order of service: poster, songs, 설교말씀, 설교,
+// 기도회, 축도, 광고…) → 다운로드.
 //
 // The closing Sunday service is a Sunday deck, so it is made with the
 // 주일예배 generator; this page lists its songs and links there.
@@ -27,13 +28,13 @@ import {
   upsertEntry,
 } from '../lib/storage/library';
 import { useSaveSoon } from '../lib/storage/saveSoon';
-import { getSavedDeck, saveDeckToLibrary, type SavedDeck } from '../lib/storage/pptLibrary';
+import { getSavedDeck, saveDeckToLibrary, type SavedDeck, type SavedFile } from '../lib/storage/pptLibrary';
 import { loadTranslation } from '../bible/bibleData';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from '../lib/pptx/pptxRenderer';
 import { isWednesdaySource } from '../wednesday/source';
 import { isPraiseSource } from '../praise/source';
 import RetreatBlockEditor from './RetreatBlockEditor';
-import { parseRetreatConti } from './conti';
+import { parseRetreatContiPages } from './conti';
 import { buildRetreatDeck } from './deckBuilder';
 import { clearRetreatDraft, loadRetreatDraft, saveRetreatDraft } from './draft';
 import { planRetreatSession, suggestRetreatFileName } from './planner';
@@ -46,9 +47,9 @@ import {
 } from './songs';
 import {
   attachPosters,
-  decodeRetreatPosters,
+  decodeRetreatFiles,
   decodeRetreatSource,
-  encodeRetreatPosters,
+  encodeRetreatFiles,
   encodeRetreatSource,
   isRetreatSource,
 } from './source';
@@ -174,7 +175,8 @@ export default function RetreatApp() {
   const [ready, setReady] = useState(false);
   const [seeds, setSeeds] = useState<RetreatSongSeed[]>([]);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
-  const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
+  /** The conti as uploaded — a retreat's can come as several PDFs. */
+  const [contiFiles, setContiFiles] = useState<SavedFile[]>([]);
   const [contiSummary, setContiSummary] = useState<string[] | null>(null);
   const [readingConti, setReadingConti] = useState(false);
   const [passages, setPassages] = useState<Record<string, RetreatPassage | null | undefined>>({});
@@ -204,11 +206,12 @@ export default function RetreatApp() {
       showToast(`'${deck.name}'은(는) 수련회 입력 내용이 함께 저장되지 않았습니다.`, 'warn');
       return;
     }
-    const restored = attachPosters(decoded.state, await decodeRetreatPosters(deck.additionalFiles ?? null));
+    const { posters, contis } = await decodeRetreatFiles(deck.additionalFiles ?? null);
+    const restored = attachPosters(decoded.state, posters);
     setState(restored);
     setActiveSessionId(decoded.sessionId ?? restored.sessions[0]?.id ?? '');
     if (decoded.sessionId) writeLibraryIds({ ...readLibraryIds(), [decoded.sessionId]: deck.id });
-    setContiFile(deck.contiPdf);
+    setContiFiles(deck.contiPdf ? [deck.contiPdf, ...contis] : contis);
     setStep(1);
     showToast(`'${deck.name}'을(를) 불러왔습니다.`);
   }, []);
@@ -319,18 +322,46 @@ export default function RetreatApp() {
       blocks: session.blocks.map((candidate) => (candidate.id === block.id ? block : candidate)),
     }));
 
-  async function readContiFile(file: File) {
+  /**
+   * Add conti PDFs and read their song table, from whichever page of
+   * whichever file holds it. A conti with no table (or none in these files)
+   * is still kept with the decks; its songs are put in by hand.
+   */
+  async function addContiFiles(files: File[]) {
     setReadingConti(true);
     try {
-      const data = await file.arrayBuffer();
-      const doc = await loadConti(data.slice(0));
-      const text = doc.parsed.pageTexts[0] ?? '';
-      doc.destroy();
-      const slots = parseRetreatConti(text);
-      if (slots.length === 0) throw new Error('콘티 첫 장에서 곡 목록을 찾지 못했습니다. 곡은 집회 순서에서 직접 넣어 주세요.');
+      const added: SavedFile[] = [];
+      const unreadable: string[] = [];
+      const pageTexts: string[] = [];
+      for (const file of files) {
+        const data = await file.arrayBuffer();
+        try {
+          const doc = await loadConti(data.slice(0));
+          pageTexts.push(...doc.parsed.pageTexts);
+          doc.destroy();
+          added.push({ name: file.name, data });
+        } catch {
+          unreadable.push(file.name);
+        }
+      }
+      if (unreadable.length > 0) showToast(`PDF로 읽지 못해 건너뛰었습니다: ${unreadable.join(', ')}`, 'error');
+      if (added.length === 0) return;
+      setContiFiles((current) => {
+        const known = new Set(current.map((file) => `${file.name}/${file.data.byteLength}`));
+        return [...current, ...added.filter((file) => !known.has(`${file.name}/${file.data.byteLength}`))];
+      });
+
+      const slots = parseRetreatContiPages(pageTexts);
+      if (slots.length === 0) {
+        showToast(
+          contiSummary
+            ? `콘티 ${added.length}개를 더 올렸습니다.`
+            : '콘티를 올렸습니다. 곡 표는 찾지 못해 곡은 집회 순서에서 직접 넣어 주세요.',
+        );
+        return;
+      }
       const result = applyConti(state, slots, resolveSong);
       setState(result.state);
-      setContiFile({ name: file.name, data });
       setContiSummary([
         ...result.placed.map((item) => `${item.label} → ${item.target} (${item.count}곡)`),
         ...result.unplaced.map((label) => `${label} → 넣을 곳이 없어 건너뜀`),
@@ -378,10 +409,10 @@ export default function RetreatApp() {
         {
           name,
           pptx: { name, data: deck.slice().buffer as ArrayBuffer },
-          contiPdf: contiFile,
+          contiPdf: contiFiles[0] ?? null,
           sermonPptx: null,
           source: encodeRetreatSource(state, session.id),
-          additionalFiles: await encodeRetreatPosters(state),
+          additionalFiles: await encodeRetreatFiles(state, contiFiles.slice(1)),
           slideCount: overview.length,
           songTitles: session.blocks.flatMap((block) => (block.kind === 'songs' ? block.songs.map((song) => song.title) : [])),
           keep: true,
@@ -431,7 +462,7 @@ export default function RetreatApp() {
     const fresh = defaultRetreat();
     setState(fresh);
     setActiveSessionId(fresh.sessions[0].id);
-    setContiFile(null);
+    setContiFiles([]);
     setContiSummary(null);
     setOverviews({});
     setPreview(null);
@@ -502,25 +533,44 @@ export default function RetreatApp() {
                 <div className="retreat-row">
                   <label className="btn">
                     <Icon name="upload" />
-                    {readingConti ? '읽는 중…' : contiFile ? '다른 콘티 올리기' : '콘티 올리기'}
+                    {readingConti ? '읽는 중…' : contiFiles.length > 0 ? '콘티 더 올리기' : '콘티 올리기'}
                     <input
                       type="file"
                       accept="application/pdf,.pdf"
+                      multiple
                       className="visually-hidden"
                       data-testid="retreat-conti-input"
                       disabled={readingConti}
                       onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file) void readContiFile(file);
+                        const files = Array.from(event.target.files ?? []);
+                        if (files.length > 0) void addContiFiles(files);
                         event.target.value = '';
                       }}
                     />
                   </label>
-                  {contiFile && <span className="field-hint">{contiFile.name}</span>}
                 </div>
+                {contiFiles.length > 0 && (
+                  <ul className="retreat-conti-files" data-testid="retreat-conti-files">
+                    {contiFiles.map((file, index) => (
+                      <li key={`${file.name}/${index}`}>
+                        <Icon name="file" />
+                        <span className="retreat-conti-name">{file.name}</span>
+                        <button
+                          type="button"
+                          className="btn btn-icon"
+                          aria-label={`${file.name} 빼기`}
+                          onClick={() => setContiFiles((current) => current.filter((_, other) => other !== index))}
+                        >
+                          <Icon name="close" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <span className="field-hint">
-                  첫 장의 표(금요일 오후 예배, 기도회, 토요일 오전 특강 …)를 읽습니다. 곡 앞에 X를 적은 곡은 빼고,
-                  작년 수련회 PPT에 있던 곡과 찬양 라이브러리 곡은 가사까지 채웁니다.
+                  PDF 여러 개를 한 번에 올리거나 이어서 더 올릴 수 있습니다. 모든 장에서 표(금요일 오후 예배, 기도회, 토요일
+                  오전 특강 …)를 찾아 읽고, 곡 앞에 X를 적은 곡은 뺍니다. 작년 수련회 PPT에 있던 곡과 찬양 라이브러리 곡은
+                  가사까지 채웁니다. 표가 없는 콘티도 올릴 수 있고, 그때 곡은 집회 순서에서 직접 넣습니다.
                 </span>
                 {contiSummary && (
                   <ul className="retreat-conti-summary" data-testid="retreat-conti-summary">

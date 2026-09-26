@@ -4620,6 +4620,25 @@ main[data-direction='back'] .wizard-panel.active {
   gap: var(--s-1);
   margin-left: auto;
 }
+.retreat-conti-files {
+  display: grid;
+  gap: var(--s-1);
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.retreat-conti-files li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.retreat-conti-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .retreat-conti-summary {
   margin: var(--s-2) 0 0;
   padding-left: var(--s-5);

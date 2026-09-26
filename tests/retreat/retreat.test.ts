@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { parseRetreatConti } from '../../src/retreat/conti';
+import { parseRetreatConti, parseRetreatContiPages } from '../../src/retreat/conti';
 import { buildRetreatDeck } from '../../src/retreat/deckBuilder';
 import { planRetreatSession, suggestRetreatFileName, titleLines } from '../../src/retreat/planner';
 import { resolveRetreatPassage, type BibleLoader } from '../../src/retreat/scripture';
@@ -15,9 +15,9 @@ import {
 } from '../../src/retreat/songs';
 import {
   attachPosters,
-  decodeRetreatPosters,
+  decodeRetreatFiles,
   decodeRetreatSource,
-  encodeRetreatPosters,
+  encodeRetreatFiles,
   encodeRetreatSource,
   isRetreatSource,
 } from '../../src/retreat/source';
@@ -82,6 +82,34 @@ describe('parseRetreatConti', () => {
       { day: '주일', part: '예배' },
     ]);
     expect(slots[6].songs).not.toContain('주 이름 찬양');
+  });
+});
+
+describe('parseRetreatContiPages', () => {
+  // A conti's other pages: a cover, and a score whose text layer has
+  // numbered lines but no 금요일/토요일/주일 header over them.
+  const cover = '2026 겨울수련회\n찬양팀 콘티';
+  const score = '주 안에서 기뻐해\n1. 주님 주신 기쁨으로\n2. 기뻐하라';
+
+  it('finds the table on whichever page, of whichever file, holds it', () => {
+    const slots = parseRetreatContiPages([cover, score, contiText]);
+    expect(slots).toEqual(parseRetreatConti(contiText));
+  });
+
+  it('is empty when no page has the table, so the songs are put in by hand', () => {
+    expect(parseRetreatContiPages([cover, score])).toEqual([]);
+    expect(parseRetreatContiPages([])).toEqual([]);
+  });
+
+  it('joins a table split over two pages, keeping the first reading of a column', () => {
+    const friday = '금요일 오후\n예배 (20m)\n1. 모두 찬양해\n2. 주품에';
+    const later = '금요일 오후\n예배 (20m)\n토요일 오전\n특강\n1. 다른 곡\n1. 푯대를 향하여';
+    const slots = parseRetreatContiPages([friday, later]);
+    expect(slots.map((slot) => slot.key)).toEqual([
+      { day: '금', part: '예배' },
+      { day: '토', part: '특강' },
+    ]);
+    expect(slots[0].songs).toEqual(['모두 찬양해', '주품에']);
   });
 });
 
@@ -313,12 +341,38 @@ describe('retreat snapshot', () => {
 
     const decoded = decodeRetreatSource(file)!;
     expect(decoded.sessionId).toBe(state.sessions[0].id);
-    const posters = await decodeRetreatPosters(await encodeRetreatPosters(state));
+    const { posters, contis } = await decodeRetreatFiles(await encodeRetreatFiles(state));
+    expect(contis).toEqual([]);
     const restored = attachPosters(decoded.state, posters);
     expect(restored.sessions.map((session) => session.name)).toEqual(state.sessions.map((session) => session.name));
     expect(restored.sessions[0].poster?.data.byteLength).toBe(png.byteLength);
     expect(restored.sessions[0].poster?.background).toBe('ABCDEF');
     expect(restored.sessions[0].blocks.map((block) => block.kind)).toEqual(state.sessions[0].blocks.map((block) => block.kind));
     expect(restored.closingSongs).toEqual(['입례']);
+  });
+
+  it('keeps the conti PDFs past the first beside the posters', async () => {
+    const state = defaultRetreat();
+    const png = readFileSync(join(root, 'tests', 'fixtures', 'sheet-page.png'));
+    state.sessions[1].poster = {
+      name: 'p.png',
+      mimeType: 'image/png',
+      data: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer,
+      width: 10,
+      height: 20,
+      background: '000000',
+    };
+    const pdf = readFileSync(join(root, 'samples', 'conti-example.pdf'));
+    const second = { name: '콘티 2.pdf', data: pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer };
+    const notPdf = { name: 'x.pdf', data: new TextEncoder().encode('not a pdf').buffer as ArrayBuffer };
+
+    const { posters, contis } = await decodeRetreatFiles(await encodeRetreatFiles(state, [second, notPdf]));
+    expect([...posters.keys()]).toEqual([state.sessions[1].id]);
+    expect(contis.map((file) => file.name)).toEqual(['콘티 2.pdf']);
+    expect(contis[0].data.byteLength).toBe(pdf.byteLength);
+
+    const onlyContis = await encodeRetreatFiles(defaultRetreat(), [second]);
+    expect((await decodeRetreatFiles(onlyContis)).contis).toHaveLength(1);
+    expect(await encodeRetreatFiles(defaultRetreat())).toBeNull();
   });
 });

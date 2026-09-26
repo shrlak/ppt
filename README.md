@@ -502,9 +502,12 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 ### 1단계 · 수련회 정보·콘티
 
 - **수련회 이름·부제·주제** — 제목 슬라이드와 광고 슬라이드 아래 줄에 들어갑니다.
-- **찬양 콘티(PDF)** — 첫 장의 표(금요일 오후 예배 / 금요일 오후 기도회 / 토요일 오전 특강 / 토요일
-  오후 예배 / 토요일 오후 기도회 / 토요일 오후 찬양집회 / 주일 예배)를 읽어 **칸마다 해당 집회의 찬양
-  순서에** 넣습니다. 두 줄로 나뉜 제목은 이어 붙이고 `*` 표시는 지우며, 앞에 `X`를 적은 곡은 뺍니다.
+- **찬양 콘티(PDF)** — **PDF 여러 개**를 한 번에 올리거나 이어서 더 올릴 수 있습니다. 모든 파일의 모든 장에서
+  표(금요일 오후 예배 / 금요일 오후 기도회 / 토요일 오전 특강 / 토요일 오후 예배 / 토요일 오후 기도회 / 토요일
+  오후 찬양집회 / 주일 예배)를 찾아 **칸마다 해당 집회의 찬양 순서에** 넣습니다. 두 줄로 나뉜 제목은 이어 붙이고
+  `*` 표시는 지우며, 앞에 `X`를 적은 곡은 뺍니다. **표가 없는 콘티도 올릴 수 있고**, 그때는 곡을 집회 순서에서
+  직접 넣습니다. 올린 PDF는 모두 PPT와 함께 라이브러리에 저장되고 **편집**으로 다시 열면 그대로 돌아옵니다
+  (라이브러리의 `콘티 PDF` 버튼은 첫 파일).
 - 곡 가사는 **작년 수련회 PPT에 나온 20곡**(`public/retreat-songs.json` — 슬라이드 나눔 그대로)에서
   먼저, 없으면 **찬양 라이브러리**에서 채웁니다. 둘 다 없으면 가사 칸에 붙여넣습니다.
 - **주일 폐회예배**는 주일예배와 같은 디자인이라 **주일예배 생성기**에서 만듭니다. 콘티의 주일 찬양
@@ -798,8 +801,9 @@ the weekly Sunday purge never deletes them — only a manual delete does.
 
 **수련회 (retreat)** has its own page at `/ppt/retreat.html` and makes one deck per session in the
 retreat's design (`public/retreat-template.pptx`, 13 designs derived from the 2026 retreat's first-night
-deck by `scripts/prepare-retreat-template.mjs`). The retreat conti's song table is read column by column
-into each session's songs; lyrics come from the 20 songs last year's retreat decks projected
+deck by `scripts/prepare-retreat-template.mjs`). The retreat conti may be several PDFs; its song table is
+found on whichever page holds it and read column by column into each session's songs (a conti with no
+table is kept all the same, its songs typed in by hand); lyrics come from the 20 songs last year's retreat decks projected
 (`public/retreat-songs.json`), then the lyrics library. Each session is an editable order of service —
 poster cover, title, songs with section dividers, 설교말씀 as 개역개정 + ESV verse slides, sermon title,
 blank, 기도, 축도, 광고. The closing Sunday service is made with the Sunday wizard. Retreat decks are
