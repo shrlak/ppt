@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
-import { deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
+import { dateFromFileName, deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import {
   parseChordSheet,
   songFromChordSheet,
@@ -495,6 +495,7 @@ export default function LyricsGenerator({
     const reading = new Set(readingIds.split(','));
     const timer = window.setTimeout(() => {
       const updates = new Map<string, Pick<Song, 'verification' | 'version'>>();
+      const drafts: string[] = [];
       for (const song of songs) {
         if (!song.title.trim() || /^새 찬양/.test(song.title) || !songHasLyrics(song)) continue;
         // A page still being read is not settled yet.
@@ -517,9 +518,12 @@ export default function LyricsGenerator({
         const entry = saveToLibrary(song, verification);
         if (!entry) continue;
         updates.set(song.id, { verification, version: entry.version });
-        if (!previous && verification === 'draft') {
-          showToast(`'${song.title}' 을(를) 초안으로 저장했습니다.`);
-        }
+        if (!previous && verification === 'draft') drafts.push(song.title);
+      }
+      // One notice for the whole batch: a conti of ten new songs is one save.
+      if (drafts.length === 1) showToast(`'${drafts[0]}' 을(를) 초안으로 저장했습니다.`);
+      else if (drafts.length > 1) {
+        showToast(`새 곡 ${drafts.length}곡(${drafts.map((title) => `'${title}'`).join(', ')})을 초안으로 저장했습니다.`);
       }
       if (updates.size === 0) return;
       setSongs((current) =>
@@ -1644,7 +1648,8 @@ export default function LyricsGenerator({
         autoAttemptedRef.current.clear();
         // Nothing to recognize: the lyrics are the sheet's own text.
         for (const { song } of kept) autoAttemptedRef.current.add(song.id);
-        onDateDetected?.(undefined);
+        // A chord sheet prints no date; its file name often does.
+        onDateDetected?.(dateFromFileName(file.name));
         onChordSheetLoaded?.(kept);
         showToast(
           `코드 악보에서 ${kept.length}곡의 가사를 그대로 읽었습니다` +
@@ -1762,7 +1767,7 @@ export default function LyricsGenerator({
       setPageImages({});
       setRecog({});
       autoAttemptedRef.current.clear();
-      onDateDetected?.(parsed.info.date);
+      onDateDetected?.(parsed.info.date ?? dateFromFileName(file.name));
       onContiInfoDetected?.(parsed.info);
       if (!hasCover && next.length > 0) {
         showToast(

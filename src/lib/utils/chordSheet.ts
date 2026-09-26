@@ -255,44 +255,69 @@ export function joinSplitWords(text: string): string {
 // ---- Korean spacing -------------------------------------------------------
 
 /**
- * Syllables that almost always close a word rather than open one — particles
- * and verb endings. Used only when the corpus has never seen the two
- * syllables side by side.
+ * Syllables that almost never open a word — particles and verb endings
+ * (은/는/을/를/의/에, …며/…네/…요). Used only when the corpus has never seen
+ * the two syllables side by side. Syllables that also start common words
+ * (소리, 기뻐, 어둠, 이름, 고난) are left out: a wrong space there is easier to
+ * spot than two words run together.
  */
-const BOUND_SYLLABLES = new Set(
-  '은는을를이가의에께로으과와도고며면네요죠서니리라랑셨신심소해게어여야지기던든된워줘였었았겠까며처듯뿐만'.split(''),
-);
+const BOUND_SYLLABLES = new Set('은는을를의에께과와며면네요죠셨랑듯뿐'.split(''));
 
 function syllables(text: string): string[] {
   return [...text].filter((char) => HANGUL_SYLLABLE.test(char));
 }
 
 /**
- * Learn Korean word breaks from lines whose spacing is trusted: how often two
- * syllables sit together inside a word, and how often the first ends a word
- * the second opens. An open gap gets a space when the corpus has seen that
- * pair apart more often than together; a pair it has never seen is joined
- * only when the second syllable is a particle or an ending.
+ * Learn Korean word breaks from lines whose spacing is trusted.
+ *
+ * An open gap is decided on whole words first: how often the corpus writes
+ * the word before the gap run on into what follows it ("기뻐", "영혼이")
+ * against how often it writes that word and then a new word starting the same
+ * way ("영광 소리쳐", "모든 것"). A stray typo in the corpus is outvoted by
+ * the usual spelling. When the corpus has neither, the two syllables either
+ * side of the gap decide: a space when it has seen them apart more often than
+ * together, and for a pair it has never seen, a join only before a particle
+ * or an ending.
  */
 export function createSpacingModel(corpus: string[]): SpacingModel {
   const together = new Map<string, number>();
   const apart = new Map<string, number>();
+  /** Every start of every word: "기뻐하며" counts for 기뻐, 기뻐하, 기뻐하며. */
+  const runOn = new Map<string, number>();
+  /** A word, then the start of the word after it: "영광|소", "영광|소리"… */
+  const followedBy = new Map<string, number>();
   const add = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
   for (const line of corpus) {
-    const words = line.split(/\s+/).map(syllables).filter((word) => word.length > 0);
-    words.forEach((word, index) => {
+    const lineWords = line.split(/\s+/).map(syllables).filter((word) => word.length > 0);
+    lineWords.forEach((word, index) => {
       for (let k = 0; k + 1 < word.length; k++) add(together, word[k] + word[k + 1]);
-      const next = words[index + 1];
-      if (next) add(apart, word[word.length - 1] + next[0]);
+      for (let k = 2; k <= word.length; k++) add(runOn, word.slice(0, k).join(''));
+      const next = lineWords[index + 1];
+      if (!next) return;
+      add(apart, word[word.length - 1] + next[0]);
+      const text = word.join('');
+      for (let k = 1; k <= next.length; k++) add(followedBy, `${text}|${next.slice(0, k).join('')}`);
     });
   }
   return (left, right) => {
-    const a = syllables(left).pop();
-    const b = syllables(right)[0];
-    if (!a || !b) return true;
-    const joined = together.get(a + b) ?? 0;
-    const spaced = apart.get(a + b) ?? 0;
-    if (joined + spaced > 0) return spaced > joined;
+    const leftWord = syllables(left.split(/\s/).pop() ?? '').join('');
+    const rightWord = syllables(right.split(/\s/)[0] ?? '').join('');
+    if (!leftWord || !rightWord) return true;
+    // Counted over every start of what follows — "영광|소리쳐", "영광|소리",
+    // "영광|소" — so one rare spelling cannot outvote the usual one.
+    let joined = 0;
+    let spaced = 0;
+    for (let length = 1; length <= rightWord.length; length++) {
+      const start = rightWord.slice(0, length);
+      joined += runOn.get(leftWord + start) ?? 0;
+      spaced += followedBy.get(`${leftWord}|${start}`) ?? 0;
+    }
+    if (joined !== spaced) return spaced > joined;
+    const a = leftWord[leftWord.length - 1];
+    const b = rightWord[0];
+    const inWord = together.get(a + b) ?? 0;
+    const betweenWords = apart.get(a + b) ?? 0;
+    if (inWord + betweenWords > 0) return betweenWords > inWord;
     return !BOUND_SYLLABLES.has(b);
   };
 }

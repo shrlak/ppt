@@ -252,7 +252,12 @@ export default function PraiseApp() {
       const english: Record<string, PraiseSongExtras> = {};
       for (const { song, sheet, slides } of imported) {
         const { englishTitle } = sheetTitles(sheet, englishLibraryRef.current);
-        english[song.id] = { english: englishFromSheet(slides, englishTitle), englishSource: 'sheet' };
+        const fromSheet = englishFromSheet(slides, englishTitle);
+        // A song the sheet prints in Korean only got no English from it.
+        english[song.id] = {
+          english: fromSheet,
+          ...(Object.keys(fromSheet.slides).length > 0 ? { englishSource: 'sheet' as const } : {}),
+        };
         entries.push(entryFromSheet(song.title, englishTitle, slides));
       }
       setSheetLibrary(entries);
