@@ -23,9 +23,10 @@ export interface PraiseSongExtras {
   prayerAfter?: boolean;
   /**
    * Where the English came from, so the card can say how far to trust it:
-   * last year's deck / a saved song, the AI, or the operator's own typing.
+   * last year's deck / a saved song, the chord sheet the conti was uploaded
+   * as, the AI, or the operator's own typing.
    */
-  englishSource?: 'memory' | 'ai' | 'manual';
+  englishSource?: 'memory' | 'sheet' | 'ai' | 'manual';
 }
 
 export interface PraiseCoverImage {
