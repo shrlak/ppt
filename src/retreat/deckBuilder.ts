@@ -8,7 +8,7 @@ import JSZip from 'jszip';
 import { assertPptxIntegrity } from '../lib/pptx/pptxPackage';
 import { ensureDefaultExtension, removeContentTypeOverridesWhere, setContentTypeOverride } from '../lib/pptx/contentTypes';
 import { xmlEscape } from '../lib/pptx/pptxBuilder';
-import { fitBodyFontSize } from '../lib/pptx/textFit';
+import { fitBodyFontSize, fitTitleFontSize, singleLineBody } from '../lib/pptx/textFit';
 import { containRect } from '../lib/pptx/imageDeckBuilder';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import { planRetreatSession, quotedSermonTitle, titleLines, type RetreatSlidePlan } from './planner';
@@ -93,6 +93,17 @@ function fillFitted(xml: string, token: string, value: string, minSz: number): s
   return replaceSpan(xml, shape, sized(fill(shape.xml, token, value), sz));
 }
 
+/**
+ * A song title, on ONE line of its box whatever its length: the largest size
+ * (≤ the template's) at which it fits the width, and a box set not to wrap.
+ */
+function fillTitle(xml: string, token: string, value: string, minSz: number): string {
+  const shape = shapeHolding(xml, token);
+  const baseSz = Number(shape.xml.match(/\bsz="(\d+)"/)?.[1] ?? 3200);
+  const sz = fitTitleFontSize(shape.xml, value, baseSz, minSz);
+  return replaceSpan(xml, shape, singleLineBody(sized(fill(shape.xml, token, value), sz)));
+}
+
 // ---- slides -------------------------------------------------------------------
 
 export function buildCoverSlide(xml: string, poster: PosterImage): string {
@@ -119,10 +130,10 @@ function slideXml(plan: RetreatSlidePlan, templates: Record<number, string>, inf
     case 'section':
       return fill(templates[RETREAT_SLIDES.section], RETREAT_TOKENS.section, plan.label);
     case 'songTitle':
-      return fillFitted(templates[RETREAT_SLIDES.songTitle], RETREAT_TOKENS.songTitle, plan.title, 3200);
+      return fillTitle(templates[RETREAT_SLIDES.songTitle], RETREAT_TOKENS.songTitle, plan.title, 1800);
     case 'lyrics': {
       const xml = fillLines(templates[RETREAT_SLIDES.lyrics], RETREAT_TOKENS.line, plan.lines, 2800);
-      return fillFitted(xml, RETREAT_TOKENS.songTitle, plan.title, 1600);
+      return fillTitle(xml, RETREAT_TOKENS.songTitle, plan.title, 1000);
     }
     case 'passage':
       return fill(templates[RETREAT_SLIDES.passage], RETREAT_TOKENS.passageKo, plan.passageKo);

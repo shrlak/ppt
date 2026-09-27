@@ -63,6 +63,9 @@ function ShapeView({ shape, pxPerEmu }: { shape: RenderedShape; pxPerEmu: number
       className="slide-thumb-text"
       style={{
         ...style,
+        // A box that names its anchor is drawn from it; one that does not keeps
+        // the old centred look.
+        justifyContent: shape.anchor === 't' ? 'flex-start' : shape.anchor === 'b' ? 'flex-end' : undefined,
         background: shape.fill,
         ...(shape.outline
           ? {
@@ -75,7 +78,7 @@ function ShapeView({ shape, pxPerEmu }: { shape: RenderedShape; pxPerEmu: number
       {shape.paragraphs.map((p, pi) => (
         <p
           key={pi}
-          className="slide-thumb-paragraph"
+          className={`slide-thumb-paragraph${shape.noWrap ? ' is-single-line' : ''}`}
           style={{ textAlign: p.align === 'ctr' ? 'center' : p.align === 'r' ? 'right' : 'left' }}
         >
           {p.runs.map((r, ri) => (

@@ -22,6 +22,7 @@ import { removeContentTypeOverride, setContentTypeOverride } from './contentType
 import { stripNonVisualParts } from './pptxPackage';
 import { xmlEscape } from './pptxBuilder';
 import { slideOrderOf } from './pptxSlices';
+import { fitTitleFontSize, singleLineBody, withFontSize } from './textFit';
 
 const SLIDE_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
@@ -131,22 +132,46 @@ function replaceSpan(xml: string, span: ShapeSpan, replacement: string): string 
  * Any quote characters around the old title are kept around the new one, so a
  * deck that prints “Celebrate the Light” keeps printing the name in quotes.
  */
+/** The smallest a retitled song name is drawn at. */
+const TITLE_MIN_SZ = 1000;
+
 function retitleParagraphs(xml: string, oldTitle: string, title: string): string {
   const wanted = normalize(oldTitle);
   if (wanted.length < 2) return xml;
-  return xml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraph) => {
+  const retitle = (paragraph: string, shape?: string): string => {
     const text = runTexts(paragraph).join('').trim();
     const quoted = text.match(new RegExp(`^([${QUOTES}])\\s*([\\s\\S]+?)\\s*([${QUOTES}])$`));
     const bare = quoted ? quoted[2] : text;
     if (normalize(bare) !== wanted) return paragraph;
     const replacement = quoted ? `${quoted[1]}${title}${quoted[3]}` : title;
     let first = true;
-    return paragraph.replace(/<a:t>[\s\S]*?<\/a:t>/g, () => {
+    const replaced = paragraph.replace(/<a:t>[\s\S]*?<\/a:t>/g, () => {
       const run = first ? `<a:t>${xmlEscape(replacement)}</a:t>` : '<a:t></a:t>';
       first = false;
       return run;
     });
+    // A song title never takes two lines: at the deck's own size when it
+    // fits the box on one line, only as much smaller as it takes when not.
+    const baseSz = Number(paragraph.match(/<a:rPr\b[^>]*\bsz="(\d+)"/)?.[1] ?? 0);
+    if (!shape || baseSz <= 0) return replaced;
+    return withFontSize(replaced, fitTitleFontSize(shape, replacement, baseSz, Math.min(baseSz, TITLE_MIN_SZ)));
+  };
+  const inShapes = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (shape) => {
+    let retitled = false;
+    let otherText = false;
+    const out = shape.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraph) => {
+      const next = retitle(paragraph, shape);
+      if (next !== paragraph) retitled = true;
+      else if (runTexts(paragraph).join('').trim()) otherText = true;
+      return next;
+    });
+    // A box holding nothing but the title (the corner label) is also set not
+    // to wrap; one that shares the title with other lines keeps its wrapping
+    // for them, and the title's size alone keeps it on one line.
+    return retitled && !otherText ? singleLineBody(out) : out;
   });
+  // Anything outside a shape (a table cell) is retitled as before.
+  return inShapes.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraph) => retitle(paragraph));
 }
 
 export interface ConfessionBlock {

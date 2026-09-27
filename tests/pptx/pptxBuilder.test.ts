@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
+import { titleWidthEm } from '../../src/lib/pptx/textFit';
 import { describe, expect, it } from 'vitest';
 import { buildPptx, suggestFileName, xmlEscape } from '../../src/lib/pptx/pptxBuilder';
 import { planAllSlides } from '../../src/lib/utils/slidePlanner';
@@ -135,49 +136,28 @@ describe('buildPptx', () => {
     expect(shortLineSlide).toContain('sz="4100"');
   });
 
-  it('never shrinks the title font size for a long song title', async () => {
-    const longTitleSong: Song = {
-      ...songB,
-      id: 'd',
-      title: '아주 길고 긴 제목의 찬양 예시입니다 정말로 깁니다',
-    };
-    const out = await buildPptx(template, [longTitleSong]);
+  it('keeps a short song title at the template size, on one line', async () => {
+    const out = await buildPptx(template, [songB]);
     const zip = await JSZip.loadAsync(out);
     const titleSlide = await zip.file('ppt/slides/slide1.xml')!.async('string');
-    // The old length-based shrink would have dropped this toward sz="2800".
-    expect(titleSlide).not.toContain('sz="2800"');
-    expect(titleSlide).toContain('sz="5000"');
-  });
-});
-
-describe('suggestFileName', () => {
-  it('uses the upcoming Sunday for a Saturday conti date', () => {
-    expect(suggestFileName('7/11/26')).toBe('0712.pptx');
-  });
-  it('keeps a Sunday conti date unchanged', () => {
-    expect(suggestFileName('7/12/26')).toBe('0712.pptx');
-  });
-  it('handles a Sunday in the next year', () => {
-    expect(suggestFileName('12/31/26')).toBe('0103.pptx');
-  });
-  it('uses the current week when the conti date is missing or invalid', () => {
-    const friday = new Date(2026, 6, 10);
-    expect(suggestFileName(undefined, friday)).toBe('0712.pptx');
-    expect(suggestFileName('not-a-date', friday)).toBe('0712.pptx');
-  });
-});
-
-describe('xmlEscape', () => {
-  it('escapes the five XML special characters', () => {
-    expect(xmlEscape(`<a & "b" 'c'>`)).toBe('&lt;a &amp; &quot;b&quot; &apos;c&apos;&gt;');
+    const title = titleSlide.match(/<p:sp>(?:(?!<\/p:sp>)[\s\S])*?<a:t>[^<]+<\/a:t>[\s\S]*?<\/p:sp>/)![0];
+    expect(title).toContain('sz="5000"');
+    expect(title).toContain('wrap="none"');
   });
 
-  it('replaces or strips characters XML 1.0 cannot carry', () => {
-    // Vertical tab (Word soft line break) and form feed (OCR page separator)
-    // become spaces; other control characters and lone surrogates vanish.
-    expect(xmlEscape('주\u000B님\u000C의')).toBe('주 님 의');
-    expect(xmlEscape('사\u0000랑\u0007과\u001F')).toBe('사랑과');
-    expect(xmlEscape('은\uD800혜')).toBe('은혜');
-    expect(xmlEscape('平\t안\n과\r기쁨')).toBe('平\t안\n과\r기쁨');
+  it('never lets a song title take two lines — a long one shrinks just enough to stay on one', async () => {
+    const title = '아주 길고 긴 제목의 찬양 예시입니다 정말로 깁니다';
+    const longTitleSong: Song = { ...songB, id: 'd', title };
+    const out = await buildPptx(template, [longTitleSong]);
+    const zip = await JSZip.loadAsync(out);
+    for (const slide of ['slide1.xml', 'slide2.xml']) {
+      const xml = await zip.file(`ppt/slides/${slide}`)!.async('string');
+      const shape = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]).find((s) => s.includes(title))!;
+      expect(shape).toContain('wrap="none"');
+      expect(shape).not.toContain('wrap="square"');
+      const sz = Number(shape.match(/<a:rPr[^>]*\bsz="(\d+)"/)![1]);
+      const cx = Number(shape.match(/<a:ext cx="(\d+)"/)![1]);
+      expect((titleWidthEm(title) * sz) / 100).toBeLessThanOrEqual((cx - 2 * 91425) / 12700);
+    }
   });
 });

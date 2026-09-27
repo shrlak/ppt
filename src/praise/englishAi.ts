@@ -11,6 +11,7 @@
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
 import { extractGeminiText } from '../lib/ai/scoreAi';
 import { parseModelJson } from '../lib/ai/scoreParser';
+import { normalizeLyricLine } from './planner';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
@@ -21,10 +22,24 @@ export interface AiEnglishResult {
   slides: string[][];
 }
 
-export function buildEnglishPrompt(title: string, slides: string[][]): string {
+export function buildEnglishPrompt(title: string, slides: string[][], reference: string[] = []): string {
   const numbered = slides
     .map((lines, index) => `[${index + 1}]\n${lines.join('\n')}`)
     .join('\n\n');
+  // English found on the web for this song is the answer's only source: the
+  // model chooses and places its lines, it does not recall or write them.
+  const source =
+    reference.length > 0
+      ? [
+          '',
+          "The song's English lyrics, as published on the web, are below.",
+          'Use ONLY these lines, word for word — choose which of them go under each Korean slide, in order.',
+          'Never write, translate or reword a line yourself. Leave a slide empty ([]) if none of these lines fit it.',
+          '<english-lyrics>',
+          ...reference,
+          '</english-lyrics>',
+        ]
+      : [];
   return [
     'You are preparing bilingual (Korean / English) lyric slides for a Korean church praise night.',
     `Korean song title: ${title}`,
@@ -37,6 +52,7 @@ export function buildEnglishPrompt(title: string, slides: string[][]): string {
     '- Never merge, drop or reorder slides. Keep repeated slides repeated.',
     '- Also give the English title (the original English title if one exists).',
     '',
+    ...source,
     'Reply with JSON only, no prose: {"englishTitle": string, "slides": [[string, ...], ...]}',
     `The "slides" array must have exactly ${slides.length} entries.`,
     '',
@@ -44,9 +60,21 @@ export function buildEnglishPrompt(title: string, slides: string[][]): string {
   ].join('\n');
 }
 
-export function buildEnglishRequest(title: string, slides: string[][]): unknown {
+/**
+ * The model's lines, kept only where they are lines of `reference` — the
+ * English it was told to use — so nothing it made up reaches a slide.
+ */
+export function keepReferenceLines(result: AiEnglishResult, reference: string[]): AiEnglishResult {
+  if (reference.length === 0) return result;
+  const known = new Set(reference.map(normalizeLyricLine).filter(Boolean));
+  const slides = result.slides.map((lines) => lines.filter((line) => known.has(normalizeLyricLine(line))));
+  if (slides.every((lines) => lines.length === 0)) throw new Error('AI가 웹에서 찾은 영어 가사를 슬라이드에 맞추지 못했습니다.');
+  return { ...result, slides };
+}
+
+export function buildEnglishRequest(title: string, slides: string[][], reference: string[] = []): unknown {
   return {
-    contents: [{ role: 'user', parts: [{ text: buildEnglishPrompt(title, slides) }] }],
+    contents: [{ role: 'user', parts: [{ text: buildEnglishPrompt(title, slides, reference) }] }],
     // Grounding cannot be combined with a response schema, so the prompt asks
     // for bare JSON and parseEnglishResponse salvages it.
     tools: [{ google_search: {} }],
@@ -77,7 +105,11 @@ export function parseEnglishResponse(response: unknown, slideCount: number): AiE
   };
 }
 
-export async function fetchEnglishWithAi(title: string, slides: string[][]): Promise<AiEnglishResult> {
+export async function fetchEnglishWithAi(
+  title: string,
+  slides: string[][],
+  reference: string[] = [],
+): Promise<AiEnglishResult> {
   const settings = await getSyncedAiSettings();
   const apiKey = settings.geminiApiKey.trim();
   if (!apiKey && !PROXY_URL) {
@@ -90,7 +122,7 @@ export async function fetchEnglishWithAi(title: string, slides: string[][]): Pro
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildEnglishRequest(title, slides)),
+    body: JSON.stringify(buildEnglishRequest(title, slides, reference)),
   });
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
@@ -103,5 +135,5 @@ export async function fetchEnglishWithAi(title: string, slides: string[][]): Pro
     }
     throw new Error(`AI 호출 실패: ${detail}`);
   }
-  return parseEnglishResponse(await response.json(), slides.length);
+  return keepReferenceLines(parseEnglishResponse(await response.json(), slides.length), reference);
 }

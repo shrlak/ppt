@@ -6,7 +6,13 @@ import { parseRetreatConti, parseRetreatContiPages } from '../../src/retreat/con
 import { buildRetreatDeck } from '../../src/retreat/deckBuilder';
 import { planRetreatSession, suggestRetreatFileName, titleLines } from '../../src/retreat/planner';
 import { resolveRetreatPassage, type BibleLoader } from '../../src/retreat/scripture';
-import { libraryLyricsText, lyricSlides, resolveSong, sanitizeSongSeeds } from '../../src/retreat/songs';
+import {
+  libraryEntryForRetreatSong,
+  libraryLyricsText,
+  lyricSlides,
+  resolveSong,
+  sanitizeSongSeeds,
+} from '../../src/retreat/songs';
 import {
   attachPosters,
   decodeRetreatFiles,
@@ -255,6 +261,65 @@ describe('buildRetreatDeck', () => {
     const xml = await zip.file(`ppt/slides/${names[1]}`)!.async('string');
     const sizes = [...xml.matchAll(/<a:rPr[^>]*\bsz="(\d+)"/g)].map((match) => Number(match[1]));
     expect(Math.min(...sizes)).toBeLessThan(3050);
+  });
+});
+
+describe('retreat song titles', () => {
+  it('never lets a song title take two lines, on its title slide or in the lyric corner', async () => {
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const title = '나의 슬픔을 주가 기쁨으로 바꾸셨네 할렐루야 아멘';
+    const block = { ...createBlock('songs'), songs: [{ id: 'x', title, lyrics: '첫 줄\n둘째 줄' }] } as never;
+    const session: RetreatSession = { ...defaultRetreat().sessions[0], blocks: [block] };
+    const { deck } = await buildRetreatDeck({ template, info: defaultRetreat().info, session });
+    const zip = await JSZip.loadAsync(deck);
+    const names = await slideOrderOf(zip);
+    let checked = 0;
+    for (const name of names) {
+      const xml = await zip.file(`ppt/slides/${name}`)!.async('string');
+      for (const [shape] of xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)) {
+        if (!shape.includes(title)) continue;
+        checked += 1;
+        expect(shape).toContain('wrap="none"');
+        expect(shape).not.toContain('wrap="square"');
+        const sz = Number(shape.match(/<a:rPr[^>]*\bsz="(\d+)"/)![1]);
+        const cx = Number(shape.match(/<a:ext cx="(\d+)"/)![1]);
+        expect((titleWidthEm(title) * sz) / 100).toBeLessThanOrEqual((cx - 2 * 91425) / 12700);
+      }
+    }
+    // The song title slide and its one lyric slide's corner.
+    expect(checked).toBe(2);
+  });
+});
+
+describe('lyrics typed on the retreat page reach the 찬양 라이브러리', () => {
+  const typed = { id: 's', title: '새로운 노래', lyrics: '첫 줄\n둘째 줄\n\n셋째 줄', source: 'manual' as const };
+
+  it('saves a song typed here as one numbered part per slide', () => {
+    const entry = libraryEntryForRetreatSong(typed, undefined)!;
+    expect(entry.title).toBe('새로운 노래');
+    expect(entry.sections).toEqual([
+      { label: '1', lines: ['첫 줄', '둘째 줄'] },
+      { label: '2', lines: ['셋째 줄'] },
+    ]);
+    expect(entry.order).toEqual(['1', '2']);
+    expect(entry.verification).toBe('edited');
+    // Read back the way the retreat reads the library, it is what was typed.
+    expect(libraryLyricsText(entry)).toBe(typed.lyrics);
+  });
+
+  it('leaves lyrics that only came from a library alone', () => {
+    expect(libraryEntryForRetreatSong({ ...typed, source: 'retreat' }, undefined)).toBeNull();
+    expect(libraryEntryForRetreatSong({ ...typed, source: 'library' }, undefined)).toBeNull();
+    expect(libraryEntryForRetreatSong({ ...typed, source: 'score' }, undefined)).toBeNull();
+    expect(libraryEntryForRetreatSong({ ...typed, lyrics: '  ' }, undefined)).toBeNull();
+  });
+
+  it('never replaces a confirmed copy whose parts are named, but updates a draft or a numbered copy', () => {
+    const named = { title: '새로운 노래', sections: [{ label: 'V', lines: ['가'] }], order: ['V'], verification: 'verified' as const, version: 3 };
+    expect(libraryEntryForRetreatSong(typed, named)).toBeNull();
+    expect(libraryEntryForRetreatSong(typed, { ...named, verification: 'draft' })?.version).toBe(4);
+    const numbered = { ...named, sections: [{ label: '1', lines: ['가'] }], order: ['1'] };
+    expect(libraryEntryForRetreatSong(typed, numbered)?.sections).toHaveLength(2);
   });
 });
 

@@ -18,7 +18,18 @@ import { showToast } from '../lib/utils/toast';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { LibraryEntry } from '../lib/utils/types';
 import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
-import { fetchBundledLibrary, loadUserLibrary, mergeLibraries, normalizeTitle } from '../lib/storage/library';
+import {
+  fetchBundledLibrary,
+  findEntry,
+  libraryContentKey,
+  loadUserLibrary,
+  mergeLibraries,
+  normalizeTitle,
+  queueLyricsUpsert,
+  saveUserLibrary,
+  upsertEntry,
+} from '../lib/storage/library';
+import { useSaveSoon } from '../lib/storage/saveSoon';
 import { getSavedDeck, saveDeckToLibrary, type SavedDeck, type SavedFile } from '../lib/storage/pptLibrary';
 import { loadTranslation } from '../bible/bibleData';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from '../lib/pptx/pptxRenderer';
@@ -32,7 +43,13 @@ import { planRetreatSession, suggestRetreatFileName } from './planner';
 import { readRetreatScores, SCORE_RENDER_WIDTH, type ScorePage } from './scoreReader';
 import { applyScoreSongs, retreatScorePages, titlesWithoutLyrics } from './scores';
 import { resolveRetreatPassage, type RetreatPassage } from './scripture';
-import { fetchSongSeeds, resolveSong as resolveSongFrom, SONG_SOURCE_LABEL, type RetreatSongSeed } from './songs';
+import {
+  fetchSongSeeds,
+  libraryEntryForRetreatSong,
+  resolveSong as resolveSongFrom,
+  SONG_SOURCE_LABEL,
+  type RetreatSongSeed,
+} from './songs';
 import {
   attachPosters,
   decodeRetreatFiles,
@@ -55,7 +72,6 @@ import {
 } from './types';
 
 const BASE = import.meta.env.BASE_URL || '/';
-const DRAFT_DEBOUNCE_MS = 800;
 const PASSAGE_DEBOUNCE_MS = 500;
 /** Which 라이브러리 entry each session's deck was last saved to, so re-saving updates it. */
 const LIBRARY_IDS_KEY = 'retreat-library-ids';
@@ -239,10 +255,39 @@ export default function RetreatApp() {
     };
   }, [restoreSaved]);
 
-  useEffect(() => {
+  // Every edit is kept the moment it is made — the whole retreat in this
+  // machine's draft, and lyrics typed or corrected here in the 찬양
+  // 라이브러리 as well, so the next retreat or Sunday finds them.
+  const libraryRef = useRef(library);
+  libraryRef.current = library;
+  const libraryWrittenRef = useRef<Map<string, string>>(new Map());
+  useSaveSoon(() => {
     if (!ready) return;
-    const timer = window.setTimeout(() => void saveRetreatDraft(state), DRAFT_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+    void saveRetreatDraft(state);
+    const entries: LibraryEntry[] = [];
+    for (const session of state.sessions) {
+      for (const block of session.blocks) {
+        if (block.kind !== 'songs') continue;
+        for (const song of block.songs) {
+          const previous = findEntry(libraryRef.current, song.title);
+          const entry = libraryEntryForRetreatSong(song, previous);
+          if (!entry) continue;
+          const content = libraryContentKey(entry);
+          if (previous && libraryContentKey(previous) === content) continue;
+          if (libraryWrittenRef.current.get(song.id) === content) continue;
+          libraryWrittenRef.current.set(song.id, content);
+          entries.push(entry);
+        }
+      }
+    }
+    if (entries.length === 0) return;
+    let user = loadUserLibrary();
+    for (const entry of entries) {
+      user = upsertEntry(user, entry);
+      queueLyricsUpsert(entry);
+    }
+    saveUserLibrary(user);
+    setLibrary((current) => entries.reduce((next, entry) => upsertEntry(next, entry), current));
   }, [ready, state]);
 
   useEffect(() => () => revokeRenderedSlides(previewRef.current), []);

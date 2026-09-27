@@ -16,6 +16,7 @@ to anyone who opens dev tools, since the app has no backend of its own.
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
 Browser  ──POST /openrouter────▶  Worker (adds real key)  ──▶  OpenRouter free vision models
 Browser  ──GET  /lyrics────────▶  Worker (search + scrape) ──▶  allowlisted lyrics sites
+Browser  ──GET  /praise/english─▶  Worker (search + scrape) ──▶  "<곡 제목> 영어 가사" posts
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
@@ -63,6 +64,23 @@ across all its files, and the shared library accepts up to 250 PPT entries.
 Browser storage remains an offline cache, so a temporary Worker outage does
 not discard a newly generated presentation. Deletion tombstones keep an old
 device from restoring an item deleted elsewhere.
+
+### 찬양집회 영어 가사 route
+
+`GET /praise/english?title=…` is how a 찬양집회 song whose conti prints no
+English gets its English: it searches `"<제목> 영어 가사"` — 다음 블로그 검색,
+네이버 블로그 검색, and Google through SerpApi when `SERPAPI_API_KEY` is set
+(one search per song) — keeps only hits whose heading names the song, reads up
+to four of them, and returns each post as its **lyric blocks**: the runs of
+Korean and English lyric lines in the order the post printed them, split at
+its empty lines, headings and language changes (`src/praiseEnglishWeb.js`).
+Site furniture, prose and copyright lines are dropped; the English title a post
+names the song by (`주님의 선하심 (Goodness of God)`) comes back too. The
+browser pairs the blocks and lays each English stanza under the Korean slide
+whose words it matches, so the Worker never needs to know the conti's lyrics.
+As with `/lyrics`, only a title crosses the wire; pages are fetched over https
+from public hosts only, re-checked after redirects, and capped in size.
+Responses with candidates are cached at the edge for a week.
 
 ### 수요예배 찬양 PPT routes
 

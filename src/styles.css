@@ -549,6 +549,13 @@ a.btn {
 .slide-thumb-run {
   white-space: pre-wrap;
 }
+/* A title box set not to wrap (wrap="none") stays on one line in the preview too. */
+.slide-thumb-paragraph.is-single-line {
+  overflow-wrap: normal;
+}
+.slide-thumb-paragraph.is-single-line .slide-thumb-run {
+  white-space: pre;
+}
 .slide-thumb-picture {
   position: absolute;
   object-fit: fill;
@@ -2298,6 +2305,17 @@ main[data-direction='back'] .wizard-panel.active {
 .song-footer select {
   width: auto;
   min-width: 140px;
+}
+/* Every lyric edit saves itself; this says it did. */
+.song-autosave {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+.song-autosave.is-saved {
+  color: var(--ok-ink);
 }
 
 .preview-strip {
@@ -4195,6 +4213,19 @@ main[data-direction='back'] .wizard-panel.active {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--s-2);
+}
+/* What the web lookup did for this song, with a link to the post it used. */
+.praise-web-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.praise-web-status a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
 }
 .praise-prayer-toggle {
   display: inline-flex;

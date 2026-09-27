@@ -164,3 +164,30 @@ describe('applyConfessionSong', () => {
     expect(result.data).toBe(notADeck);
   });
 });
+
+describe('the 공동체 고백 song name', () => {
+  it('never takes two lines — on the marker slide or in the lyric corner', async () => {
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const title = '우리 모일 때 주 성령 임하리 주의 영광 가득하리';
+    const result = await applyConfessionSong(backSlides, song(title, ['첫째 줄', '둘째 줄']));
+    expect(result.applied).toBe(true);
+    const zip = await JSZip.loadAsync(result.data);
+    const names = await slideOrder(zip);
+    let checked = 0;
+    for (const name of names.slice(0, 2)) {
+      const xml = await zip.file(`ppt/slides/${name}`)!.async('string');
+      for (const [shape] of xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)) {
+        const paragraph = [...shape.matchAll(/<a:p>[\s\S]*?<\/a:p>/g)].map((m) => m[0]).find((p) => p.includes(title));
+        if (!paragraph) continue;
+        checked += 1;
+        const text = [...paragraph.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join('');
+        const sz = Number(paragraph.match(/<a:rPr[^>]*\bsz="(\d+)"/)![1]);
+        const cx = Number(shape.match(/<a:ext cx="(\d+)"/)![1]);
+        expect((titleWidthEm(text) * sz) / 100).toBeLessThanOrEqual((cx - 2 * 91425) / 12700);
+        // The corner label holds nothing else, so it is also set not to wrap.
+        if (!/공동체/.test(shape)) expect(shape).toContain('wrap="none"');
+      }
+    }
+    expect(checked).toBe(2);
+  });
+});

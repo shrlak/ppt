@@ -106,12 +106,14 @@ function extrasOf(value: unknown): Record<string, PraiseSongExtras> {
     if (!raw || typeof raw !== 'object') continue;
     const entry = raw as Record<string, unknown>;
     const source = entry.englishSource;
+    const sourceUrl = entry.englishSourceUrl;
     result[id] = {
       english: englishOf(entry.english),
       ...(entry.prayerAfter === true ? { prayerAfter: true } : {}),
-      ...(source === 'memory' || source === 'sheet' || source === 'ai' || source === 'manual'
+      ...(source === 'memory' || source === 'sheet' || source === 'web' || source === 'ai' || source === 'manual'
         ? { englishSource: source }
         : {}),
+      ...(typeof sourceUrl === 'string' && /^https:\/\//.test(sourceUrl) ? { englishSourceUrl: sourceUrl.slice(0, 500) } : {}),
     };
   }
   return result;

@@ -119,12 +119,23 @@ function chunkBalanced<T>(items: T[], size: number): T[][] {
  * onto one slide.
  */
 export function planSlides(song: Song): SlidePlan[] {
+  const plans: SlidePlan[] = [{ kind: 'title', title: song.title }];
+  for (const part of planSectionSlides(song)) {
+    for (const lines of part.slides) plans.push({ kind: 'lyrics', title: song.title, lines });
+  }
+  return plans;
+}
+
+/**
+ * The parts a song's lyric slides come from, in slide order — each part
+ * once — with the slides it is split into. planSlides is exactly these
+ * slides, in this order, after the title slide.
+ */
+export function planSectionSlides(song: Song): { label: string; slides: string[][] }[] {
   const linesPerSlide =
     song.linesPerSlide && song.linesPerSlide >= 1 ? song.linesPerSlide : DEFAULT_LINES_PER_SLIDE;
-  const plans: SlidePlan[] = [{ kind: 'title', title: song.title }];
-
   const tokens = song.order.length > 0 ? song.order : song.sections.map((s) => s.label);
-
+  const parts: { label: string; slides: string[][] }[] = [];
   const seen = new Set<Section>();
   for (const token of tokens) {
     if (token === 'I') continue; // the leading title slide covers intro/간주
@@ -133,13 +144,10 @@ export function planSlides(song: Song): SlidePlan[] {
     seen.add(section);
     // Blank lines split the section into blocks that never share a slide;
     // each block is then chunked by 슬라이드당 줄 수 as usual.
-    for (const block of lineBlocks(section)) {
-      for (const group of chunkBalanced(block, linesPerSlide)) {
-        plans.push({ kind: 'lyrics', title: song.title, lines: group });
-      }
-    }
+    const slides = lineBlocks(section).flatMap((block) => chunkBalanced(block, linesPerSlide));
+    if (slides.length > 0) parts.push({ label: section.label, slides });
   }
-  return plans;
+  return parts;
 }
 
 /** Plan the slides for the whole deck. */

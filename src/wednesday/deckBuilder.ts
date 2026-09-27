@@ -26,6 +26,7 @@ import type { Verse } from '../bible/types';
 import { buildWednesdayVerseSlide, groupVerses } from './bibleSlides';
 import { removeSongBackgrounds } from './songDeck';
 import { clearRemainingTokens, formatDateDot, formatDateKo, substituteTokens } from './fields';
+import { fitTitleFontSize, singleLineBody, withFontSize } from '../lib/pptx/textFit';
 import { WEDNESDAY_IMAGE_CARRIER, WEDNESDAY_SLIDES } from './template';
 import { isAttached, songSlideCount, type WednesdayService, type WednesdaySong } from './types';
 
@@ -98,6 +99,25 @@ function preacherLine(service: WednesdayService): string {
   return [service.preacher.trim(), service.preacherTitle.trim()].filter(Boolean).join(' ');
 }
 
+/** The smallest a song title is drawn at before it would take a second line. */
+const SONG_TITLE_MIN_SZ = 2000;
+
+/**
+ * The shape holding `token`, sized for `title` on ONE line: a song title never
+ * wraps. It keeps the template's size (72pt) when it fits the box on one line,
+ * shrinks just enough when it does not, and the box is set not to wrap.
+ */
+export function singleLineTitleShape(xml: string, token: string, title: string): string {
+  for (const match of xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)) {
+    if (!match[0].includes(token)) continue;
+    const shape = match[0];
+    const baseSz = Number(shape.match(/<a:rPr\b[^>]*\bsz="(\d+)"/)?.[1] ?? 0);
+    const sized = baseSz > 0 ? withFontSize(shape, fitTitleFontSize(shape, title, baseSz, SONG_TITLE_MIN_SZ)) : shape;
+    return xml.slice(0, match.index!) + singleLineBody(sized) + xml.slice(match.index! + shape.length);
+  }
+  return xml;
+}
+
 /** Build the fixed slides: one template copy, then fill each slot's text. */
 async function buildSkeleton(
   input: WednesdayDeckInput,
@@ -136,9 +156,8 @@ async function buildSkeleton(
     if (slot.kind === 'wordBody') {
       filled = buildWednesdayVerseSlide(xml, verseGroups[slot.groupIndex!], input.rangeKo);
     } else if (slot.kind === 'songTitle') {
-      filled = substituteTokens(xml, {
-        SONG_TITLE: input.songs[slot.songIndex!].title.trim(),
-      });
+      const title = input.songs[slot.songIndex!].title.trim();
+      filled = substituteTokens(singleLineTitleShape(xml, '{{SONG_TITLE}}', title), { SONG_TITLE: title });
     } else {
       filled = substituteTokens(xml, common);
     }

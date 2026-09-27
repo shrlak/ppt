@@ -226,14 +226,118 @@ describe('isoDateFromConti', () => {
 });
 
 describe('the lyrics box the planner measures against', () => {
-  it('matches the template’s own lyrics shape', async () => {
+  it('matches the lyrics shape as every lyric slide is built', async () => {
     const { PRAISE_LYRICS_BODY_BOX } = await import('../../src/praise/template');
+    const { buildLyricsSlide } = await import('../../src/praise/deckBuilder');
     const zip = await JSZip.loadAsync(template);
-    const xml = await zip.file('ppt/slides/slide3.xml')!.async('string');
-    const body = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]).find((shape) => shape.includes('{{LINE}}'))!;
+    const xml = buildLyricsSlide(await zip.file('ppt/slides/slide3.xml')!.async('string'), '제목', ['가사'], []);
+    const body = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]).find((shape) => shape.includes('가사'))!;
     const ext = PRAISE_LYRICS_BODY_BOX.match(/<a:ext[^>]*\/>/)![0];
     expect(body).toContain(ext);
     expect(body).toContain('<a:spcPct val="115000"/>');
     for (const inset of ['bIns="91425"', 'lIns="91425"', 'rIns="91425"', 'tIns="91425"']) expect(body).toContain(inset);
+  });
+});
+
+async function templateSlide(position: number): Promise<string> {
+  const zip = await JSZip.loadAsync(template);
+  return zip.file(`ppt/slides/slide${position}.xml`)!.async('string');
+}
+
+function shapes(xml: string): string[] {
+  return [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]);
+}
+
+function box(shapeXml: string): { x: number; y: number; cx: number; cy: number } {
+  const m = shapeXml.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/)!;
+  return { x: Number(m[1]), y: Number(m[2]), cx: Number(m[3]), cy: Number(m[4]) };
+}
+
+describe('lyrics sit in the centre of every slide', () => {
+  it('centres a two-line slide and a crowded bilingual slide alike', async () => {
+    const { buildLyricsSlide } = await import('../../src/praise/deckBuilder');
+    const xml = await templateSlide(3);
+    const slides = [
+      buildLyricsSlide(xml, '주님의 선하심 | Goodness of God', ['사랑해요 주의 자비'], []),
+      buildLyricsSlide(
+        xml,
+        '주님의 선하심 | Goodness of God',
+        ['사랑해요 주의 자비 변치 않네', '내 모든 삶 주의 손에 있네', '내 평생 신실하신 주'],
+        ['I love You Lord', 'Oh Your mercy never fails me', 'All my days I’ve been held in Your hands', 'All my life You have been faithful'],
+      ),
+      buildLyricsSlide(xml, 'Praise', ['Praise the Lord, oh my soul'], []),
+    ];
+    for (const slide of slides) {
+      const body = shapes(slide).find((shape) => shape.includes('algn="ctr"') && shape.includes('115000'))!;
+      const { x, y, cx, cy } = box(body);
+      // Centred on the 9144000 × 6858000 slide, both ways…
+      expect(x + cx / 2).toBe(9144000 / 2);
+      expect(y + cy / 2).toBe(6858000 / 2);
+      // …with the text hung from the middle of that box, not its top.
+      expect(body).toMatch(/<a:bodyPr anchor="ctr"/);
+      expect(body).not.toContain('anchor="t"');
+      // Clear of the corner title above it.
+      const header = shapes(slide).find((shape) => shape !== body)!;
+      expect(y).toBeGreaterThan(box(header).y + box(header).cy);
+    }
+  });
+});
+
+/** Every `<a:p>` of a shape: its text and the run size it is drawn at. */
+function paragraphs(shapeXml: string): { text: string; sz: number }[] {
+  return [...shapeXml.matchAll(/<a:p>[\s\S]*?<\/a:p>/g)].map((m) => ({
+    text: [...m[0].matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((t) => t[1]).join(''),
+    sz: Number(m[0].match(/<a:rPr[^>]*\bsz="(\d+)"/)?.[1] ?? 0),
+  }));
+}
+
+describe('a song title never takes two lines', () => {
+  it('keeps a short title at the template size, on one line', async () => {
+    const { buildTitleSlide } = await import('../../src/praise/deckBuilder');
+    const slide = buildTitleSlide(await templateSlide(2), '주님의 선하심', 'Goodness of God');
+    const title = shapes(slide).find((shape) => shape.includes('주님의 선하심'))!;
+    expect(title).toContain('wrap="none"');
+    expect(title).not.toContain('wrap="square"');
+    expect(paragraphs(title)).toEqual([
+      { text: '주님의 선하심', sz: 5400 },
+      { text: 'Goodness of God', sz: 5400 },
+    ]);
+    // Widened, and still centred where last year's was.
+    const { x, cx } = box(title);
+    expect(x + cx / 2).toBe(9144000 / 2);
+    expect(cx).toBeGreaterThan(6094500);
+  });
+
+  it('shrinks a long title just enough to stay on one line, Korean and English each on its own', async () => {
+    const { buildTitleSlide } = await import('../../src/praise/deckBuilder');
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const ko = '나의 슬픔을 주가 기쁨으로 바꾸셨네 할렐루야';
+    const en = 'You Turned My Mourning into Dancing Again Hallelujah';
+    const slide = buildTitleSlide(await templateSlide(2), ko, en);
+    const title = shapes(slide).find((shape) => shape.includes(ko))!;
+    const widthPt = (box(title).cx - 2 * 91425) / 12700;
+    expect(title).toContain('wrap="none"');
+    for (const { text, sz } of paragraphs(title)) {
+      expect(sz).toBeLessThan(5400);
+      // One line at that size: the (generous) width estimate fits the box.
+      expect((titleWidthEm(text) * sz) / 100).toBeLessThanOrEqual(widthPt);
+      // …and it did not shrink any further than it had to.
+      expect((titleWidthEm(text) * (sz + 100)) / 100).toBeGreaterThan(widthPt);
+    }
+  });
+
+  it('keeps the corner label on one line across the top of the lyric slide', async () => {
+    const { buildLyricsSlide } = await import('../../src/praise/deckBuilder');
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const header = '나의 슬픔을 주가 기쁨으로 | Turn Your Mourning into Dancing';
+    const slide = buildLyricsSlide(await templateSlide(3), header, ['가사'], []);
+    const label = shapes(slide).find((shape) => shape.includes('Turn Your Mourning'))!;
+    expect(label).toContain('wrap="none"');
+    const [{ text, sz }] = paragraphs(label);
+    expect(text).toBe(header);
+    expect((titleWidthEm(text) * sz) / 100).toBeLessThanOrEqual((box(label).cx - 2 * 91425) / 12700);
+    // A short one keeps the template's size.
+    const short = buildLyricsSlide(await templateSlide(3), '예수 우리 왕이여', ['가사'], []);
+    expect(paragraphs(shapes(short).find((shape) => shape.includes('예수 우리 왕이여'))!)[0].sz).toBe(2010);
   });
 });

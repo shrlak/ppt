@@ -144,6 +144,57 @@ test.describe('찬양집회 generator', () => {
     await page.screenshot({ path: testInfo.outputPath('praise-preview.png'), fullPage: true });
   });
 
+  test('fills English the conti lacks from the web by itself, with no button pressed', async ({ page }) => {
+    // Made-up lyrics, served the way a 영어 가사 post comes back from the proxy.
+    const asked: string[] = [];
+    await page.route('**/__proxy/praise/english**', async (route) => {
+      asked.push(new URL(route.request().url()).searchParams.get('title') ?? '');
+      await route.fulfill({
+        json: {
+          title: '시험의 노래',
+          query: '시험의 노래 영어 가사',
+          candidates: [
+            {
+              url: 'https://example.tistory.com/1',
+              host: 'example.tistory.com',
+              title: '[영어찬양] Song of Trial, 시험의 노래, 영어 가사',
+              englishTitle: 'Song of Trial',
+              score: 1,
+              blocks: [
+                { lang: 'ko', lines: ['주 사랑 안에 나 살아가리', '그 은혜 날마다 새롭네'] },
+                { lang: 'en', lines: ['In Your love I will live my days', 'Your grace is new every morning'] },
+                { lang: 'ko', lines: ['주를 찬양해 영원토록', '주의 이름 높이리'] },
+                { lang: 'en', lines: ['I will praise You forevermore', 'I lift Your name on high'] },
+              ],
+            },
+          ],
+        },
+      });
+    });
+
+    await page.goto('praise.html');
+    await page.getByTestId('add-song').click();
+    const card = page.getByTestId('song-card').last();
+    await card.getByTestId('song-title-input').fill('시험의 노래');
+    await card.getByRole('button', { name: 'V', exact: true }).click();
+    await card.getByTestId('section-textarea').last().fill('주 사랑 안에 나 살아가리\n그 은혜 날마다 새롭네');
+    await card.getByRole('button', { name: 'C', exact: true }).click();
+    await card.getByTestId('section-textarea').last().fill('주를 찬양해 영원토록\n주의 이름 높이리');
+    // The edit is written to the 찬양 라이브러리 straight away, and says so.
+    await expect(card.getByTestId('song-autosave')).toContainText('가사 자동 저장됨');
+
+    await page.getByTestId('praise-next-songs').click();
+    const song = page.getByTestId('praise-english-song').filter({ hasText: '시험의 노래' });
+    const boxes = song.getByTestId('praise-slide-english');
+    await expect(boxes.first()).toHaveValue(/In Your love I will live my days/, { timeout: 15_000 });
+    await expect(boxes.nth(1)).toHaveValue(/I will praise You forevermore/);
+    await expect(song.getByTestId('praise-english-title')).toHaveValue('Song of Trial');
+    await expect(song.getByTestId('praise-english-status')).toContainText('웹에서 가져옴');
+    await expect(song.getByTestId('praise-web-source')).toHaveAttribute('href', 'https://example.tistory.com/1');
+    // One search for the song, by its title, and none started by hand.
+    expect(asked).toEqual(['시험의 노래']);
+  });
+
   test('keeps both languages by itself, and the Sunday page loads only the Korean', async ({ page }) => {
     await page.goto('praise.html');
     await expect(page.getByTestId('praise-panel-songs')).toBeVisible();

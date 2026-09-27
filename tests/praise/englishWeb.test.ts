@@ -1,0 +1,166 @@
+import { describe, expect, it } from 'vitest';
+import {
+  alignEnglishOnly,
+  englishFromWeb,
+  englishStanzas,
+  pairWebBlocks,
+  sanitizeWebEnglishCandidates,
+  webEnglishReference,
+  type WebEnglishBlock,
+  type WebEnglishCandidate,
+} from '../../src/praise/englishWeb';
+import { buildEnglishPrompt, keepReferenceLines } from '../../src/praise/englishAi';
+import { planPraiseSong, slideKey } from '../../src/praise/planner';
+import type { Song } from '../../src/lib/utils/types';
+
+// Made-up lyrics in the shape of a translated worship song.
+const V = ['주 사랑 안에 나 살아가리', '그 은혜 날마다 새롭네'];
+const C = ['주를 찬양해 영원토록', '주의 이름 높이리'];
+const B = ['나 무너져도 주 붙드시네', '그 사랑 끝이 없네'];
+const EV = ['In Your love I will live my days', 'Your grace is new every morning'];
+const EC = ['I will praise You forevermore', 'I lift Your name on high'];
+const EB = ['When I fall You hold me fast', 'Your love will never end'];
+
+const song: Song = {
+  id: 'trial',
+  title: '시험의 노래',
+  sections: [
+    { label: 'V', lines: V },
+    { label: 'C', lines: C },
+    { label: 'B', lines: B },
+  ],
+  order: ['I', 'V', 'C', 'V', 'B', 'C'],
+  linesPerSlide: 3,
+};
+
+const ko = (lines: string[]): WebEnglishBlock => ({ lang: 'ko', lines });
+const en = (lines: string[]): WebEnglishBlock => ({ lang: 'en', lines });
+
+function candidate(blocks: WebEnglishBlock[], englishTitle = ''): WebEnglishCandidate {
+  return { url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: '시험의 노래 영어 가사', englishTitle, score: 1, blocks };
+}
+
+const empty = { title: '', slides: {} };
+
+function englishUnder(result: { english: { slides: Record<string, string[]> } }): string[][] {
+  return [V, C, B].map((lines) => result.english.slides[slideKey(lines)] ?? []);
+}
+
+describe('pairing a post’s stanzas', () => {
+  const songLines = [...V, ...C, ...B];
+
+  it('pairs Korean-then-English stanzas, ignoring the post’s own headings', () => {
+    const pairs = pairWebBlocks(
+      [ko(['시험의 노래 영어 가사']), en(['Song of Trial']), ko(V), en(EV), ko(C), en(EC), ko(V), en(EV), ko(B), en(EB), ko(['다른 글 보기'])],
+      songLines,
+    );
+    expect(pairs).toContainEqual({ ko: V, en: EV });
+    expect(pairs).toContainEqual({ ko: C, en: EC });
+    expect(pairs).toContainEqual({ ko: B, en: EB });
+    expect(pairs.some((pair) => pair.en.includes('Song of Trial'))).toBe(false);
+  });
+
+  it('pairs English-then-Korean stanzas the other way round', () => {
+    const pairs = pairWebBlocks([en(EV), ko(V), en(EC), ko(C), en(EB), ko(B)], songLines);
+    expect(pairs).toEqual([
+      { ko: V, en: EV },
+      { ko: C, en: EC },
+      { ko: B, en: EB },
+    ]);
+  });
+
+  it('pairs all-the-Korean-then-all-the-English stanza for stanza', () => {
+    const pairs = pairWebBlocks([ko(V), ko(C), ko(B), en(EV), en(EC), en(EB)], songLines);
+    expect(pairs).toEqual([
+      { ko: V, en: EV },
+      { ko: C, en: EC },
+      { ko: B, en: EB },
+    ]);
+  });
+
+  it('pairs nothing when the Korean on the page is not this song', () => {
+    expect(pairWebBlocks([ko(['전혀 다른 노래의 가사', '여기 적혀 있네']), en(EV)], songLines)).toEqual([]);
+  });
+});
+
+describe('English from the web under this conti’s Korean', () => {
+  it('fills every Korean slide from a bilingual post, and the English title', () => {
+    const result = englishFromWeb(song, empty, [
+      candidate([ko(V), en(EV), ko(C), en(EC), ko(V), en(EV), ko(B), en(EB), ko(C), en(EC)], 'Song of Trial'),
+    ]);
+    expect(result.filled).toBe(3);
+    expect(englishUnder(result)).toEqual([EV, EC, EB]);
+    expect(result.english.title).toBe('Song of Trial');
+    expect(result.source).toEqual({ url: 'https://a.tistory.com/1', host: 'a.tistory.com' });
+  });
+
+  it('matches the Korean however the conti breaks its lines', () => {
+    const regrouped: Song = { ...song, linesPerSlide: 1 };
+    const result = englishFromWeb(regrouped, empty, [candidate([ko(V), en(EV), ko(C), en(EC), ko(B), en(EB)])]);
+    const slides = planPraiseSong(regrouped, { english: result.english }).slides;
+    expect(slides.map((slide) => slide.english)).toEqual([[EV[0]], [EV[1]], [EC[0]], [EC[1]], [EB[0]], [EB[1]]]);
+  });
+
+  it('never replaces English the song already has', () => {
+    const typed = { title: 'My Title', slides: { [slideKey(V)]: ['typed by hand'] } };
+    const result = englishFromWeb(song, typed, [candidate([ko(V), en(EV), ko(C), en(EC), ko(B), en(EB)], 'Other')]);
+    expect(englishUnder(result)).toEqual([['typed by hand'], EC, EB]);
+    expect(result.english.title).toBe('My Title');
+    expect(result.filled).toBe(2);
+  });
+
+  it('lays an English-only post over the song part by part when it has one stanza per part', () => {
+    const blocks = [en(['Song of Trial Lyrics']), en(EV), en(EC), en(EV), en(EB), en(EC)];
+    expect(englishStanzas(blocks)).toEqual([EV, EC, EB]);
+    const result = englishFromWeb(song, empty, [candidate(blocks)]);
+    expect(englishUnder(result)).toEqual([EV, EC, EB]);
+  });
+
+  it('shares a part’s stanza across the slides that part is split into', () => {
+    const long: Song = { ...song, sections: [{ label: 'V', lines: [...V, ...C] }], order: ['V'], linesPerSlide: 2 };
+    const aligned = alignEnglishOnly(long, [[...EV, ...EC]])!;
+    expect(aligned[slideKey(V)]).toEqual(EV);
+    expect(aligned[slideKey(C)]).toEqual(EC);
+  });
+
+  it('guesses nothing when an English-only post does not fit, and offers it to paste instead', () => {
+    const result = englishFromWeb(song, empty, [candidate([en(EV), en([...EC, ...EB, 'One more line here'])])]);
+    expect(result.filled).toBe(0);
+    expect(englishUnder(result)).toEqual([[], [], []]);
+    expect(result.pasteText).toBe([EV.join('\n'), [...EC, ...EB, 'One more line here'].join('\n')].join('\n\n'));
+    expect(result.source?.url).toBe('https://a.tistory.com/1');
+  });
+
+  it('takes the post that fills the most slides', () => {
+    const partial = { ...candidate([ko(V), en(EV)]), url: 'https://b.tistory.com/2', host: 'b.tistory.com' };
+    const full = candidate([ko(V), en(EV), ko(C), en(EC), ko(B), en(EB)]);
+    expect(englishFromWeb(song, empty, [partial, full]).source?.host).toBe('a.tistory.com');
+  });
+
+  it('reads only well-formed candidates off the wire', () => {
+    const clean = sanitizeWebEnglishCandidates([
+      { url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: 't', englishTitle: 'E', score: 1, blocks: [{ lang: 'en', lines: ['x y', 3] }, { lang: 'fr', lines: ['z'] }] },
+      { url: 'javascript:alert(1)', blocks: [{ lang: 'en', lines: ['x'] }] },
+      null,
+    ]);
+    expect(clean).toEqual([
+      { url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: 't', englishTitle: 'E', score: 1, blocks: [{ lang: 'en', lines: ['x y'] }] },
+    ]);
+  });
+});
+
+describe('the AI, given the English found on the web', () => {
+  it('is told to use only those lines', () => {
+    const prompt = buildEnglishPrompt('시험의 노래', [V, C], [...EV, ...EC]);
+    expect(prompt).toContain('Use ONLY these lines');
+    expect(prompt).toContain(EV[0]);
+  });
+
+  it('keeps only lines that are in the English it was given', () => {
+    const reference = webEnglishReference([candidate([ko(V), en(EV), en(EC)])]);
+    expect(reference).toEqual([...EV, ...EC]);
+    const kept = keepReferenceLines({ englishTitle: '', slides: [[EV[0], 'A line it made up'], [EC[1].toUpperCase()]] }, reference);
+    expect(kept.slides).toEqual([[EV[0]], [EC[1].toUpperCase()]]);
+    expect(() => keepReferenceLines({ englishTitle: '', slides: [['made up']] }, reference)).toThrow();
+  });
+});
