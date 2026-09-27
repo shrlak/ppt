@@ -4,10 +4,22 @@
 // template.ts), so the deck keeps the retreat's own photos, master and
 // fonts. Text that would not fit its box is shrunk on the slide itself —
 // never left to PowerPoint's autofit, which a projector's viewer may ignore.
+// A 광고's links are QR codes in its slide's bottom-right corner (qrCode.ts).
 import JSZip from 'jszip';
 import { assertPptxIntegrity } from '../lib/pptx/pptxPackage';
 import { ensureDefaultExtension, removeContentTypeOverridesWhere, setContentTypeOverride } from '../lib/pptx/contentTypes';
 import { xmlEscape } from '../lib/pptx/pptxBuilder';
+import {
+  QR_GAP,
+  QR_IMAGE_CONTENT_TYPE,
+  QR_IMAGE_EXTENSION,
+  addQrCodes,
+  clearOfQrCodes,
+  qrCodeBoxes,
+  shapeRect,
+  type QrArea,
+  type Rect,
+} from '../lib/pptx/qrCode';
 import { fitBodyFontSize, fitTitleFontSize, singleLineBody } from '../lib/pptx/textFit';
 import { containRect } from '../lib/pptx/imageDeckBuilder';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
@@ -104,6 +116,17 @@ function fillTitle(xml: string, token: string, value: string, minSz: number): st
   return replaceSpan(xml, shape, singleLineBody(sized(fill(shape.xml, token, value), sz)));
 }
 
+/**
+ * Where a 광고 slide's QR codes go: lined up with the body box's right edge,
+ * just above the footer band, never above the body's top (the title's there).
+ */
+function announcementQrArea(templateXml: string): QrArea | null {
+  const body = shapeRect(shapeHolding(templateXml, RETREAT_TOKENS.announcementLine).xml);
+  const footer = shapeRect(shapeHolding(templateXml, RETREAT_TOKENS.footerTitle).xml);
+  if (!body || !footer) return null;
+  return { right: body.x + body.cx, bottom: footer.y - QR_GAP, top: body.y };
+}
+
 // ---- slides -------------------------------------------------------------------
 
 export function buildCoverSlide(xml: string, poster: PosterImage): string {
@@ -117,7 +140,12 @@ export function buildCoverSlide(xml: string, poster: PosterImage): string {
     );
 }
 
-function slideXml(plan: RetreatSlidePlan, templates: Record<number, string>, info: RetreatInfo): string {
+function slideXml(
+  plan: RetreatSlidePlan,
+  templates: Record<number, string>,
+  info: RetreatInfo,
+  qrBoxes: Rect[] = [],
+): string {
   switch (plan.kind) {
     case 'cover':
       return templates[RETREAT_SLIDES.cover];
@@ -161,6 +189,11 @@ function slideXml(plan: RetreatSlidePlan, templates: Record<number, string>, inf
       return fill(templates[RETREAT_SLIDES.announcementDivider], RETREAT_TOKENS.label, plan.label);
     case 'announcement': {
       let xml = fillFitted(templates[RETREAT_SLIDES.announcement], RETREAT_TOKENS.announcementTitle, plan.title, 2400);
+      if (qrBoxes.length > 0) {
+        const body = shapeHolding(xml, RETREAT_TOKENS.announcementLine);
+        const baseSz = Number(body.xml.match(/\bsz="(\d+)"/)?.[1] ?? 3200);
+        xml = replaceSpan(xml, body, clearOfQrCodes(body.xml, plan.lines, qrBoxes, baseSz, 1600));
+      }
       xml = fillLines(xml, RETREAT_TOKENS.announcementLine, plan.lines, 1600);
       xml = fill(xml, RETREAT_TOKENS.footerTitle, info.title.trim());
       return fill(xml, RETREAT_TOKENS.footerTheme, info.theme.trim());
@@ -263,10 +296,23 @@ export async function buildRetreatDeck(input: RetreatDeckInput): Promise<Retreat
     );
   }
 
+  const qrArea = announcementQrArea(templates[RETREAT_SLIDES.announcement]);
   plans.forEach((plan, index) => {
     const n = index + 1;
-    zip.file(`ppt/slides/slide${n}.xml`, slideXml(plan, templates, input.info));
-    zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, rels[templateFor(plan)]);
+    const links = plan.kind === 'announcement' ? plan.links : [];
+    const boxes = qrArea ? qrCodeBoxes(links.length, qrArea) : [];
+    let xml = slideXml(plan, templates, input.info, boxes);
+    let rel = rels[templateFor(plan)];
+    if (boxes.length > 0) {
+      const withQr = addQrCodes(xml, rel, links, boxes, `retreat-qr-${n}`);
+      ({ slideXml: xml, relsXml: rel } = withQr);
+      for (const image of withQr.media) zip.file(image.path, image.data);
+      if (withQr.media.length > 0) {
+        contentTypes = ensureDefaultExtension(contentTypes, QR_IMAGE_EXTENSION, QR_IMAGE_CONTENT_TYPE);
+      }
+    }
+    zip.file(`ppt/slides/slide${n}.xml`, xml);
+    zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, rel);
   });
 
   presentation = presentation.replace(

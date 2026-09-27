@@ -26,6 +26,7 @@ import { createBlock, defaultRetreat, type RetreatSession } from '../../src/retr
 import { decodeDeckSource } from '../../src/lib/storage/deckSource';
 import { findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 import { slideOrderOf } from '../../src/lib/pptx/pptxSlices';
+import { shapeRect } from '../../src/lib/pptx/qrCode';
 import type { BookChapters } from '../../src/bible/types';
 
 const root = join(__dirname, '..', '..');
@@ -216,6 +217,36 @@ describe('buildRetreatDeck', () => {
       Object.keys(zip.files).filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path)).map((path) => zip.file(path)!.async('string')),
     );
     expect(allXml.join('')).not.toContain('{{');
+  });
+
+  it("draws a 광고's link as a QR code in the corner above the footer, not as text", async () => {
+    const base = defaultRetreat();
+    const session = structuredClone(base.sessions[0]);
+    for (const block of session.blocks) {
+      if (block.kind === 'announcements') block.text = '1. 조별 모임 신청\n조별 모임을 신청해 주세요\nhttps://forms.gle/xyz789';
+    }
+    const last = planRetreatSession(session).at(-1)!;
+    expect(last).toEqual({
+      kind: 'announcement',
+      title: '1. <조별 모임 신청>',
+      lines: ['조별 모임을 신청해 주세요'],
+      links: ['https://forms.gle/xyz789'],
+    });
+
+    const { deck } = await buildRetreatDeck({ template, info: base.info, session });
+    const zip = await JSZip.loadAsync(deck);
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+    const name = (await slideOrderOf(zip)).at(-1)!;
+    const slide = await zip.file(`ppt/slides/${name}`)!.async('string');
+    expect(slide).not.toMatch(/<a:t>[^<]*forms\.gle/);
+    const picture = slide.match(/<p:pic>[\s\S]*?<\/p:pic>/)![0];
+    const qr = shapeRect(picture)!;
+    const footer = shapeRect(slide.match(/<p:sp>(?:(?!<\/p:sp>)[\s\S])*빛주사랑 겨울 수련회[\s\S]*?<\/p:sp>/)![0])!;
+    expect(qr.y + qr.cy).toBeLessThan(footer.y);
+    expect(qr.x + qr.cx).toBeLessThanOrEqual(9144000);
+    const rels = await zip.file(`ppt/slides/_rels/${name}.rels`)!.async('string');
+    expect(rels).toMatch(/Target="\.\.\/media\/retreat-qr-\d+-1\.gif"/);
+    expect(await zip.file('[Content_Types].xml')!.async('string')).toContain('Extension="gif"');
   });
 
   it('puts the session poster on the cover, centred on its own colour', async () => {
