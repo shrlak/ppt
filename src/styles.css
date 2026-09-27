@@ -4639,6 +4639,19 @@ main[data-direction='back'] .wizard-panel.active {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.retreat-score-songs {
+  display: grid;
+  gap: var(--s-1);
+  margin-top: var(--s-3);
+}
+.retreat-score-songs ol {
+  margin: 0;
+  padding-left: var(--s-5);
+  font-size: var(--text-sm);
+}
+.retreat-score-songs li span + span {
+  margin-left: var(--s-2);
+}
 .retreat-conti-summary {
   margin: var(--s-2) 0 0;
   padding-left: var(--s-5);

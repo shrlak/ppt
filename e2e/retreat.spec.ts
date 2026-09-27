@@ -21,6 +21,50 @@ async function slideTexts(zip: JSZip): Promise<string[]> {
   return texts;
 }
 
+const PROXY = '**/ppt/__proxy';
+
+/**
+ * Answer the recognition proxy the e2e bundle is built with: the page at
+ * position i of every request reads as "악보 곡 {i+1}", with made-up lyrics
+ * (no real 악보 or published lyrics belong in a fixture).
+ */
+async function stubRecognition(page: Page): Promise<{ requests: number }> {
+  const seen = { requests: 0 };
+  const body = (images: number) =>
+    JSON.stringify({
+      results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({
+        imageIndex,
+        pageType: 'score',
+        sermonTitle: '',
+        scripture: '',
+        title: `악보 곡 ${imageIndex + 1}`,
+        artist: '',
+        key: 'G',
+        order: ['V', 'C'],
+        lyricRowCount: 1,
+        sections: [
+          { label: 'V', lines: ['가나다라 마바사 아자차', '카타파하 그 이름 높이'] },
+          { label: 'C', lines: ['높이 높이 노래해', '영원토록 노래해'] },
+        ],
+      })),
+    });
+  await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+  await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+  await page.route(`${PROXY}/gemini/**`, async (route) => {
+    seen.requests += 1;
+    const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData).length;
+    await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: body(images) }] } }] } });
+  });
+  await page.route(`${PROXY}/openrouter`, async (route) => {
+    seen.requests += 1;
+    const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+    const images = (payload.messages?.[0]?.content ?? []).filter((part) => (part as { type?: string }).type === 'image_url').length;
+    await route.fulfill({ json: { choices: [{ message: { content: body(images) } }] } });
+  });
+  return seen;
+}
+
 function block(page: Page, kind: string) {
   return page.locator(`[data-testid="retreat-block"][data-kind="${kind}"]`);
 }
@@ -89,7 +133,8 @@ test.describe('수련회 generator', () => {
     await expect(block(page, 'sermon').getByTestId('retreat-sermon-title')).toHaveValue('Go Beyond the Visible');
   });
 
-  test('takes a conti as several PDFs, with no song table in any, and keeps them all with the decks', async ({ page }) => {
+  test('reads songs off a 악보-only conti of several PDFs, and keeps the files and songs with the decks', async ({ page }) => {
+    const models = await stubRecognition(page);
     // A second one-page PDF, printed by the browser itself. Both go in as
     // bytes, not paths: of two paths, one under this test's Korean output
     // folder, only one reached the page.
@@ -103,10 +148,24 @@ test.describe('수련회 generator', () => {
     ]);
     const files = page.getByTestId('retreat-conti-files').locator('li');
     await expect(files).toHaveText(['conti-example.pdf', 'conti-2.pdf'], { timeout: 30_000 });
-    await expect(page.getByText(/곡 표는 찾지 못해 곡은 집회 순서에서 직접 넣어 주세요/)).toBeVisible();
+
+    // No song table anywhere: every 악보 page is read, titles first, then lyrics.
+    await expect(page.getByText(/곡 표가 없어 악보에서 \d+곡을 읽었습니다/)).toBeVisible({ timeout: BUILD_TIMEOUT });
+    const scoreSongs = page.getByTestId('retreat-score-songs').locator('li');
+    await expect(scoreSongs.first()).toHaveText(/악보 곡 1\s*악보에서 읽은 가사/);
+    await expect(scoreSongs.nth(1)).toHaveText(/악보 곡 2\s*악보에서 읽은 가사/);
+    expect(models.requests).toBeGreaterThan(0);
     await expect(page.locator('.toast-error')).toHaveCount(0);
 
-    // Both are saved with the deck, and come back with 편집.
+    // A song typed into a 집회 takes the lyrics its 악보 page was read as.
+    await page.getByTestId('retreat-tab-sessions').click();
+    const praise = block(page, 'songs').first();
+    await praise.getByTestId('retreat-add-song-input').fill('악보 곡 2');
+    await praise.getByTestId('retreat-add-song').click();
+    await expect(praise.getByTestId('retreat-song-source')).toContainText('악보에서 읽은 가사');
+    await expect(praise.getByTestId('retreat-song-lyrics')).toHaveValue(/가나다라 마바사/);
+
+    // Both files and the songs read are saved with the deck, and come back with 편집.
     await page.getByTestId('retreat-tab-download').click();
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
@@ -120,11 +179,13 @@ test.describe('수련회 generator', () => {
     page.once('dialog', (dialog) => void dialog.accept());
     await page.getByTestId('retreat-reset').click();
     await expect(page.getByTestId('retreat-conti-files')).toHaveCount(0);
+    await expect(page.getByTestId('retreat-score-songs')).toHaveCount(0);
 
     await page.getByRole('button', { name: '라이브러리' }).click();
     await page.getByTestId('library-entry-edit').first().click();
     await page.getByTestId('retreat-tab-info').click();
     await expect(files).toHaveText(['conti-example.pdf', 'conti-2.pdf']);
+    await expect(scoreSongs.first()).toHaveText(/악보 곡 1/);
 
     // A file can be taken out again.
     await page.getByRole('button', { name: 'conti-2.pdf 빼기' }).click();

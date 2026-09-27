@@ -310,6 +310,7 @@ describe('lyrics typed on the retreat page reach the 찬양 라이브러리', ()
   it('leaves lyrics that only came from a library alone', () => {
     expect(libraryEntryForRetreatSong({ ...typed, source: 'retreat' }, undefined)).toBeNull();
     expect(libraryEntryForRetreatSong({ ...typed, source: 'library' }, undefined)).toBeNull();
+    expect(libraryEntryForRetreatSong({ ...typed, source: 'score' }, undefined)).toBeNull();
     expect(libraryEntryForRetreatSong({ ...typed, lyrics: '  ' }, undefined)).toBeNull();
   });
 

@@ -1,7 +1,8 @@
 // 수련회 PPT 생성기 — one deck per 집회, in the retreat's own design.
 //
 // Three steps: 수련회 정보·콘티 (the retreat's name, and the 찬양 콘티 — one
-// PDF or several — whose table's columns fill each session's songs) →
+// PDF or several — whose table's columns fill each session's songs, and whose
+// 악보 pages lend lyrics to the songs nobody has yet) →
 // 집회 순서 (each session's order of service: poster, songs, 설교말씀, 설교,
 // 기도회, 축도, 광고…) → 다운로드.
 //
@@ -16,13 +17,14 @@ import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { LibraryEntry } from '../lib/utils/types';
-import { loadConti } from '../lib/utils/contiPdf';
+import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
 import {
   fetchBundledLibrary,
   findEntry,
   libraryContentKey,
   loadUserLibrary,
   mergeLibraries,
+  normalizeTitle,
   queueLyricsUpsert,
   saveUserLibrary,
   upsertEntry,
@@ -38,11 +40,14 @@ import { parseRetreatContiPages } from './conti';
 import { buildRetreatDeck } from './deckBuilder';
 import { clearRetreatDraft, loadRetreatDraft, saveRetreatDraft } from './draft';
 import { planRetreatSession, suggestRetreatFileName } from './planner';
+import { readRetreatScores, SCORE_RENDER_WIDTH, type ScorePage } from './scoreReader';
+import { applyScoreSongs, retreatScorePages, titlesWithoutLyrics } from './scores';
 import { resolveRetreatPassage, type RetreatPassage } from './scripture';
 import {
   fetchSongSeeds,
   libraryEntryForRetreatSong,
   resolveSong as resolveSongFrom,
+  SONG_SOURCE_LABEL,
   type RetreatSongSeed,
 } from './songs';
 import {
@@ -179,6 +184,8 @@ export default function RetreatApp() {
   const [contiFiles, setContiFiles] = useState<SavedFile[]>([]);
   const [contiSummary, setContiSummary] = useState<string[] | null>(null);
   const [readingConti, setReadingConti] = useState(false);
+  /** What the 악보 reading is doing, while it runs. */
+  const [scoreProgress, setScoreProgress] = useState<string | null>(null);
   const [passages, setPassages] = useState<Record<string, RetreatPassage | null | undefined>>({});
   const [passageErrors, setPassageErrors] = useState<Record<string, string>>({});
   const [busySession, setBusySession] = useState<string | null>(null);
@@ -193,10 +200,17 @@ export default function RetreatApp() {
     void fetchSongSeeds(BASE).then(setSeeds);
     void fetchBundledLibrary(BASE).then((bundled) => setLibrary(mergeLibraries(bundled, loadUserLibrary())));
   }, []);
-  const resolveSong = useCallback((title: string) => resolveSongFrom(title, seeds, library), [seeds, library]);
-  const songTitles = useMemo(
-    () => [...new Set([...seeds.map((seed) => seed.title), ...library.map((entry) => entry.title)])].sort((a, b) => a.localeCompare(b, 'ko')),
+  const resolveSong = useCallback(
+    (title: string) => resolveSongFrom(title, seeds, library, state.scoreSongs),
+    [seeds, library, state.scoreSongs],
+  );
+  const knownTitles = useMemo(
+    () => [...new Set([...seeds.map((seed) => seed.title), ...library.map((entry) => entry.title)])],
     [seeds, library],
+  );
+  const songTitles = useMemo(
+    () => [...new Set([...knownTitles, ...state.scoreSongs.map((song) => song.title)])].sort((a, b) => a.localeCompare(b, 'ko')),
+    [knownTitles, state.scoreSongs],
   );
 
   // ---- restore: a 라이브러리 entry in the URL, else this machine's draft ----
@@ -323,22 +337,23 @@ export default function RetreatApp() {
     }));
 
   /**
-   * Add conti PDFs and read their song table, from whichever page of
-   * whichever file holds it. A conti with no table (or none in these files)
-   * is still kept with the decks; its songs are put in by hand.
+   * Add conti PDFs and read them all: the song table, from whichever page of
+   * whichever file holds it, and then the 악보 pages. One 악보 PDF holds every
+   * 집회's songs, so the table decides where a song goes and the 악보 only
+   * lends lyrics to the songs still without them; with no table, the songs
+   * read off the 악보 are listed for the 집회 순서 to take from. A conti with
+   * neither is still kept with the decks.
    */
   async function addContiFiles(files: File[]) {
     setReadingConti(true);
+    const docs: { name: string; doc: ContiDocument }[] = [];
     try {
       const added: SavedFile[] = [];
       const unreadable: string[] = [];
-      const pageTexts: string[] = [];
       for (const file of files) {
         const data = await file.arrayBuffer();
         try {
-          const doc = await loadConti(data.slice(0));
-          pageTexts.push(...doc.parsed.pageTexts);
-          doc.destroy();
+          docs.push({ name: file.name, doc: await loadConti(data.slice(0)) });
           added.push({ name: file.name, data });
         } catch {
           unreadable.push(file.name);
@@ -351,25 +366,68 @@ export default function RetreatApp() {
         return [...current, ...added.filter((file) => !known.has(`${file.name}/${file.data.byteLength}`))];
       });
 
-      const slots = parseRetreatContiPages(pageTexts);
-      if (slots.length === 0) {
-        showToast(
-          contiSummary
-            ? `콘티 ${added.length}개를 더 올렸습니다.`
-            : '콘티를 올렸습니다. 곡 표는 찾지 못해 곡은 집회 순서에서 직접 넣어 주세요.',
-        );
+      let next = state;
+      const slots = parseRetreatContiPages(docs.flatMap(({ doc }) => doc.parsed.pageTexts));
+      if (slots.length > 0) {
+        const result = applyConti(state, slots, resolveSong);
+        next = result.state;
+        setState(next);
+        setContiSummary([
+          ...result.placed.map((item) => `${item.label} → ${item.target} (${item.count}곡)`),
+          ...result.unplaced.map((label) => `${label} → 넣을 곳이 없어 건너뜀`),
+        ]);
+        showToast(`콘티에서 ${slots.reduce((sum, slot) => sum + slot.songs.length, 0)}곡을 읽어 집회마다 넣었습니다.`);
+      }
+      const hasTable = slots.length > 0 || contiSummary !== null;
+
+      const pages: ScorePage[] = docs.flatMap(({ name, doc }) =>
+        retreatScorePages(doc.parsed.pageTexts).map((page) => ({
+          label: `${name} p.${page}`,
+          text: doc.parsed.pageTexts[page - 1] ?? '',
+          render: () => doc.renderPage(page, SCORE_RENDER_WIDTH, 'png'),
+        })),
+      );
+      const missing = titlesWithoutLyrics(next);
+      if (pages.length === 0 || (hasTable && missing.length === 0)) {
+        if (!hasTable) showToast('콘티를 올렸습니다. 곡 표도 악보도 찾지 못해 곡은 집회 순서에서 직접 넣어 주세요.');
         return;
       }
-      const result = applyConti(state, slots, resolveSong);
-      setState(result.state);
-      setContiSummary([
-        ...result.placed.map((item) => `${item.label} → ${item.target} (${item.count}곡)`),
-        ...result.unplaced.map((label) => `${label} → 넣을 곳이 없어 건너뜀`),
-      ]);
-      showToast(`콘티에서 ${slots.reduce((sum, slot) => sum + slot.songs.length, 0)}곡을 읽어 집회마다 넣었습니다.`);
+
+      const wanted = new Set(missing.map(normalizeTitle));
+      const tableTitles = next.sessions.flatMap((session) =>
+        session.blocks.flatMap((block) => (block.kind === 'songs' ? block.songs.map((song) => song.title) : [])),
+      );
+      setScoreProgress('악보 읽는 중…');
+      const read = await readRetreatScores(pages, {
+        tableTitles,
+        knownTitles,
+        needsLyrics: (title) => (hasTable ? wanted.has(normalizeTitle(title)) : !resolveSong(title).lyrics.trim()),
+        readUntitled: !hasTable,
+        onProgress: setScoreProgress,
+      });
+      const { filled } = applyScoreSongs(next, read.songs);
+      setState((current) => applyScoreSongs(current, read.songs).state);
+
+      if (hasTable) {
+        const still = missing.filter((title) => !filled.includes(title));
+        showToast(
+          (filled.length > 0 ? `악보에서 ${filled.length}곡의 가사를 읽어 넣었습니다.` : '악보에서 더 읽은 가사가 없습니다.') +
+            (still.length > 0 ? ` 가사가 없는 곡: ${still.join(', ')}` : ''),
+          still.length > 0 ? 'warn' : 'notice',
+        );
+      } else if (read.songs.length > 0) {
+        showToast(
+          `곡 표가 없어 악보에서 ${read.songs.length}곡을 읽었습니다. 집회 순서의 찬양에 곡 이름을 넣으면 가사가 함께 들어갑니다.`,
+        );
+      } else {
+        showToast('콘티를 올렸습니다. 악보에서 곡을 읽지 못해 곡은 집회 순서에서 직접 넣어 주세요.');
+      }
+      if (read.error) showToast(`악보를 끝까지 읽지 못했습니다: ${read.error}`, 'warn');
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
     } finally {
+      for (const { doc } of docs) doc.destroy();
+      setScoreProgress(null);
       setReadingConti(false);
     }
   }
@@ -568,16 +626,40 @@ export default function RetreatApp() {
                   </ul>
                 )}
                 <span className="field-hint">
-                  PDF 여러 개를 한 번에 올리거나 이어서 더 올릴 수 있습니다. 모든 장에서 표(금요일 오후 예배, 기도회, 토요일
-                  오전 특강 …)를 찾아 읽고, 곡 앞에 X를 적은 곡은 뺍니다. 작년 수련회 PPT에 있던 곡과 찬양 라이브러리 곡은
-                  가사까지 채웁니다. 표가 없는 콘티도 올릴 수 있고, 그때 곡은 집회 순서에서 직접 넣습니다.
+                  PDF 여러 개(곡 표, 악보)를 한 번에 올리거나 이어서 더 올릴 수 있습니다. 모든 장에서 표(금요일 오후 예배,
+                  기도회, 토요일 오전 특강 …)를 찾아 칸마다 해당 집회에 넣고, 곡 앞에 X를 적은 곡은 뺍니다. 가사는 작년
+                  수련회 PPT, 찬양 라이브러리에서 먼저 채우고, 없는 곡은 악보를 읽어 채웁니다. 곡 표가 없으면 악보에서 읽은
+                  곡을 아래에 모아 두니, 집회 순서의 찬양에서 곡 이름으로 골라 넣으세요.
                 </span>
+                {scoreProgress && (
+                  <p className="field-hint" role="status" data-testid="retreat-score-progress">
+                    {scoreProgress}
+                  </p>
+                )}
                 {contiSummary && (
                   <ul className="retreat-conti-summary" data-testid="retreat-conti-summary">
                     {contiSummary.map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
+                )}
+                {state.scoreSongs.length > 0 && (
+                  <div className="retreat-score-songs" data-testid="retreat-score-songs">
+                    <span className="field-label">악보에서 읽은 곡 ({state.scoreSongs.length})</span>
+                    <ol>
+                      {state.scoreSongs.map((song) => {
+                        const resolved = resolveSong(song.title);
+                        return (
+                          <li key={song.title}>
+                            <span>{song.title}</span>
+                            <span className={`retreat-song-source${resolved.lyrics.trim() ? '' : ' is-missing'}`}>
+                              {resolved.lyrics.trim() ? SONG_SOURCE_LABEL[resolved.source ?? 'manual'] : '가사 없음'}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
                 )}
               </div>
             </section>
