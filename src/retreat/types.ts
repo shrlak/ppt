@@ -20,7 +20,14 @@ export interface RetreatSong {
    */
   lyrics: string;
   /** Where the lyrics came from, for the card's hint. */
-  source?: 'retreat' | 'library' | 'manual';
+  source?: 'retreat' | 'library' | 'score' | 'manual';
+}
+
+/** A song read off the conti's 악보 pages: its title, and its lyrics when they were read. */
+export interface ScoreSong {
+  title: string;
+  /** As projected (see RetreatSong.lyrics); empty when only the title could be read. */
+  lyrics: string;
 }
 
 export interface PosterImage {
@@ -69,6 +76,12 @@ export interface RetreatState {
    * generator (it is a Sunday deck), so its songs are only listed here.
    */
   closingSongs: string[];
+  /**
+   * Every song the conti's 악보 pages were read as, in page order. A conti
+   * with a song table takes lyrics from here; one without is placed from
+   * here by hand, since one 악보 PDF holds every 집회's songs.
+   */
+  scoreSongs: ScoreSong[];
 }
 
 export const BLOCK_LABELS: Record<RetreatBlockKind, string> = {
@@ -171,5 +184,6 @@ export function defaultRetreat(): RetreatState {
       },
     ],
     closingSongs: [],
+    scoreSongs: [],
   };
 }
