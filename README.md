@@ -360,6 +360,21 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 사용합니다 (하위 항목의 `- ` 표시는 그대로 유지됩니다). 번호는 입력한 순서대로 항상 새로
 매겨집니다.
 
+본문에 **링크**가 있으면 글에서는 빼고, 그 광고 슬라이드 **오른쪽 아래 구석**에 링크의 **QR 코드**를
+넣습니다. 본문 글상자는 QR 코드와 겹치지 않도록 그 위나 왼쪽으로 비켜 줍니다.
+
+```
+3. <찬양팀 모집>
+찬양팀 싱어와 세션을 모집합니다.
+- 신청: https://forms.gle/xyz789     ← 이 줄은 빠지고 QR 코드가 됩니다
+- 문의: 찬양팀장
+```
+
+- `https://…`, `www.…`, 그리고 `forms.gle/abc`·`bit.ly/xyz`처럼 주소 뒤에 경로가 붙은 짧은 링크를
+  알아봅니다. 마크다운 링크 `[신청하기](https://…)`는 `신청하기`만 글에 남습니다.
+- `- 신청: 링크`처럼 링크를 소개만 하던 짧은 줄은 통째로 빠지고, 문장 속 링크는 링크만 빠집니다.
+- 한 광고에 링크가 여러 개면 QR 코드가 적은 순서대로 위에서부터 쌓입니다.
+
 ## 📎 추가 자료
 
 마지막 **추가 자료** 단계에서 PDF, PPTX, PNG, JPG/JPEG 파일을 여러 개 올리고 위·아래 버튼으로
@@ -537,7 +552,8 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
   **찬양 라이브러리**에도 (한 장이 한 파트 1, 2, 3…인 곡으로) 저장되어 다음 수련회나 주일예배에서
   불러옵니다. 다만 라이브러리에 V·C·B로 파트가 나뉜 확인된 곡이 이미 있으면 그 곡은 덮어쓰지 않습니다
   (주일예배가 콘티의 진행 순서를 그 파트 이름에 맞추기 때문입니다).
-- 광고는 `1. <제목>` 다음 줄부터 내용을 적으면 항목마다 한 장씩 만들어집니다.
+- 광고는 `1. <제목>` 다음 줄부터 내용을 적으면 항목마다 한 장씩 만들어집니다. 본문의 링크는 글에서
+  빼고 그 슬라이드 오른쪽 아래(아래 띠 위)에 QR 코드로 넣습니다.
 - 긴 가사·말씀·광고는 글자를 줄여 상자 안에 맞춥니다.
 
 ### 3단계 · 다운로드
@@ -772,6 +788,9 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 4. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split
    into one slide per item. Markdown pasted from a notes app works too: bold/italic markers around
    the title (`1. **<title>**`) or inside the body are stripped, and `*`/`•` bullets become `-`.
+   Links in an item's body are taken out of the text and drawn as QR codes in the slide's
+   bottom-right corner, with the body box moved clear of them (`src/lib/utils/announcementLinks.ts`,
+   `src/lib/pptx/qrCode.ts`); the 수련회 광고 slides do the same above their footer band.
 5. **Additional files** — ordered PDF, PPTX, PNG, and JPG/JPEG uploads are appended only after the
    final back/end slide. PDFs become one slide per page, images are fitted without cropping, and
    uploaded PPTX slides keep their own layouts and themes.

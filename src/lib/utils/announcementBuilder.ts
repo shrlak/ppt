@@ -3,18 +3,41 @@
 // slide design from the weekly service template (see pptxSlices.ts for how
 // that slide is located). Mirrors the clone-and-substitute technique used
 // in lib/pptxBuilder.ts, adapted to this slide's 3-shape layout (fixed
-// corner label, single-run title, multi-paragraph body).
+// corner label, single-run title, multi-paragraph body). A link in an item's
+// body becomes a QR code in its slide's bottom-right corner (see qrCode.ts).
 import JSZip from 'jszip';
 import { xmlEscape } from '../pptx/pptxBuilder';
 import { extractSlideSubset } from '../pptx/pptxSlices';
-import { removeContentTypeOverride, setContentTypeOverride } from '../pptx/contentTypes';
+import {
+  ensureDefaultExtension,
+  removeContentTypeOverride,
+  setContentTypeOverride,
+} from '../pptx/contentTypes';
+import {
+  QR_IMAGE_CONTENT_TYPE,
+  QR_IMAGE_EXTENSION,
+  addQrCodes,
+  clearOfQrCodes,
+  qrCodeBoxes,
+  shapeRect,
+  type QrArea,
+  type Rect,
+} from '../pptx/qrCode';
+import { readSlideSizeOf } from '../pptx/slideGeometry';
 import { fitBodyFontSize } from '../pptx/textFit';
+import { splitOutLinks } from './announcementLinks';
 
 export interface AnnouncementItem {
   /** Title text as written between < > in the source text, e.g. "새가족 환영". */
   title: string;
+  /** The body, with any links taken out of it. */
   bodyLines: string[];
+  /** The links the body had, each drawn as a QR code on the slide. Absent when there were none. */
+  links?: string[];
 }
+
+const BODY_BASE_SZ = 2500;
+const BODY_MIN_SZ = 1200;
 
 // Titles may be wrapped in Markdown emphasis when the text is pasted from a
 // note-taking app (e.g. "1. **<새가족 환영>**"), so the delimiters around the
@@ -47,7 +70,8 @@ function isBlankLine(line: string): boolean {
  * Parse freeform announcement text into items. Anything before the first
  * "N. <title>" marker (e.g. a "7/5 주일광고:" header line) is discarded —
  * only the numbered items become slides. Markdown formatting around titles
- * and body lines is accepted and stripped.
+ * and body lines is accepted and stripped, and links are moved out of the
+ * body into `links`.
  */
 export function parseAnnouncements(text: string): AnnouncementItem[] {
   const markers = [...text.matchAll(ITEM_MARKER)];
@@ -59,12 +83,14 @@ export function parseAnnouncements(text: string): AnnouncementItem[] {
     const title = stripEmphasis(marker[2].replace(/\s+/g, ' ').trim()).trim();
     const start = marker.index! + marker[0].length;
     const end = i + 1 < markers.length ? markers[i + 1].index! : text.length;
-    const bodyLines = text
-      .slice(start, end)
-      .split(/\r?\n/)
-      .map(cleanBodyLine)
-      .filter((line) => !isBlankLine(line));
-    if (title) items.push({ title, bodyLines });
+    const { bodyLines, links } = splitOutLinks(
+      text
+        .slice(start, end)
+        .split(/\r?\n/)
+        .map(cleanBodyLine)
+        .filter((line) => !isBlankLine(line)),
+    );
+    if (title) items.push(links.length > 0 ? { title, bodyLines, links } : { title, bodyLines });
   }
   return items;
 }
@@ -78,19 +104,42 @@ function setTextOfFirstRun(xml: string, text: string): string {
   return xml.slice(0, open + 5) + text + xml.slice(close);
 }
 
-/** Build one announcement slide's XML from the template item-slide XML. */
-function buildAnnouncementSlideXml(templateXml: string, index: number, item: AnnouncementItem): string {
+function templateShapes(templateXml: string): RegExpExecArray[] {
   const shapes = [...templateXml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)];
   if (shapes.length < 3) {
     throw new Error('공지 슬라이드 템플릿의 구조가 예상과 다릅니다 (도형 3개 필요).');
   }
-  const [, titleShape, bodyShape] = shapes;
+  return shapes;
+}
+
+/**
+ * Where the item slide's QR codes go: the bottom-right corner, lined up with
+ * the body box's right edge and as far from the slide's bottom as that edge
+ * is from its side, never above the body's top (the title sits there).
+ */
+function qrAreaOf(templateXml: string, slideWidth: number, slideHeight: number): QrArea | null {
+  const body = shapeRect(templateShapes(templateXml)[2][0]);
+  if (!body) return null;
+  const right = body.x + body.cx;
+  return { right, bottom: slideHeight - (slideWidth - right), top: body.y };
+}
+
+/** Build one announcement slide's XML from the template item-slide XML, kept clear of `qrBoxes`. */
+function buildAnnouncementSlideXml(
+  templateXml: string,
+  index: number,
+  item: AnnouncementItem,
+  qrBoxes: Rect[] = [],
+): string {
+  const [, titleShape, bodyShape] = templateShapes(templateXml);
 
   const newTitleShape = setTextOfFirstRun(titleShape[0], xmlEscape(`${index + 1}. <${item.title}>`));
 
-  const bodyStart = bodyShape[0].indexOf('<p:txBody>');
-  const bodyEnd = bodyShape[0].indexOf('</p:txBody>', bodyStart);
-  const body = bodyShape[0].slice(bodyStart, bodyEnd);
+  const lines = item.bodyLines.length > 0 ? item.bodyLines : [''];
+  const bodyShapeXml = clearOfQrCodes(bodyShape[0], lines, qrBoxes, BODY_BASE_SZ, BODY_MIN_SZ);
+  const bodyStart = bodyShapeXml.indexOf('<p:txBody>');
+  const bodyEnd = bodyShapeXml.indexOf('</p:txBody>', bodyStart);
+  const body = bodyShapeXml.slice(bodyStart, bodyEnd);
   const firstP = body.indexOf('<a:p>');
   const lastP = body.lastIndexOf('</a:p>');
   if (firstP === -1 || lastP === -1) {
@@ -98,8 +147,7 @@ function buildAnnouncementSlideXml(templateXml: string, index: number, item: Ann
   }
   const paraTpl = body.slice(firstP, body.indexOf('</a:p>', firstP) + '</a:p>'.length);
 
-  const lines = item.bodyLines.length > 0 ? item.bodyLines : [''];
-  const sz = fitBodyFontSize(bodyShape[0], lines, 2500, 1200);
+  const sz = fitBodyFontSize(bodyShapeXml, lines, BODY_BASE_SZ, BODY_MIN_SZ);
   const paragraphs = lines
     .map((line) => {
       const withSize = paraTpl.replace(/sz="\d+"/g, `sz="${sz}"`);
@@ -107,7 +155,7 @@ function buildAnnouncementSlideXml(templateXml: string, index: number, item: Ann
     })
     .join('');
   const newBody = body.slice(0, firstP) + paragraphs + body.slice(lastP + '</a:p>'.length);
-  const newBodyShape = bodyShape[0].slice(0, bodyStart) + newBody + bodyShape[0].slice(bodyEnd);
+  const newBodyShape = bodyShapeXml.slice(0, bodyStart) + newBody + bodyShapeXml.slice(bodyEnd);
 
   let out = templateXml;
   // Replace body first (later in the string) so the title shape's offset stays valid.
@@ -141,10 +189,26 @@ export async function buildAnnouncementDeck(
   zip.remove('ppt/slides/slide1.xml');
   zip.remove('ppt/slides/_rels/slide1.xml.rels');
 
+  const presentationOrig = await zip.file('ppt/presentation.xml')!.async('string');
+  const slideSize = readSlideSizeOf(presentationOrig);
+  const qrArea = qrAreaOf(templateXml, slideSize.cx, slideSize.cy);
+
   items.forEach((item, i) => {
     const n = i + 1;
-    zip.file(`ppt/slides/slide${n}.xml`, buildAnnouncementSlideXml(templateXml, i, item));
-    zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, templateRels);
+    const links = item.links ?? [];
+    const boxes = qrArea ? qrCodeBoxes(links.length, qrArea) : [];
+    let slideXml = buildAnnouncementSlideXml(templateXml, i, item, boxes);
+    let relsXml = templateRels;
+    if (boxes.length > 0) {
+      const withQr = addQrCodes(slideXml, relsXml, links, boxes, `announcement-qr-${n}`);
+      ({ slideXml, relsXml } = withQr);
+      for (const image of withQr.media) zip.file(image.path, image.data);
+      if (withQr.media.length > 0) {
+        contentTypes = ensureDefaultExtension(contentTypes, QR_IMAGE_EXTENSION, QR_IMAGE_CONTENT_TYPE);
+      }
+    }
+    zip.file(`ppt/slides/slide${n}.xml`, slideXml);
+    zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, relsXml);
     contentTypes = setContentTypeOverride(
       contentTypes,
       `ppt/slides/slide${n}.xml`,
@@ -152,7 +216,6 @@ export async function buildAnnouncementDeck(
     );
   });
 
-  const presentationOrig = await zip.file('ppt/presentation.xml')!.async('string');
   let presRels = (await zip.file('ppt/_rels/presentation.xml.rels')!.async('string')).replace(
     /<Relationship[^>]*Type="[^"]*\/relationships\/slide"[^>]*\/>/g,
     '',

@@ -16,7 +16,8 @@ export default function AnnouncementSection({ value, onChange }: Props) {
       <p className="tool-intro">
         공지 내용을 <code>1. &lt;제목&gt;</code> 형식으로 붙여넣으면 번호를 다시 매겨 항목별로
         슬라이드를 만들어 드립니다 (선택). <code>1. **&lt;제목&gt;**</code> 처럼 마크다운 서식이
-        섞여 있어도 그대로 붙여넣으시면 됩니다.
+        섞여 있어도 그대로 붙여넣으시면 됩니다. 본문에 링크가 있으면 글에서는 빼고 그 슬라이드
+        오른쪽 아래에 QR 코드로 넣습니다.
       </p>
       <textarea
         className="announcement-textarea"
@@ -41,7 +42,8 @@ export default function AnnouncementSection({ value, onChange }: Props) {
               <div key={i} className="verse-preview-item">
                 <Icon name="check" />
                 <span>
-                  {i + 1}. &lt;{item.title}&gt; ({item.bodyLines.length}줄)
+                  {i + 1}. &lt;{item.title}&gt; ({item.bodyLines.length}줄
+                  {item.links ? ` · QR 코드 ${item.links.length}개` : ''})
                 </span>
               </div>
             ))

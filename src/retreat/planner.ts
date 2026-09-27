@@ -1,7 +1,8 @@
 // Plans one 수련회 session's deck: which of the template's designs each slide
 // uses and what it says. Pure, so the download, the slide count and the
 // on-screen preview read the same plan.
-import { parseAnnouncements } from '../lib/utils/announcementBuilder';
+import { parseAnnouncements, type AnnouncementItem } from '../lib/utils/announcementBuilder';
+import { splitOutLinks } from '../lib/utils/announcementLinks';
 import type { RetreatPassage } from './scripture';
 import { lyricSlides } from './songs';
 import type { RetreatInfo, RetreatSession } from './types';
@@ -19,7 +20,8 @@ export type RetreatSlidePlan =
   | { kind: 'prayer'; label: string }
   | { kind: 'benediction'; label: string }
   | { kind: 'announcementDivider'; label: string }
-  | { kind: 'announcement'; title: string; lines: string[] };
+  /** `links` are drawn as QR codes, not written in `lines`. */
+  | { kind: 'announcement'; title: string; lines: string[]; links: string[] };
 
 /**
  * Every slide of a session, in order. `passages` holds each scripture
@@ -82,6 +84,7 @@ export function planRetreatSession(
             kind: 'announcement',
             title: `${index + 1}. <${item.title.trim()}>`,
             lines: item.bodyLines.filter((line) => line.trim()),
+            links: item.links ?? [],
           }),
         );
         break;
@@ -93,20 +96,24 @@ export function planRetreatSession(
 
 /**
  * 광고 text as the Sunday 광고 step takes it ("1. <제목>" and its lines), or
- * just "1. 제목" — the brackets are printed on the slide either way.
+ * just "1. 제목" — the brackets are printed on the slide either way. Links
+ * are moved out of the lines into `links`, as the Sunday step does.
  */
-export function parseRetreatAnnouncements(text: string): { title: string; bodyLines: string[] }[] {
+export function parseRetreatAnnouncements(text: string): AnnouncementItem[] {
   if (!text.trim()) return [];
   const bracketed = parseAnnouncements(text);
   if (bracketed.length > 0) return bracketed;
-  const items: { title: string; bodyLines: string[] }[] = [];
+  const items: AnnouncementItem[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     const numbered = line.match(/^\d+\s*[.)]\s*(.+)$/);
     if (numbered) items.push({ title: numbered[1].trim(), bodyLines: [] });
     else if (line && items.length > 0) items[items.length - 1].bodyLines.push(line);
   }
-  return items;
+  return items.map((item) => {
+    const { bodyLines, links } = splitOutLinks(item.bodyLines);
+    return links.length > 0 ? { ...item, bodyLines, links } : item;
+  });
 }
 
 /** The title slide's two runs: “2026 + 빛주사랑 겨울 수련회”. */

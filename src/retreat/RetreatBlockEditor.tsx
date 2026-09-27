@@ -276,7 +276,10 @@ export default function RetreatBlockEditor({
               data-testid="retreat-announcements"
               onChange={(event) => onChange({ ...block, text: event.target.value })}
             />
-            <span className="field-hint">번호를 붙인 항목마다 광고 슬라이드가 한 장씩 만들어집니다.</span>
+            <span className="field-hint">
+              번호를 붙인 항목마다 광고 슬라이드가 한 장씩 만들어집니다. 링크는 글에서 빼고 그 슬라이드
+              오른쪽 아래에 QR 코드로 넣습니다.
+            </span>
           </label>
         </>
       )}

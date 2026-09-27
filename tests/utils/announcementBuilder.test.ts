@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { parseAnnouncements, buildAnnouncementDeck } from '../../src/lib/utils/announcementBuilder';
+import { mergePptxDecks } from '../../src/lib/pptx/pptxMerge';
+import { assertPptxIntegrity } from '../../src/lib/pptx/pptxPackage';
+import { extractSlideSubset } from '../../src/lib/pptx/pptxSlices';
+import { qrCodeGif, shapeRect } from '../../src/lib/pptx/qrCode';
 
 const serviceTemplate = readFileSync(join(__dirname, '..', '..', 'public', 'service-template.pptx'));
 const sampleText = readFileSync(join(__dirname, '..', 'fixtures', 'announcements-sample.txt'), 'utf-8');
@@ -81,6 +85,16 @@ describe('parseAnnouncements', () => {
     expect(parseAnnouncements('1. <**새가족 환영**>\n본문').map((i) => i.title)).toEqual(['새가족 환영']);
   });
 
+  it('moves a link out of the body into links', () => {
+    const items = parseAnnouncements(
+      '1. <찬양팀 모집>\n찬양팀을 모집합니다.\n- 신청: https://forms.gle/xyz789\n- 문의: 찬양팀장\n\n2. <새가족 환영>\n환영합니다!',
+    );
+    expect(items).toEqual([
+      { title: '찬양팀 모집', bodyLines: ['찬양팀을 모집합니다.', '- 문의: 찬양팀장'], links: ['https://forms.gle/xyz789'] },
+      { title: '새가족 환영', bodyLines: ['환영합니다!'] },
+    ]);
+  });
+
   it('returns an empty array for text with no numbered items', () => {
     expect(parseAnnouncements('그냥 아무 텍스트입니다.')).toEqual([]);
   });
@@ -122,6 +136,53 @@ describe('buildAnnouncementDeck', () => {
     for (let n = 1; n <= 5; n++) {
       expect(contentTypes).toContain(`PartName="/ppt/slides/slide${n}.xml"`);
     }
+  });
+
+  describe('with a link', () => {
+    const linked = parseAnnouncements(
+      '1. <새가족 환영>\n환영합니다!\n\n2. <찬양팀 모집>\n찬양팀 싱어와 세션을 모집합니다.\n- 신청: https://forms.gle/xyz789',
+    );
+
+    it('puts its QR code in the bottom-right corner, clear of the text, and the link nowhere in the text', async () => {
+      const out = await buildAnnouncementDeck(serviceTemplate, 33, linked);
+      await expect(assertPptxIntegrity(out)).resolves.toBeUndefined();
+      const zip = await JSZip.loadAsync(out);
+
+      const plain = await zip.file('ppt/slides/slide1.xml')!.async('string');
+      expect(plain).not.toContain('<p:pic>');
+      expect(await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string')).not.toContain('/image"');
+
+      const slide = await zip.file('ppt/slides/slide2.xml')!.async('string');
+      expect(slide).not.toMatch(/<a:t>[^<]*forms\.gle/);
+      const pictures = slide.match(/<p:pic>[\s\S]*?<\/p:pic>/g)!;
+      expect(pictures).toHaveLength(1);
+      const qr = shapeRect(pictures[0])!;
+      // Lined up with the body's right edge, as far off the bottom as that edge is off the side.
+      expect(qr.x + qr.cx).toBe(8748425);
+      expect(qr.y + qr.cy).toBe(6858000 - (9144000 - 8748425));
+      const body = shapeRect([...slide.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)][2][0])!;
+      const apart = body.x + body.cx <= qr.x || body.y + body.cy <= qr.y;
+      expect(apart).toBe(true);
+
+      const rels = await zip.file('ppt/slides/_rels/slide2.xml.rels')!.async('string');
+      const rId = pictures[0].match(/r:embed="([^"]+)"/)![1];
+      const target = rels.match(new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`))![1];
+      const image = await zip.file(`ppt/media/${target}`)!.async('uint8array');
+      expect(image).toEqual(qrCodeGif('https://forms.gle/xyz789'));
+      expect(await zip.file('[Content_Types].xml')!.async('string')).toContain('Extension="gif"');
+    });
+
+    it('stays a valid package once merged into the service deck', async () => {
+      const merged = await mergePptxDecks(
+        await extractSlideSubset(serviceTemplate, [32]),
+        await buildAnnouncementDeck(serviceTemplate, 33, linked),
+      );
+      await expect(assertPptxIntegrity(merged)).resolves.toBeUndefined();
+      const zip = await JSZip.loadAsync(merged);
+      const rels = await zip.file('ppt/slides/_rels/slide3.xml.rels')!.async('string');
+      const target = rels.match(/Target="\.\.\/media\/([^"]+\.gif)"/)![1];
+      expect(zip.file(`ppt/media/${target}`)).not.toBeNull();
+    });
   });
 
   it('rejects an empty item list', async () => {
