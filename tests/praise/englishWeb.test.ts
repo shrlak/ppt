@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignEnglishByLabels,
   alignEnglishOnly,
   englishFromWeb,
   englishStanzas,
@@ -34,7 +35,7 @@ const song: Song = {
 };
 
 const ko = (lines: string[]): WebEnglishBlock => ({ lang: 'ko', lines });
-const en = (lines: string[]): WebEnglishBlock => ({ lang: 'en', lines });
+const en = (lines: string[], label?: string): WebEnglishBlock => ({ lang: 'en', lines, ...(label ? { label } : {}) });
 
 function candidate(blocks: WebEnglishBlock[], englishTitle = ''): WebEnglishCandidate {
   return { url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: '시험의 노래 영어 가사', englishTitle, score: 1, blocks };
@@ -78,6 +79,46 @@ describe('pairing a post’s stanzas', () => {
     ]);
   });
 
+  it('pairs the first stanza even when the post’s own Korean runs straight into it', () => {
+    const pairs = pairWebBlocks(
+      [ko(['시험의 노래']), ko(['오늘 함께 부를 찬양입니다']), ko(V), en(EV), ko(C), en(EC), ko(B), en(EB)],
+      songLines,
+    );
+    expect(pairs).toEqual([
+      { ko: V, en: EV },
+      { ko: C, en: EC },
+      { ko: B, en: EB },
+    ]);
+  });
+
+  it('pairs the last stanza even when a stray English line follows its English', () => {
+    const pairs = pairWebBlocks([ko(V), en(EV), ko(C), en(EC), ko(B), en(EB), en(['Translated by Some One'])], songLines);
+    expect(pairs).toEqual([
+      { ko: V, en: EV },
+      { ko: C, en: EC },
+      { ko: B, en: EB },
+    ]);
+  });
+
+  it('pairs a post that gives each Korean line its English line', () => {
+    const lineByLine = [V, C, B].flatMap((lines, part) =>
+      lines.flatMap((line, at) => [ko([line]), en([[EV, EC, EB][part][at]])]),
+    );
+    const result = englishFromWeb(song, empty, [candidate([ko(['시험의 노래 가사']), ...lineByLine])]);
+    expect(result.filled).toBe(3);
+    expect(englishUnder(result)).toEqual([EV, EC, EB]);
+  });
+
+  it('pairs all the Korean then all the English past the post’s own Korean, and guesses nothing when counts differ', () => {
+    expect(pairWebBlocks([ko(['시험의 노래 가사']), ko(V), ko(C), ko(B), en(EV), en(EC), en(EB)], songLines)).toEqual([
+      { ko: V, en: EV },
+      { ko: C, en: EC },
+      { ko: B, en: EB },
+    ]);
+    // Which English goes with which Korean cannot be told, so none is guessed.
+    expect(pairWebBlocks([ko(['시험의 노래 가사']), ko(V), ko(C), en(EV), en(EC), en(EB)], songLines)).toEqual([]);
+  });
+
   it('pairs nothing when the Korean on the page is not this song', () => {
     expect(pairWebBlocks([ko(['전혀 다른 노래의 가사', '여기 적혀 있네']), en(EV)], songLines)).toEqual([]);
   });
@@ -114,6 +155,39 @@ describe('English from the web under this conti’s Korean', () => {
     expect(englishStanzas(blocks)).toEqual([EV, EC, EB]);
     const result = englishFromWeb(song, empty, [candidate(blocks)]);
     expect(englishUnder(result)).toEqual([EV, EC, EB]);
+  });
+
+  it('lays a lyrics site’s English under the conti’s parts of the same name', () => {
+    // Genius prints the English original once through, chorus and all, headed by part.
+    const blocks = [
+      en(EV, 'Verse 1'),
+      en(EC, 'Chorus'),
+      en(['A second verse we do not sing', 'Another line of it here'], 'Verse 2'),
+      en(EC, 'Chorus'),
+      en(EB, 'Bridge'),
+      en([...EC, 'I lift Your name'], 'Chorus'),
+    ];
+    const aligned = alignEnglishByLabels(song, blocks)!;
+    expect([V, C, B].map((lines) => aligned[slideKey(lines)])).toEqual([EV, EC, EB]);
+    const result = englishFromWeb(song, empty, [{ ...candidate(blocks, 'Song of Trial'), url: 'https://genius.com/x-lyrics', host: 'genius.com' }]);
+    expect(result.filled).toBe(3);
+    expect(englishUnder(result)).toEqual([EV, EC, EB]);
+    expect(result.source).toEqual({ url: 'https://genius.com/x-lyrics', host: 'genius.com' });
+    expect(result.pasteText).toBeUndefined();
+  });
+
+  it('matches numbered parts and Korean headings by name too', () => {
+    const numbered: Song = { ...song, sections: [{ label: 'V', lines: V }, { label: 'V2', lines: B }, { label: 'C', lines: C }], order: ['V', 'C', 'V2', 'C'] };
+    const aligned = alignEnglishByLabels(numbered, [en(EB, 'Verse 2'), en(EV, '1절'), en(EC, '후렴')])!;
+    expect([V, B, C].map((lines) => aligned[slideKey(lines)])).toEqual([EV, EB, EC]);
+  });
+
+  it('lays nothing by headings unless two parts agree, or a stanza is far off its part’s length', () => {
+    expect(alignEnglishByLabels(song, [en(EV, 'Verse 1'), en(['Only this'], 'Outro')])).toBeNull();
+    expect(alignEnglishByLabels(song, [en(EV), en(EC)])).toBeNull();
+    const tooLong = Array.from({ length: 7 }, (_, index) => `A line that runs on ${index}`);
+    const aligned = alignEnglishByLabels(song, [en(EV, 'Verse 1'), en(tooLong, 'Chorus'), en(EB, 'Bridge')])!;
+    expect([V, C, B].map((lines) => aligned[slideKey(lines)])).toEqual([EV, undefined, EB]);
   });
 
   it('shares a part’s stanza across the slides that part is split into', () => {

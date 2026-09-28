@@ -1535,11 +1535,15 @@ export default {
     if (request.method === 'GET' && url.pathname === '/praise/english') {
       const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
       if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
+      // The song's English title, when the app knows it: its English original
+      // is looked up by it too (Genius, "<title> lyrics").
+      const englishTitle = (url.searchParams.get('en') || '').trim().slice(0, 100);
       // Posts do not change from one rehearsal to the next: serve repeats from
       // the edge. `v` changes whenever what a candidate carries does.
-      const cacheKey = new Request(`${url.origin}/praise/english?v=1&title=${encodeURIComponent(title)}`, {
-        method: 'GET',
-      });
+      const cacheKey = new Request(
+        `${url.origin}/praise/english?v=2&title=${encodeURIComponent(title)}&en=${encodeURIComponent(englishTitle)}`,
+        { method: 'GET' },
+      );
       const cache = caches.default;
       const cached = await cache.match(cacheKey);
       if (cached) {
@@ -1548,13 +1552,20 @@ export default {
           headers: { ...headers, 'Content-Type': 'application/json' },
         });
       }
-      let found = { query: '', candidates: [] };
+      let found = { query: '', englishTitle: '', candidates: [] };
       try {
-        found = await fetchEnglishLyricsCandidates(title, env);
+        found = await fetchEnglishLyricsCandidates(title, env, { englishTitle });
       } catch (error) {
         console.warn('english lyrics lookup failed:', error instanceof Error ? error.message : error);
       }
-      const body = JSON.stringify({ title, query: found.query, candidates: found.candidates });
+      const body = JSON.stringify({
+        title,
+        query: found.query,
+        englishTitle: found.englishTitle,
+        // Whether Google was asked, or only the keyless searches — it needs SERPAPI_API_KEY.
+        googleSearch: Boolean(googleSearchKey(env)),
+        candidates: found.candidates,
+      });
       if (found.candidates.length > 0) {
         await cache.put(
           cacheKey,

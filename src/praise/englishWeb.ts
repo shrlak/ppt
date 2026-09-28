@@ -11,8 +11,11 @@
 // repeats or in what order. A post that gives only the English is laid over
 // the song part by part (or line by line) when its shape agrees with the
 // conti's; when it does not, nothing is guessed — the English is handed to
-// the operator to paste, and to the AI as its source.
+// the operator to paste, and to the AI as its source. A lyrics site such as
+// Genius prints the English original under headings ([Verse 1], [Chorus]),
+// so its stanzas are laid over the conti's parts of the same name.
 import type { Song } from '../lib/utils/types';
+import { parsePartHeading } from '../lib/lyrics/lyricsStructure';
 import { planSectionSlides } from '../lib/utils/slidePlanner';
 import { fillEnglishFromLibrary, koreanFoundIn, type EnglishSlide } from './englishLibrary';
 import { normalizeLyricLine, planPraiseSong, slideKey } from './planner';
@@ -79,16 +82,21 @@ export function sanitizeWebEnglishCandidates(value: unknown): WebEnglishCandidat
   });
 }
 
-/** Ask the proxy to search the web for `title`'s English lyrics. */
-export async function fetchWebEnglish(title: string): Promise<WebEnglishCandidate[]> {
+/**
+ * Ask the proxy to search the web for `title`'s English lyrics. With the
+ * song's English title, the English original's lyrics page (Genius, or
+ * "<English title> lyrics" on Google) is looked up too.
+ */
+export async function fetchWebEnglish(title: string, englishTitle = ''): Promise<WebEnglishCandidate[]> {
   if (!PROXY_URL) throw new Error('웹 검색 서버가 연결되어 있지 않습니다.');
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
+  const params = new URLSearchParams({ title: title.trim() });
+  if (englishTitle.trim()) params.set('en', englishTitle.trim());
   try {
-    const response = await fetch(
-      `${PROXY_URL.replace(/\/$/, '')}/praise/english?title=${encodeURIComponent(title.trim())}`,
-      { signal: controller.signal },
-    );
+    const response = await fetch(`${PROXY_URL.replace(/\/$/, '')}/praise/english?${params}`, {
+      signal: controller.signal,
+    });
     if (!response.ok) throw new Error(`웹 검색 실패: HTTP ${response.status}`);
     let payload: { candidates?: unknown };
     try {
@@ -134,39 +142,61 @@ export function pairWebBlocks(blocks: WebEnglishBlock[], songLines: string[]): E
   const used = new Set<number>();
 
   // Grouped: a run of the song's Korean stanzas, then as many English ones.
+  // The post's own Korean at either end of the run — its heading, a word of
+  // introduction — is not a stanza, so it is not counted.
   for (let r = 0; r + 1 < runs.length; r++) {
     const [first, second] = [runs[r], runs[r + 1]];
-    const length = first.end - first.start;
-    if (length < 2 || length !== second.end - second.start) continue;
     const ko = first.lang === 'ko' ? first : second;
     const en = first.lang === 'ko' ? second : first;
-    const songStanzas = blocks.slice(ko.start, ko.end).filter(isSong).length;
+    if (used.has(en.start)) continue;
+    let start = ko.start;
+    let end = ko.end;
+    while (start < end && !isSong(blocks[start])) start += 1;
+    while (end > start && !isSong(blocks[end - 1])) end -= 1;
+    const length = end - start;
+    if (length < 2 || length !== en.end - en.start) continue;
+    const songStanzas = blocks.slice(start, end).filter(isSong).length;
     if (songStanzas * 2 < length) continue;
     for (let i = 0; i < length; i++) {
-      pairs.push({ ko: [...blocks[ko.start + i].lines], en: [...blocks[en.start + i].lines] });
-      used.add(ko.start + i);
+      pairs.push({ ko: [...blocks[start + i].lines], en: [...blocks[en.start + i].lines] });
+      used.add(start + i);
       used.add(en.start + i);
     }
   }
 
-  // Interleaved: single blocks alternating between the languages.
+  // Interleaved: single blocks alternating between the languages. One side
+  // of a pair must be a block on its own; the other need only be the end of
+  // its run facing it. A post's own Korean — its heading, a sentence
+  // introducing the song — often runs straight into the first stanza, and a
+  // stray English line (a credit, a repeated tag) often follows the last,
+  // and the stanza next to them is still a pair. Two runs meeting — all the
+  // Korean, then all the English — are not: which goes with which is the
+  // grouped rule's to say.
+  const runOf = (index: number) => runs.find((candidate) => candidate.start <= index && index < candidate.end);
   const single = (index: number) => {
-    const run = runs.find((candidate) => candidate.start <= index && index < candidate.end);
+    const run = runOf(index);
     return Boolean(run && run.end - run.start === 1);
   };
-  const neighbour = (index: number) =>
-    index >= 0 && index < blocks.length && blocks[index].lang === 'en' && single(index) && !used.has(index);
+  const facing = (index: number, offset: 1 | -1) => {
+    const run = runOf(index);
+    return Boolean(run && (offset === 1 ? index === run.end - 1 : index === run.start));
+  };
+  const pairsWith = (index: number, offset: 1 | -1) => {
+    const other = index + offset;
+    if (other < 0 || other >= blocks.length || blocks[other].lang !== 'en' || used.has(other)) return false;
+    return facing(index, offset) && facing(other, offset === 1 ? -1 : 1) && (single(index) || single(other));
+  };
   let after = 0;
   let before = 0;
   blocks.forEach((block, index) => {
-    if (used.has(index) || !single(index) || !isSong(block)) return;
-    if (neighbour(index + 1)) after += 1;
-    if (neighbour(index - 1)) before += 1;
+    if (used.has(index) || !isSong(block)) return;
+    if (pairsWith(index, 1)) after += 1;
+    if (pairsWith(index, -1)) before += 1;
   });
   if (after === 0 && before === 0) return pairs;
   const offset = after >= before ? 1 : -1;
   blocks.forEach((block, index) => {
-    if (used.has(index) || !single(index) || !isSong(block) || !neighbour(index + offset)) return;
+    if (used.has(index) || !isSong(block) || !pairsWith(index, offset)) return;
     pairs.push({ ko: [...block.lines], en: [...blocks[index + offset].lines] });
     used.add(index);
     used.add(index + offset);
@@ -244,6 +274,56 @@ export function alignEnglishOnly(song: Song, stanzas: string[][]): Record<string
   return result;
 }
 
+/** A conti part's label as family and number: "V" → "V1", "C2" → "C2", "PC" → "PC1". */
+function partKey(label: string): string {
+  const match = /^([A-Z]+)(\d*)$/.exec(label.trim().toUpperCase());
+  return match ? `${match[1]}${match[2] || '1'}` : label.trim().toUpperCase();
+}
+
+/** A page's heading ("Verse 1", "Chorus", "후렴", "2절") as the same key; null when it names no part. */
+function headingKey(label: string): string | null {
+  const heading = parsePartHeading(label.replace(/:.*$/, '').trim());
+  return heading ? `${heading.family}${heading.index ?? 1}` : null;
+}
+
+/**
+ * An English-only page laid over the song by its headings: each conti part
+ * takes the first English stanza printed under a heading of the same name
+ * (V/V1 ← Verse 1, V2 ← Verse 2, C ← Chorus, PC ← Pre-Chorus, B ← Bridge),
+ * shared across that part's slides. That is how a lyrics site prints an
+ * English original, and it does not matter how often it repeats the chorus
+ * or which parts the conti leaves out.
+ *
+ * A stanza far longer or shorter than the part it would go under is not
+ * that part's English, so it is left out. Null unless at least two parts
+ * (or a one-part song's only part) find their English this way.
+ */
+export function alignEnglishByLabels(song: Song, blocks: WebEnglishBlock[]): Record<string, string[]> | null {
+  const byKey = new Map<string, string[]>();
+  for (const block of blocks) {
+    if (block.lang !== 'en' || !block.label) continue;
+    const key = headingKey(block.label);
+    const lines = block.lines.filter((line) => wordCount(line) >= 1);
+    if (!key || byKey.has(key) || lines.length === 0) continue;
+    byKey.set(key, lines);
+  }
+  if (byKey.size === 0) return null;
+  const parts = planSectionSlides(song);
+  const result: Record<string, string[]> = {};
+  let matched = 0;
+  for (const part of parts) {
+    const english = byKey.get(partKey(part.label));
+    if (!english) continue;
+    const koLines = part.slides.reduce((sum, lines) => sum + lines.length, 0);
+    if (english.length > koLines * 3 || english.length * 2 < koLines) continue;
+    matched += 1;
+    shareAcross(part.slides, english).forEach((lines, slide) => {
+      if (lines.length > 0) result[slideKey(part.slides[slide])] = lines;
+    });
+  }
+  return matched >= Math.min(2, parts.length) ? result : null;
+}
+
 // ---- putting it together ------------------------------------------------------
 
 /** One title's web lookup, as the page tracks it. */
@@ -292,7 +372,7 @@ export function englishFromWeb(song: Song, english: PraiseEnglish, candidates: W
     let result = pairs.length > 0 ? fillEnglishFromLibrary(song, english, [entry]) : null;
     if (!result || result.filled === 0) {
       const stanzas = englishStanzas(candidate.blocks);
-      const aligned = alignEnglishOnly(song, stanzas);
+      const aligned = alignEnglishByLabels(song, candidate.blocks) ?? alignEnglishOnly(song, stanzas);
       if (aligned) {
         const next: PraiseEnglish = { title: english.title, slides: { ...english.slides } };
         let filled = 0;
