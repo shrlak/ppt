@@ -16,7 +16,7 @@ to anyone who opens dev tools, since the app has no backend of its own.
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
 Browser  ──POST /openrouter────▶  Worker (adds real key)  ──▶  OpenRouter free vision models
 Browser  ──GET  /lyrics────────▶  Worker (search + scrape) ──▶  allowlisted lyrics sites
-Browser  ──GET  /praise/english─▶  Worker (search + scrape) ──▶  "<곡 제목> 영어 가사" posts
+Browser  ──GET  /praise/english─▶  Worker (search + scrape) ──▶  "<곡 제목> 영어 가사" posts, Genius
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
@@ -67,20 +67,39 @@ device from restoring an item deleted elsewhere.
 
 ### 찬양집회 영어 가사 route
 
-`GET /praise/english?title=…` is how a 찬양집회 song whose conti prints no
-English gets its English: it searches `"<제목> 영어 가사"` — 다음 블로그 검색,
-네이버 블로그 검색, and Google through SerpApi when `SERPAPI_API_KEY` is set
-(one search per song) — keeps only hits whose heading names the song, reads up
-to four of them, and returns each post as its **lyric blocks**: the runs of
-Korean and English lyric lines in the order the post printed them, split at
-its empty lines, headings and language changes (`src/praiseEnglishWeb.js`).
-Site furniture, prose and copyright lines are dropped; the English title a post
-names the song by (`주님의 선하심 (Goodness of God)`) comes back too. The
-browser pairs the blocks and lays each English stanza under the Korean slide
-whose words it matches, so the Worker never needs to know the conti's lyrics.
-As with `/lyrics`, only a title crosses the wire; pages are fetched over https
-from public hosts only, re-checked after redirects, and capped in size.
-Responses with candidates are cached at the edge for a week.
+`GET /praise/english?title=…[&en=…]` is how a 찬양집회 song whose conti prints
+no English gets its English: it searches `"<제목> 영어 가사"` — Google through
+SerpApi when `SERPAPI_API_KEY` is set (one search per song), 다음 블로그 검색,
+네이버 블로그 검색 and DuckDuckGo's keyless HTML results (which often turn a
+server away, so they are only ever one search among several) — keeps only hits
+whose heading names the song, reads up to four of them, and returns each post
+as its **lyric blocks**: the runs of Korean and English lyric lines in the
+order the post printed them, split at its empty lines, headings and language
+changes (`src/praiseEnglishWeb.js`). Site furniture, prose and copyright lines
+are dropped; the English title a post names the song by (`주님의 선하심
+(Goodness of God)`) comes back too, passing over a series tag printed before
+the song's own title (`[K-Gospel Ep-1] 부르신 곳에서`).
+
+When the song's English title is known — `en`, sent by the app when the song
+card has one; the title itself when it is English; or the name most of the
+posts found give it — the **English original** is looked up as well: Genius's
+own song search (`genius.com/api/search/song`, keyless; a song whose title is
+the title, a worship artist's first), and only when that finds nothing,
+`"<English title> lyrics"` on Google (SerpApi, in English) and DuckDuckGo. Up to
+two such pages are read; a Genius page is read from its `data-lyrics-container`
+elements only (its header, description, annotations and credits are not
+lyrics), and its `[Verse 1: …]`/`[Chorus]` headings come back as each block's
+label. The best of these pages is returned after the three best posts, and the
+response says which `englishTitle` was used and whether Google was asked
+(`googleSearch`). A site that refuses the Worker (HTTP 403) is skipped.
+
+The browser pairs the blocks and lays each English stanza under the Korean
+slide whose words it matches — or, for a lyrics site's English-only page, under
+the conti's part of the same name — so the Worker never needs to know the
+conti's lyrics. As with `/lyrics`, only titles cross the wire; pages are fetched
+over https from public hosts only, re-checked after redirects, and capped in
+size. Responses with candidates are cached at the edge for a week, keyed by
+both titles.
 
 ### 수요예배 찬양 PPT routes
 
@@ -321,7 +340,8 @@ run a CLI command or touch the raw key outside GitHub's own secret UI.
    - `GEMINI_API_KEY` — your Gemini key (optional; skip to share only the other providers)
    - `OPENROUTER_API_KEY` — a key from <https://openrouter.ai/settings/keys>
    - `SERPAPI_API_KEY` — a key from <https://serpapi.com> (optional; turns on
-     the Google search for 수요예배 찬양 PPT on 티스토리·갓피플)
+     the Google search for 수요예배 찬양 PPT on 티스토리·갓피플, and for
+     찬양집회 영어 가사)
 
 4. Edit `wrangler.toml` in this repo — set `ALLOWED_ORIGINS` to your deployed
    site's origin (e.g. `https://<your-username>.github.io`, no trailing
@@ -449,7 +469,7 @@ Sunday could never train anything; see `wrangler.toml`.
 | `GEMINI_API_KEY` | secret | Gemini free-tier key |
 | `OPENROUTER_API_KEY` | secret | OpenRouter key, used only for `:free` vision models |
 | `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
-| `SERPAPI_API_KEY` | secret | Optional. Turns on the Google search (티스토리·갓피플) for 수요예배 찬양 PPT, through [SerpApi](https://serpapi.com) (free: 250 searches a month) |
+| `SERPAPI_API_KEY` | secret | Optional. Turns on the Google search, through [SerpApi](https://serpapi.com) (free: 250 searches a month): 티스토리·갓피플 for 수요예배 찬양 PPT, and `<곡 제목> 영어 가사` / `<English title> lyrics` for 찬양집회 영어 가사 |
 | `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
 | `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
 

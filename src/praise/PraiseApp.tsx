@@ -261,13 +261,15 @@ export default function PraiseApp() {
   webEnglishRef.current = webEnglish;
   const webInFlight = useRef(new Set<string>());
 
-  const lookUpWebEnglish = useCallback(async (title: string) => {
+  // The song's English title, when it has one, goes along: the English
+  // original's lyrics page (Genius, Google) is looked up by it too.
+  const lookUpWebEnglish = useCallback(async (title: string, englishTitle = '') => {
     const key = normalizeTitle(title);
     if (!key || webInFlight.current.has(key)) return;
     webInFlight.current.add(key);
     setWebEnglish((previous) => ({ ...previous, [key]: { status: 'searching' } }));
     try {
-      const candidates = await fetchWebEnglish(title);
+      const candidates = await fetchWebEnglish(title, englishTitle);
       setWebEnglish((previous) => ({ ...previous, [key]: { status: 'done', candidates } }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -289,7 +291,11 @@ export default function PraiseApp() {
       // Two at a time: ten songs are ten searches, not one burst of ten.
       void (async () => {
         for (let at = 0; at < wanted.length; at += 2) {
-          await Promise.all(wanted.slice(at, at + 2).map((song) => lookUpWebEnglish(song.title)));
+          await Promise.all(
+            wanted
+              .slice(at, at + 2)
+              .map((song) => lookUpWebEnglish(song.title, extrasFor(extrasRef.current, song.id).english.title)),
+          );
         }
       })();
     }, WEB_LOOKUP_DELAY_MS);
@@ -345,7 +351,7 @@ export default function PraiseApp() {
         const { [key]: _dropped, ...rest } = previous;
         return rest;
       });
-      void lookUpWebEnglish(song.title);
+      void lookUpWebEnglish(song.title, extrasFor(extrasRef.current, song.id).english.title);
     },
     [lookUpWebEnglish],
   );
