@@ -25,7 +25,8 @@ OPENROUTER_DAILY_REQUEST_LIMIT = "50"
 # Bugs is a commercial service; scraping its pages is a permission decision,
 # not a code decision. Left "false", the proxy may show a Bugs search result as
 # a link the user can open, but never fetches the page itself. The deployment's
-# administrator turned it on so Bugs pages join the web lyrics check.
+# administrator turned it on so Bugs pages join the web lyrics check and the
+# 찬양집회 영어 가사 lookup (an English version's track page, by Korean title).
 BUGS_SCRAPING_ALLOWED = "true"
 # Extra hosts the 수요예배 찬양 PPT search should treat as known 자료실, on top
 # of the 네이버 블로그·카페, 갓피플 and 티스토리 hosts src/songPpt.js ships

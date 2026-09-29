@@ -11,7 +11,7 @@
 //   POST /gemini/:model   -> https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent
 //   POST /openrouter      -> OpenRouter free vision models (legacy alias: /nvidia)
 //   GET  /lyrics          -> scored lyric candidates for a recognized 찬양
-//   GET  /praise/english  -> a 찬양집회 song's English lyrics, as posts' lyric blocks
+//   GET  /praise/english  -> a 찬양집회 song's English lyrics (posts, Bugs), as lyric blocks
 //   GET  /usage           -> current per-model usage from the shared proxy
 //   GET  /settings        -> shared recognition settings (model pool, excluded titles)
 //   POST /settings        -> update shared settings (관리자 비밀번호 required)
@@ -1529,19 +1529,18 @@ export default {
       return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
 
-    // 찬양집회 영어 가사: search "<곡 제목> 영어 가사" and hand back each post's
-    // Korean and English lyric blocks, for the browser to lay under this
-    // conti's Korean slides. Like /lyrics, only a title crosses the wire.
+    // 찬양집회 영어 가사: search "<곡 제목> 영어 가사" (and Bugs, by the same
+    // Korean title) and hand back each page's Korean and English lyric
+    // blocks, for the browser to lay under this conti's Korean slides. Like
+    // /lyrics, only a title crosses the wire — the Korean one.
     if (request.method === 'GET' && url.pathname === '/praise/english') {
       const title = (url.searchParams.get('title') || '').trim().slice(0, 100);
       if (!title) return jsonResponse({ error: 'missing title' }, 400, headers);
-      // The song's English title, when the app knows it: its English original
-      // is looked up by it too (Genius, "<title> lyrics").
-      const englishTitle = (url.searchParams.get('en') || '').trim().slice(0, 100);
       // Posts do not change from one rehearsal to the next: serve repeats from
-      // the edge. `v` changes whenever what a candidate carries does.
+      // the edge. `v` changes whenever what a candidate carries does, and
+      // Bugs's permission is part of the key so turning it on is seen at once.
       const cacheKey = new Request(
-        `${url.origin}/praise/english?v=2&title=${encodeURIComponent(title)}&en=${encodeURIComponent(englishTitle)}`,
+        `${url.origin}/praise/english?v=3&bugs=${bugsScrapingAllowed(env) ? 1 : 0}&title=${encodeURIComponent(title)}`,
         { method: 'GET' },
       );
       const cache = caches.default;
@@ -1554,7 +1553,7 @@ export default {
       }
       let found = { query: '', englishTitle: '', candidates: [] };
       try {
-        found = await fetchEnglishLyricsCandidates(title, env, { englishTitle });
+        found = await fetchEnglishLyricsCandidates(title, env);
       } catch (error) {
         console.warn('english lyrics lookup failed:', error instanceof Error ? error.message : error);
       }
