@@ -261,15 +261,14 @@ export default function PraiseApp() {
   webEnglishRef.current = webEnglish;
   const webInFlight = useRef(new Set<string>());
 
-  // The song's English title, when it has one, goes along: the English
-  // original's lyrics page (Genius, Google) is looked up by it too.
-  const lookUpWebEnglish = useCallback(async (title: string, englishTitle = '') => {
+  // Only the Korean title is searched — never an English one.
+  const lookUpWebEnglish = useCallback(async (title: string) => {
     const key = normalizeTitle(title);
     if (!key || webInFlight.current.has(key)) return;
     webInFlight.current.add(key);
     setWebEnglish((previous) => ({ ...previous, [key]: { status: 'searching' } }));
     try {
-      const candidates = await fetchWebEnglish(title, englishTitle);
+      const candidates = await fetchWebEnglish(title);
       setWebEnglish((previous) => ({ ...previous, [key]: { status: 'done', candidates } }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -294,7 +293,7 @@ export default function PraiseApp() {
           await Promise.all(
             wanted
               .slice(at, at + 2)
-              .map((song) => lookUpWebEnglish(song.title, extrasFor(extrasRef.current, song.id).english.title)),
+              .map((song) => lookUpWebEnglish(song.title)),
           );
         }
       })();
@@ -351,7 +350,7 @@ export default function PraiseApp() {
         const { [key]: _dropped, ...rest } = previous;
         return rest;
       });
-      void lookUpWebEnglish(song.title, extrasFor(extrasRef.current, song.id).english.title);
+      void lookUpWebEnglish(song.title);
     },
     [lookUpWebEnglish],
   );

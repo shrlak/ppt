@@ -10,13 +10,12 @@
 // Korean stanza against the conti's own Korean lyrics — it is the only side
 // that knows them — so the English lands under the slide it translates.
 //
-// When the song has an English original, its English title — the one the
-// browser already knows, or the one the posts name it by ("부르신 곳에서 (At
-// the Place You've Called Me To)") — is looked up too, the way the operator
-// would next: "<English title> lyrics", on Genius and on Google. A lyrics
-// site prints the English only, headed [Verse 1], [Chorus]…, so those
-// headings come back as each block's label for the browser to line up with
-// the conti's own parts.
+// Every search is by the song's KOREAN title — never by an English title,
+// which is only ever a guess read off someone's post. Bugs is searched by
+// it too: a Korean song's English version is listed there under both names
+// ("At The Place Where You Call (부르신 곳에서)"), and its track page carries
+// the English lyrics as sung. Bugs is read only where the deployment has
+// recorded permission to (BUGS_SCRAPING_ALLOWED).
 //
 // Like the other lookups only a title crosses the wire, and what is fetched
 // is a page this proxy chose off its own searches: https only, never an
@@ -37,12 +36,13 @@ import {
   naverBlogSearchUrl,
   readBoundedText,
 } from './songPpt.js';
+import { BUGS_ADAPTER, bugsScrapingAllowed } from './lyricsSources.js';
 
 /** Pages read per song: enough to find one good post, few enough to stay quick. */
 export const MAX_ENGLISH_PAGES = 4;
-/** Lyrics-site pages read for the English original, on top of the posts. */
-export const MAX_ORIGINAL_PAGES = 2;
-/** Candidates handed back to the browser: the best posts, and the best lyrics page. */
+/** Bugs track pages read for the song's English version, on top of the posts. */
+export const MAX_BUGS_PAGES = 2;
+/** Candidates handed back to the browser: the best Bugs page, and the best posts. */
 export const MAX_ENGLISH_CANDIDATES = 3;
 const PAGE_TIMEOUT_MS = 6000;
 const GOOGLE_TIMEOUT_MS = 8000;
@@ -50,8 +50,8 @@ const GOOGLE_TIMEOUT_MS = 8000;
 const MAX_BLOCKS = 160;
 const MAX_LINES = 500;
 /**
- * DuckDuckGo turns away a client that does not look like a browser, and it
- * is only ever asked for a results page — never used to fetch a post.
+ * DuckDuckGo turns away a client that does not look like a browser, and
+ * Bugs and Genius serve their pages to a browser only.
  */
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -60,18 +60,6 @@ const BROWSER_USER_AGENT =
 export function englishLyricsQuery(title) {
   const clean = String(title || '').trim();
   return clean ? `${clean} 영어 가사` : '';
-}
-
-/** The search for an English original: its title and "lyrics". */
-export function originalLyricsQuery(englishTitle) {
-  const clean = String(englishTitle || '').trim();
-  return clean ? `${clean} lyrics` : '';
-}
-
-/** True when a title is written in English letters, with no Hangul. */
-export function isEnglishTitle(title) {
-  const text = String(title || '');
-  return !/[가-힣ㄱ-ㆎ]/.test(text) && (text.match(/[A-Za-z]/g) || []).length >= 2;
 }
 
 /** Letters and digits only, lower-cased — how two titles are compared. */
@@ -262,7 +250,7 @@ function lyricEnglishLines(blocks) {
 
 /** Words in a title that are about the post, not the song. */
 const TITLE_NOISE =
-  /\b(lyrics?|english|korean|ver(sion)?|ccm|ppt|mr|key|chords?|official|live|audio|video|cover|feat)\b/gi;
+  /\b(lyrics?|english|korean|ver(sion)?|ccm|ppt|ptt|pdf|files?|mr|key|chords?|official|live|audio|video|cover|feat)\b/gi;
 
 /** Where `title` ends in `text`, however the two are spaced; -1 when it is not there. */
 function titleEnd(text, title) {
@@ -402,17 +390,122 @@ export function geniusSongTitle(pageHeading) {
   return (parts.length > 1 ? parts.slice(1).join(' - ') : '').trim();
 }
 
+// ---- Bugs --------------------------------------------------------------------------
+
+/** Bugs's own track search, asked for the song's Korean title. */
+export const BUGS_SEARCH_ENDPOINT = 'https://music.bugs.co.kr/search/track';
+
+export function bugsSearchUrl(title) {
+  return `${BUGS_SEARCH_ENDPOINT}?${new URLSearchParams({ q: String(title || '').trim() })}`;
+}
+
+/** The track id of a Bugs track page ("https://music.bugs.co.kr/track/2767575"), or ''. */
+export function bugsTrackId(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' || !BUGS_ADAPTER.hosts.includes(parsed.hostname.toLowerCase())) return '';
+    return parsed.pathname.match(/^\/track\/(\d{1,12})\/?$/)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** True for any page on Bugs, track or not. */
+function isBugsUrl(rawUrl) {
+  try {
+    return BUGS_ADAPTER.hosts.includes(new URL(rawUrl).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** A track that is not sung: an instrumental, a backing track, a solo instrument. */
+const NOT_SUNG =
+  /(\binst\b|\binstrumental\b|\bmr\b|반주|연주|색소폰|피아노|첼로|바이올린|오르골|\b(?:piano|guitar|cello|violin|music box)\b)/i;
+
+function plainText(fragment) {
+  return decodeEntities(String(fragment || '').replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when a Bugs track's title is this song's, not a longer one's that
+ * starts the same way ("나는 믿음으로 살리라" is not "나는 믿음으로"): the
+ * title outside its brackets, or the text in one of them, is the song's
+ * title exactly. Only the Korean letters are compared for a Korean title, so
+ * the English name printed beside it does not get in the way.
+ */
+export function bugsTitleNames(trackTitle, title) {
+  const hangul = (text) => String(text || '').replace(/[^가-힣]/g, '');
+  const text = decodeEntities(String(trackTitle || ''));
+  const segments = [text.replace(/[([（【<「『][^)\]）】>」』]*[)\]）】>」』]/g, ' ')];
+  for (const match of text.matchAll(/[([（【<「『]([^)\]）】>」』]*)[)\]）】>」』]/g)) segments.push(match[1]);
+  const want = hangul(title);
+  if (want) return segments.some((segment) => hangul(segment) === want);
+  return segments.some((segment) => titleKey(segment) === titleKey(title));
+}
+
+/**
+ * The tracks on a Bugs search page that are the song's English version: the
+ * track is listed under the song's title and an English title too ("At The
+ * Place Where You Call (부르신 곳에서)"), and it is sung. In Bugs's own order.
+ */
+export function extractBugsTrackHits(html, title) {
+  if (!titleKey(title)) return [];
+  const source = String(html || '');
+  const hits = [];
+  const seen = new Set();
+  for (const row of source.matchAll(/<tr\b[^>]*\btrackId="(\d{1,12})"[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const [, id, body] = row;
+    if (seen.has(id)) continue;
+    const trackTitle = plainText(body.match(/<p class="title"[^>]*>([\s\S]*?)<\/p>/i)?.[1]);
+    const artist = plainText(body.match(/<p class="artist"[^>]*>([\s\S]*?)<\/p>/i)?.[1]);
+    if (!trackTitle || !bugsTitleNames(trackTitle, title) || NOT_SUNG.test(trackTitle)) continue;
+    const englishTitle = englishTitleFrom(trackTitle, title);
+    if (!englishTitle) continue;
+    seen.add(id);
+    hits.push({
+      url: `https://music.bugs.co.kr/track/${id}`,
+      host: 'music.bugs.co.kr',
+      title: `${trackTitle}${artist ? ` / ${artist}` : ''}`.slice(0, 200),
+      englishTitle,
+    });
+  }
+  return hits;
+}
+
+/**
+ * A Bugs track page's lyrics, and nothing else of it: the plain-text block
+ * Bugs prints in <xmp> inside its lyrics container, its line breaks turned
+ * into markup ones so the page reads like any other. '' when the track has
+ * no lyrics.
+ */
+export function bugsLyricsHtml(html) {
+  const source = String(html || '');
+  const at = source.search(/class="lyricsContainer"/i);
+  if (at < 0) return '';
+  const block = source.slice(at).match(/<xmp>([\s\S]*?)<\/xmp>/i);
+  if (!block) return '';
+  return block[1]
+    .replace(/</g, '&lt;')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .join('<br>');
+}
+
 /**
  * One page as a candidate: its lyric blocks and how likely it is to be the
  * song's English. Null when it carries no English lyrics at all.
  *
- * `title` is the title the page was searched by: the Korean one for a
- * 영어 가사 post, the English one for a lyrics site's page. `englishTitle`,
- * when the search already knows it, is the English title handed back.
+ * `title` is the song's Korean title, the one the page was found by.
+ * `englishTitle`, when the search already read one off the page's listing,
+ * is the English title handed back.
  */
 export function englishCandidateFromPage(html, { url, host, heading = '', englishTitle = '' }, title) {
   const genius = isGeniusUrl(url);
-  const lyricsHtml = genius ? geniusLyricsHtml(html) : html;
+  const bugs = Boolean(bugsTrackId(url));
+  const lyricsHtml = genius ? geniusLyricsHtml(html) : bugs ? bugsLyricsHtml(html) : html;
   if (!lyricsHtml) return null;
   const blocks = lyricBlocks(pageLines(lyricsHtml));
   const english = lyricEnglishLines(blocks);
@@ -420,11 +513,12 @@ export function englishCandidateFromPage(html, { url, host, heading = '', englis
   const titleText = `${heading} ${pageTitle(html)}`;
   const named = titleKey(titleText).includes(titleKey(title));
   const bilingual = blocks.some((block) => block.lang === 'ko') && blocks.some((block) => block.lang === 'en');
-  const aboutEnglish = /영어|영문|english|lyrics/i.test(titleText);
+  // A Bugs track listed under an English title is the song's English version.
+  const aboutEnglish = bugs ? Boolean(englishTitle) : /영어|영문|english|lyrics/i.test(titleText);
   const score =
     (named ? 0.5 : 0) + (aboutEnglish ? 0.2 : 0) + (bilingual ? 0.15 : 0) + Math.min(english.length, 40) / 40 * 0.15;
   // A lyrics site's heading names the artist too, so the English title is
-  // the one searched by, or the one its "Artist – Title Lyrics" gives.
+  // the one read off its listing, or the one its "Artist – Title Lyrics" gives.
   const englishName = genius
     ? englishTitle || geniusSongTitle(pageTitle(html)) || geniusSongTitle(heading)
     : englishTitle || englishTitleFrom(heading, title) || englishTitleFrom(pageTitle(html), title);
@@ -462,15 +556,14 @@ export function relevantHits(hits, title) {
     .map(({ hit }) => hit);
 }
 
-/**
- * Google, through SerpApi, for the same phrase — only when a key is set.
- * An English original's "<title> lyrics" is asked of Google in English.
- */
-export function googleEnglishSearchUrl(query, env = {}, { english = false } = {}) {
+/** Google, through SerpApi, for the same phrase — only when a key is set. */
+export function googleEnglishSearchUrl(query, env = {}) {
   const params = new URLSearchParams({
     engine: 'google',
     q: query,
-    ...(english ? { hl: 'en', gl: 'us' } : { hl: 'ko', gl: 'kr', google_domain: 'google.co.kr' }),
+    hl: 'ko',
+    gl: 'kr',
+    google_domain: 'google.co.kr',
     api_key: googleSearchKey(env),
   });
   return `${GOOGLE_SEARCH_ENDPOINT}?${params}`;
@@ -485,8 +578,8 @@ export function duckDuckGoSearchUrl(query) {
   return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
 }
 
-function searchGoogle(query, env, options) {
-  return fetchWithTimeout(googleEnglishSearchUrl(query, env, options), { timeoutMs: GOOGLE_TIMEOUT_MS }).then(
+function searchGoogle(query, env) {
+  return fetchWithTimeout(googleEnglishSearchUrl(query, env), { timeoutMs: GOOGLE_TIMEOUT_MS }).then(
     async (response) => (response.ok ? extractGoogleResults(await response.json(), {}, 12).results : []),
   );
 }
@@ -517,80 +610,14 @@ async function searchHits(query, env) {
   return settledHits(searches);
 }
 
-// ---- the English original ----------------------------------------------------------
-
-/** Genius's own song search: keyless JSON, the same the site's search box asks. */
-export const GENIUS_SEARCH_ENDPOINT = 'https://genius.com/api/search/song';
-
-export function geniusSearchUrl(englishTitle) {
-  return `${GENIUS_SEARCH_ENDPOINT}?${new URLSearchParams({ q: String(englishTitle || '').trim(), per_page: '10' })}`;
+/** Bugs's track search for the song's Korean title: its English version's track pages. */
+function searchBugs(title) {
+  return fetchWithTimeout(bugsSearchUrl(title), { headers: { 'User-Agent': BROWSER_USER_AGENT } }).then(async (response) =>
+    response.ok ? extractBugsTrackHits(await readBoundedText(response), title) : [],
+  );
 }
 
-/**
- * Artists a 찬양집회 sings, so that of several songs called "Praise" or
- * "Holy" the worship song is opened, not a rapper's. Any artist whose name
- * says Worship counts too.
- */
-const WORSHIP_ARTISTS =
-  /worship|hillsong|bethel|maverick city|elevation|passion|jesus culture|housefires|upperroom|planetshakers|chris tomlin|phil wickham|matt redman|brandon lake|cece winans|kari jobe|cody carnes|lauren daigle|casting crowns|michael w\.? smith|don moen|darlene zschech|shane (?:&|and) shane|rend collective|crowder|for king (?:&|and) country|lincoln brewster|israel houghton|tim hughes|paul baloche|sinach|leeland|all sons (?:&|and) daughters|torwalt|amanda cook|kristene dimarco|jeremy riddle|pat barrett|sean feucht|gateway|vertical|anthem lights|citizens|sovereign grace|keith (?:&|and) kristyn getty|getty|matt maher|jesus image|red rocks|we the kingdom|brooke ligertwood|chandler moore|naomi raine|tasha cobbs|hezekiah walker|william mcdowell|travis greene|j(?:\.|onathan)? ?mcreynolds|zach williams|mercyme|big daddy weave|newsboys|third day|sonicflood|delirious|stuart townend|graham kendrick|marcos witt|israel (?:&|and) new breed|dante bowe|tauren wells|tobymac|jeremy camp|hillsong young (?:&|and) free/i;
-
-/**
- * Genius search hits for a title: songs whose own title is the title (not
- * one that merely contains it), a worship artist's first, then Genius's
- * order.
- */
-export function extractGeniusHits(payload, englishTitle) {
-  const want = titleKey(englishTitle);
-  if (!want) return [];
-  const sections = Array.isArray(payload?.response?.sections) ? payload.response.sections : [];
-  const results = sections.flatMap((section) => (Array.isArray(section?.hits) ? section.hits : [])).map((hit) => hit?.result);
-  const seen = new Set();
-  const out = [];
-  for (const result of results) {
-    const url = typeof result?.url === 'string' ? result.url.split('#')[0] : '';
-    if (!url || seen.has(url) || !isGeniusUrl(url) || !isAllowedSongPptUrl(url, {})) continue;
-    if (titleKey(result.title) !== want) continue;
-    seen.add(url);
-    const artist = String(result.artist_names ?? result.primary_artist?.name ?? '');
-    out.push({
-      url,
-      host: new URL(url).hostname.toLowerCase(),
-      title: `${artist ? `${artist} – ` : ''}${result.title} Lyrics`.slice(0, 160),
-      englishTitle: String(result.title).trim(),
-      worship: WORSHIP_ARTISTS.test(artist),
-    });
-  }
-  return out
-    .map((hit, index) => ({ hit, index }))
-    .sort((a, b) => Number(b.hit.worship) - Number(a.hit.worship) || a.index - b.index)
-    .map(({ hit }) => hit);
-}
-
-/**
- * Pages that may carry the English original, best first: Genius's own
- * search, then "<English title> lyrics" on Google (with a key) and
- * DuckDuckGo — kept only when their heading names the song, Genius first.
- * Google is asked only when Genius finds nothing, to spare the month's
- * searches.
- */
-async function originalHits(englishTitle, env) {
-  const query = originalLyricsQuery(englishTitle);
-  const genius = await settledHits([
-    fetchWithTimeout(geniusSearchUrl(englishTitle), {
-      headers: { Accept: 'application/json', 'User-Agent': BROWSER_USER_AGENT },
-    }).then(async (response) => (response.ok ? extractGeniusHits(await response.json(), englishTitle) : [])),
-  ]);
-  const searches = [searchDuckDuckGo(query)];
-  if (genius.length === 0 && googleSearchKey(env)) searches.unshift(searchGoogle(query, env, { english: true }));
-  const found = relevantHits(await settledHits(searches), englishTitle);
-  const onGenius = (hit) => (isGeniusUrl(hit.url) ? 0 : 1);
-  const others = found
-    .filter((hit) => !genius.some((known) => known.url === hit.url))
-    .map((hit, index) => ({ hit, index }))
-    .sort((a, b) => onGenius(a.hit) - onGenius(b.hit) || a.index - b.index)
-    .map(({ hit }) => ({ ...hit, englishTitle }));
-  return [...genius, ...others];
-}
+// ---- reading what was found --------------------------------------------------------
 
 /**
  * The English title the posts name the song by, when most of those that
@@ -615,8 +642,8 @@ async function readPage(hit) {
   const target = mobileNaverBlogUrl(hit.url) ?? hit.url;
   const response = await fetchWithTimeout(target, {
     timeoutMs: PAGE_TIMEOUT_MS,
-    // Genius serves its lyrics to a browser only.
-    ...(isGeniusUrl(target) ? { headers: { 'User-Agent': BROWSER_USER_AGENT } } : {}),
+    // Genius and Bugs serve their lyrics to a browser only.
+    ...(isGeniusUrl(target) || isBugsUrl(target) ? { headers: { 'User-Agent': BROWSER_USER_AGENT } } : {}),
   });
   if (!response.ok) return null;
   // Re-check where the fetch actually landed: a page may redirect.
@@ -646,30 +673,29 @@ async function readCandidates(hits, title) {
 }
 
 /**
- * Look a song's English lyrics up: search, open the few posts whose heading
- * names the song, and return the best of them, most promising first.
+ * Look a song's English lyrics up: search "<곡 제목> 영어 가사", open the
+ * few posts whose heading names the song, and return the best of them —
+ * with, first, the song's English version on Bugs when this deployment may
+ * read Bugs and Bugs lists one under the song's Korean title.
  *
- * `englishTitle` is the song's English title when the browser knows it;
- * otherwise it is the song's own title when that is English, or the one the
- * posts found name it by. With one, the English original's lyrics page is
- * looked up too, and the best of those comes back after the posts.
+ * Only the Korean title is ever searched. The English title that comes back
+ * is the one Bugs lists the English version under, else the one the posts
+ * found name the song by.
  */
-export async function fetchEnglishLyricsCandidates(title, env = {}, { englishTitle = '' } = {}) {
+export async function fetchEnglishLyricsCandidates(title, env = {}) {
   const query = englishLyricsQuery(title);
   if (!query) return { query, englishTitle: '', candidates: [] };
-  const hits = relevantHits(await searchHits(query, env), title);
-  const knownEnglish =
-    String(englishTitle || '').trim() || (isEnglishTitle(title) ? String(title).trim() : '') || englishTitleFromHits(hits, title);
-  const [posts, originals] = await Promise.all([
-    readCandidates(hits.slice(0, MAX_ENGLISH_PAGES), title),
-    knownEnglish
-      ? originalHits(knownEnglish, env)
-          .then((found) => readCandidates(found.slice(0, MAX_ORIGINAL_PAGES), knownEnglish))
-          .catch(() => [])
-      : Promise.resolve([]),
+  const bugsAllowed = bugsScrapingAllowed(env);
+  const [found, listed] = await Promise.all([
+    searchHits(query, env),
+    bugsAllowed ? settledHits([searchBugs(title)]) : Promise.resolve([]),
   ]);
-  const candidates = posts.slice(0, MAX_ENGLISH_CANDIDATES);
-  const original = originals.find((page) => !candidates.some((candidate) => candidate.url === page.url));
-  if (original) candidates.push(original);
-  return { query, englishTitle: knownEnglish, candidates };
+  const posts = relevantHits(found, title);
+  const [fromPosts, fromBugs] = await Promise.all([
+    readCandidates(posts.slice(0, MAX_ENGLISH_PAGES), title),
+    readCandidates(listed.slice(0, MAX_BUGS_PAGES), title),
+  ]);
+  const candidates = [...fromBugs.slice(0, 1), ...fromPosts.slice(0, MAX_ENGLISH_CANDIDATES)];
+  const englishTitle = fromBugs[0]?.englishTitle || englishTitleFromHits(posts, title);
+  return { query, englishTitle, candidates };
 }

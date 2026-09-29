@@ -4,6 +4,7 @@ import {
   alignEnglishOnly,
   englishFromWeb,
   englishStanzas,
+  lineSyllables,
   pairWebBlocks,
   sanitizeWebEnglishCandidates,
   webEnglishReference,
@@ -205,6 +206,26 @@ describe('English from the web under this conti’s Korean', () => {
     expect(result.source?.url).toBe('https://a.tistory.com/1');
   });
 
+  it('shares a stanza across a part’s slides by what is sung on each', () => {
+    // Two Korean slides of unequal length, and five English lines for them.
+    const uneven: Song = {
+      ...song,
+      sections: [{ label: 'V', lines: ['새벽 빛 가운데 주님을 보네', '내 맘을 채우며 부어지는 은혜로', '기쁨을 누리네'] }],
+      order: ['V'],
+      linesPerSlide: 2,
+    };
+    const english = ['Morning light of grace', 'Your mercy on me', 'You fill my heart with joy', 'In Your gentle hands', 'I rest in You'];
+    const aligned = alignEnglishOnly(uneven, [english])!;
+    expect(aligned[slideKey(['새벽 빛 가운데 주님을 보네', '내 맘을 채우며 부어지는 은혜로'])]).toEqual(english.slice(0, 4));
+    expect(aligned[slideKey(['기쁨을 누리네'])]).toEqual(['I rest in You']);
+  });
+
+  it('counts sung syllables in either language', () => {
+    expect(lineSyllables('보내신 곳에서 나는 노래하네')).toBe(12);
+    expect(lineSyllables('You fill my heart with joy')).toBe(6);
+    expect(lineSyllables('In Your gentle hands')).toBe(5);
+  });
+
   it('takes the post that fills the most slides', () => {
     const partial = { ...candidate([ko(V), en(EV)]), url: 'https://b.tistory.com/2', host: 'b.tistory.com' };
     const full = candidate([ko(V), en(EV), ko(C), en(EC), ko(B), en(EB)]);
@@ -220,6 +241,78 @@ describe('English from the web under this conti’s Korean', () => {
     expect(clean).toEqual([
       { url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: 't', englishTitle: 'E', score: 1, blocks: [{ lang: 'en', lines: ['x y'] }] },
     ]);
+  });
+});
+
+describe('English printed once through, in another order than the conti sings it', () => {
+  // Made-up lyrics in the shape of a Korean song's English version on Bugs:
+  // verse 1, verse 2, the chorus sung twice, the bridge — while the conti
+  // sings verse 1, chorus, verse 2, chorus, bridge.
+  const KV1 = ['새벽 빛 가운데 주님을 보네', '내 맘을 채우며 부어지는 은혜로', '기쁨을 누리네'];
+  const KV2 = ['진리의 말씀이 등불이 되네', '내 맘을 채우며 부어지는 은혜로', '그 은혜 누리네'];
+  const KC = ['보내신 곳에서 나는 노래하네', '어느 때에라도 나는 노래하네'];
+  const KB = ['내가 머무를 때 집이 되고', '떠나갈 때 길이 되는', '그 자리에 노래하네'];
+  const EV1 = ['Morning light of grace', 'Your mercy on me', 'You fill my heart with joy', 'In Your gentle hands', 'I rest in You'];
+  const EV2 = ['Word of truth and life, a lamp to my feet', 'You fill my heart with joy', 'In Your gentle hands', 'Your grace is all I need'];
+  const EC = ['Where You send me I go', 'I sing to You Lord', 'In every day', 'I lift up my song'];
+  const ECTwice = [...EC.slice(0, 3), 'I lift up my song', ...EC.slice(0, 3), 'Oh Lord, I sing to You'];
+  const EB = ['Everywhere I walk You make a way', 'Everything I am I give to You', 'All my life I sing to You'];
+  const bugs = (stanzas: string[][]): WebEnglishCandidate => ({
+    url: 'https://music.bugs.co.kr/track/102',
+    host: 'music.bugs.co.kr',
+    title: 'Song of Trial (시험의 노래)',
+    englishTitle: 'Song of Trial',
+    score: 0.77,
+    blocks: stanzas.map((lines) => en(lines)),
+  });
+  const conti = (chorus: string[], linesPerSlide: number): Song => ({
+    id: 'sent',
+    title: '보내신 곳에서',
+    sections: [
+      { label: 'V1', lines: KV1 },
+      { label: 'C', lines: chorus },
+      { label: 'V2', lines: KV2 },
+      { label: 'B', lines: KB },
+    ],
+    order: ['I', 'V1', 'C', 'V2', 'C', 'B', 'C'],
+    linesPerSlide,
+  });
+
+  it('gives each part the stanza its length fits, not the one printed in its place', () => {
+    const result = englishFromWeb(conti([...KC, ...KC], 4), empty, [bugs([EV1, EV2, ECTwice, EB])]);
+    expect(result.filled).toBe(4);
+    const under = (lines: string[]) => result.english.slides[slideKey(lines)];
+    expect(under(KV1)).toEqual(EV1);
+    expect(under([...KC, ...KC])).toEqual(ECTwice);
+    expect(under(KV2)).toEqual(EV2);
+    expect(under(KB)).toEqual(EB);
+    expect(result.english.title).toBe('Song of Trial');
+    expect(result.source?.host).toBe('music.bugs.co.kr');
+  });
+
+  it('gives a chorus the conti prints once the first half of one the page prints twice', () => {
+    const result = englishFromWeb(conti(KC, 4), empty, [bugs([EV1, EV2, ECTwice, EB])]);
+    expect(result.filled).toBe(4);
+    expect(result.english.slides[slideKey(KC)]).toEqual(ECTwice.slice(0, 4));
+    expect(result.english.slides[slideKey(KV2)]).toEqual(EV2);
+    expect(result.english.slides[slideKey(KB)]).toEqual(EB);
+  });
+
+  it('never gives verse 1 the English printed after verse 2’s', () => {
+    // By length alone the verses would swap: verse 1 is short, the second stanza too.
+    const shortVerse = ['기쁨을 누리네', '은혜를 누리네'];
+    const shortSecond = ['Joy in You', 'Grace to me'];
+    const swapped: Song = { ...conti(KC, 4), sections: [{ label: 'V1', lines: shortVerse }, { label: 'C', lines: KC }, { label: 'V2', lines: KV2 }, { label: 'B', lines: KB }] };
+    const aligned = alignEnglishOnly(swapped, [EV1, shortSecond, ECTwice, EB]);
+    expect(aligned?.[slideKey(shortVerse)]).not.toEqual(shortSecond);
+    expect(aligned?.[slideKey(KV2)]).not.toEqual(EV1);
+  });
+
+  it('guesses nothing when no stanza fits a part', () => {
+    const others = [['Hold on'], ['A short line here', 'And one more'], Array.from({ length: 12 }, (_, i) => `A very long line that goes on and on ${i}`)];
+    const result = englishFromWeb(conti(KC, 4), empty, [bugs(others)]);
+    expect(result.filled).toBe(0);
+    expect(result.pasteText).toBeTruthy();
   });
 });
 

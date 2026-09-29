@@ -1,18 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  BUGS_SEARCH_ENDPOINT,
+  bugsLyricsHtml,
+  bugsTitleNames,
+  bugsTrackId,
   englishCandidateFromPage,
   englishLyricsQuery,
   englishTitleFrom,
   englishTitleFromHits,
-  extractGeniusHits,
+  extractBugsTrackHits,
   fetchEnglishLyricsCandidates,
   geniusLyricsHtml,
   geniusSongTitle,
-  GENIUS_SEARCH_ENDPOINT,
-  isEnglishTitle,
   lineKind,
   lyricBlocks,
-  originalLyricsQuery,
   pageLines,
   relevantHits,
 } from '../../worker/src/praiseEnglishWeb.js';
@@ -57,6 +58,42 @@ function geniusPage(): string {
     </div>
     <div class="About"><p>How to sing this song with a band</p><p>Written by Some Writer and Another Writer</p><p>Released on some day this year</p></div>
     </body></html>`;
+}
+
+/** A Bugs track search page: one <tr trackId> per track, its title and artist in <p>s. */
+function bugsSearchPage(): string {
+  const row = (id: string, title: string, artist: string) => `
+    <tr albumId="1" artistId="2" mvId="0" trackId="${id}" multiArtist="N" rowType="track" >
+      <td class="check"><input type="checkbox" value="${id}" name="check" title="${title}"></td>
+      <td><a href="https://music.bugs.co.kr/track/${id}?wl_ref=list_tr_08_search" class="trackInfo">곡정보</a></td>
+      <th scope="row"><p class="title" adult_yn="N"><a href="javascript:;" title="${title}">${title}</a></p></th>
+      <td class="left"><p class="artist"><a href="https://music.bugs.co.kr/artist/2" title="${artist}">${artist}</a></p></td>
+    </tr>`;
+  return `<!doctype html><html><body><table class="list trackList"><tbody>
+    ${row('101', TITLE, '어느 찬양팀')}
+    ${row('102', `Song of Trial (${TITLE})`, '어느 찬양팀')}
+    ${row('103', `Song of Trial (${TITLE}) (Inst.)`, '어느 찬양팀')}
+    ${row('104', `${TITLE} 살리라 (Song of Trials)`, '다른 찬양팀')}
+    ${row('105', `Trial Song (${TITLE})`, '또 다른 팀')}
+    ${row('102', `Song of Trial (${TITLE})`, '어느 찬양팀')}
+  </tbody></table></body></html>`;
+}
+
+/** A Bugs track page: the lyrics as plain text in <xmp>, under the page's own furniture. */
+function bugsTrackPage(): string {
+  return `<!doctype html><html><head>
+    <meta property="og:title" content="Song of Trial (${TITLE}) / 어느 찬양팀"/>
+    <title>Song of Trial (${TITLE})/어느 찬양팀 - 벅스</title></head><body>
+    <div class="trackInfo"><p>Great music for everyone</p><p>Listen on the app now</p></div>
+    <div class="lyricsContainer">
+      <p><xmp>In Your love I will live my days  
+Your grace is new every morning  
+
+I will praise You forevermore 
+I lift Your name on high
+</xmp></p>
+      <div class="reference"><cite class="writer">someone</cite> 님이 등록해 주신 가사입니다.</div>
+    </div></body></html>`;
 }
 
 afterEach(() => {
@@ -150,6 +187,21 @@ describe('reading a 영어 가사 post', () => {
     expect(englishCandidateFromPage('<p>How to sing this song with a band</p>'.repeat(5), { url: 'https://genius.com/x-lyrics', host: 'genius.com' }, 'Song of Trial')).toBeNull();
   });
 
+  it('reads only the lyrics off a Bugs track page, its stanza breaks kept', () => {
+    expect(lyricBlocks(pageLines(bugsLyricsHtml(bugsTrackPage())))).toEqual([
+      { lang: 'en', lines: ['In Your love I will live my days', 'Your grace is new every morning'] },
+      { lang: 'en', lines: ['I will praise You forevermore', 'I lift Your name on high'] },
+    ]);
+    expect(bugsLyricsHtml('<div class="lyricsContainer"><p>가사 준비중입니다</p></div>')).toBe('');
+    const candidate = englishCandidateFromPage(
+      bugsTrackPage(),
+      { url: 'https://music.bugs.co.kr/track/102', host: 'music.bugs.co.kr', heading: `Song of Trial (${TITLE}) / 어느 찬양팀`, englishTitle: 'Song of Trial' },
+      TITLE,
+    )!;
+    expect(candidate.englishTitle).toBe('Song of Trial');
+    expect(candidate.blocks.flatMap((block) => block.lines).join(' ')).not.toMatch(/Great music|Listen on/);
+  });
+
   it('makes a candidate of a post with English lyrics, and none of a post without', () => {
     const candidate = englishCandidateFromPage(bilingualPost(), { url: 'https://a.tistory.com/1', host: 'a.tistory.com', heading: `${TITLE} 영어 가사` }, TITLE)!;
     expect(candidate.url).toBe('https://a.tistory.com/1');
@@ -163,37 +215,18 @@ describe('searching "<곡 제목> 영어 가사"', () => {
   it('asks exactly what the operator would type', () => {
     expect(englishLyricsQuery(' 시험의 노래 ')).toBe('시험의 노래 영어 가사');
     expect(englishLyricsQuery('')).toBe('');
-    expect(originalLyricsQuery(' Song of Trial ')).toBe('Song of Trial lyrics');
-    expect(isEnglishTitle('Song of Trial')).toBe(true);
-    expect(isEnglishTitle(TITLE)).toBe(false);
   });
 
-  it('opens the Genius song whose title is the title, a worship artist’s first', () => {
-    const hits = extractGeniusHits(
-      {
-        response: {
-          sections: [
-            {
-              type: 'song',
-              hits: [
-                { result: { title: 'Song of Trial (Remix)', url: 'https://genius.com/A-song-of-trial-remix-lyrics', artist_names: 'A Rapper' } },
-                { result: { title: 'Song of Trial', url: 'https://genius.com/A-rapper-song-of-trial-lyrics', artist_names: 'A Rapper' } },
-                { result: { title: 'Song of Trial', url: 'https://genius.com/Some-worship-song-of-trial-lyrics', artist_names: 'Some Worship' } },
-                { result: { title: 'Song of Trial', url: 'http://genius.com/Insecure-lyrics', artist_names: 'Some Worship' } },
-                { result: { title: 'Song of Trial', url: 'https://example.com/song-of-trial', artist_names: 'Some Worship' } },
-              ],
-            },
-          ],
-        },
-      },
-      'Song of Trial',
-    );
-    expect(hits.map((hit) => hit.url)).toEqual([
-      'https://genius.com/Some-worship-song-of-trial-lyrics',
-      'https://genius.com/A-rapper-song-of-trial-lyrics',
-    ]);
-    expect(hits[0]).toMatchObject({ englishTitle: 'Song of Trial', title: 'Some Worship – Song of Trial Lyrics' });
-    expect(extractGeniusHits({ error: 'nope' }, 'Song of Trial')).toEqual([]);
+  it('opens the Bugs tracks listed under the song’s title and an English one, and nothing else', () => {
+    const hits = extractBugsTrackHits(bugsSearchPage(), TITLE);
+    // 101 has no English name, 103 is not sung, 104 is a longer title — another song.
+    expect(hits.map((hit) => hit.url)).toEqual(['https://music.bugs.co.kr/track/102', 'https://music.bugs.co.kr/track/105']);
+    expect(hits[0]).toMatchObject({ englishTitle: 'Song of Trial', title: `Song of Trial (${TITLE}) / 어느 찬양팀` });
+    expect(bugsTitleNames(`Song of Trial (${TITLE.replace(' ', '')})`, TITLE)).toBe(true);
+    expect(bugsTitleNames(`${TITLE} 살리라`, TITLE)).toBe(false);
+    expect(bugsTrackId('https://music.bugs.co.kr/track/2767575')).toBe('2767575');
+    expect(bugsTrackId('https://music.bugs.co.kr/album/2767575')).toBe('');
+    expect(bugsTrackId('https://evil.example/track/1')).toBe('');
   });
 
   it('opens only posts whose heading names the song, each once, English ones first', () => {
@@ -245,69 +278,49 @@ describe('searching "<곡 제목> 영어 가사"', () => {
     expect(asked).not.toContain('https://c.tistory.com/9');
   });
 
-  it('looks the English original up on Genius by the name the posts give it', async () => {
+  it('reads the song’s English version off Bugs first, found by its Korean title — never by an English one', async () => {
     const asked: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | Request) => {
         const url = typeof input === 'string' ? input : input.url;
         asked.push(url);
+        if (url.startsWith(`${BUGS_SEARCH_ENDPOINT}?`)) return new Response(bugsSearchPage());
+        if (url === 'https://music.bugs.co.kr/track/102') return new Response(bugsTrackPage(), { headers: { 'content-type': 'text/html' } });
         if (url.startsWith('https://search.daum.net/')) {
           return new Response(`<c-title data-href="https://a.tistory.com/1">[영어찬양] ${TITLE} (Song of Trial)</c-title>`);
         }
-        if (url.startsWith(`${GENIUS_SEARCH_ENDPOINT}?`)) {
-          return Response.json({
-            response: { sections: [{ hits: [{ result: { title: 'Song of Trial', url: 'https://genius.com/Some-worship-song-of-trial-lyrics', artist_names: 'Some Worship' } }] }] },
-          });
-        }
         if (url === 'https://a.tistory.com/1') return new Response(bilingualPost(), { headers: { 'content-type': 'text/html' } });
-        if (url === 'https://genius.com/Some-worship-song-of-trial-lyrics') {
-          return new Response(geniusPage(), { headers: { 'content-type': 'text/html; charset=utf-8' } });
-        }
         return new Response('', { status: 404 });
       }),
     );
 
-    const found = await fetchEnglishLyricsCandidates(TITLE, { SERPAPI_API_KEY: 'key-1' });
+    const found = await fetchEnglishLyricsCandidates(TITLE, { SERPAPI_API_KEY: 'key-1', BUGS_SCRAPING_ALLOWED: 'true' });
     expect(found.englishTitle).toBe('Song of Trial');
-    // The post first, then the lyrics page: the browser tries both.
-    expect(found.candidates.map((candidate) => candidate.url)).toEqual([
-      'https://a.tistory.com/1',
-      'https://genius.com/Some-worship-song-of-trial-lyrics',
-    ]);
-    expect(found.candidates[1].blocks.map((block) => block.label)).toEqual(['Verse 1', 'Chorus', 'Bridge', 'Chorus']);
-    expect(new URL(asked.find((url) => url.startsWith(GENIUS_SEARCH_ENDPOINT))!).searchParams.get('q')).toBe('Song of Trial');
-    // Genius found it, so Google is not asked a second time.
-    expect(asked.filter((url) => url.startsWith(GOOGLE_SEARCH_ENDPOINT))).toHaveLength(1);
+    expect(found.candidates.map((candidate) => candidate.url)).toEqual(['https://music.bugs.co.kr/track/102', 'https://a.tistory.com/1']);
+    expect(new URL(asked.find((url) => url.startsWith(BUGS_SEARCH_ENDPOINT))!).searchParams.get('q')).toBe(TITLE);
+    // Every search is by the Korean title; the English name the posts give is never searched.
+    const searches = asked.filter((url) => !/tistory\.com|bugs\.co\.kr\/track/.test(url));
+    for (const url of searches) expect(decodeURIComponent(url.replace(/\+/g, ' '))).toContain(TITLE);
+    expect(asked.some((url) => /genius\.com/.test(url))).toBe(false);
+    expect(asked.some((url) => decodeURIComponent(url.replace(/\+/g, ' ')).includes('Song of Trial lyrics'))).toBe(false);
+    // Only one track's page was needed; the unsung and the other song's never.
+    expect(asked).not.toContain('https://music.bugs.co.kr/track/103');
+    expect(asked).not.toContain('https://music.bugs.co.kr/track/104');
   });
 
-  it('asks Google for "<English title> lyrics" when Genius finds nothing, and takes the English title it is given', async () => {
+  it('leaves Bugs alone where the deployment has not recorded permission to read it', async () => {
     const asked: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | Request) => {
-        const url = typeof input === 'string' ? input : input.url;
-        asked.push(url);
-        if (url.startsWith(`${GOOGLE_SEARCH_ENDPOINT}?`) && url.includes('lyrics')) {
-          return Response.json({
-            organic_results: [
-              { title: 'Some Worship – Song of Trial Lyrics | Genius Lyrics', link: 'https://genius.com/Some-worship-song-of-trial-lyrics' },
-              { title: 'Another Song Lyrics', link: 'https://genius.com/Another-song-lyrics' },
-            ],
-          });
-        }
-        if (url.startsWith(`${GENIUS_SEARCH_ENDPOINT}?`)) return new Response('', { status: 403 });
-        if (url === 'https://genius.com/Some-worship-song-of-trial-lyrics') return new Response(geniusPage());
+        asked.push(typeof input === 'string' ? input : input.url);
         return new Response('<html></html>');
       }),
     );
-
-    const found = await fetchEnglishLyricsCandidates(TITLE, { SERPAPI_API_KEY: 'key-1' }, { englishTitle: 'Song of Trial' });
-    expect(found.candidates.map((candidate) => candidate.url)).toEqual(['https://genius.com/Some-worship-song-of-trial-lyrics']);
-    const google = asked.filter((url) => url.startsWith(GOOGLE_SEARCH_ENDPOINT)).map((url) => new URL(url).searchParams);
-    expect(google.map((params) => params.get('q'))).toEqual(['시험의 노래 영어 가사', 'Song of Trial lyrics']);
-    expect(google[1].get('hl')).toBe('en');
-    expect(asked).not.toContain('https://genius.com/Another-song-lyrics');
+    await fetchEnglishLyricsCandidates(TITLE, {});
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.some((url) => url.includes('bugs.co.kr'))).toBe(false);
   });
 
   it('comes back empty, not failing, when every search turns the Worker away', async () => {

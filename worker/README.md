@@ -16,7 +16,7 @@ to anyone who opens dev tools, since the app has no backend of its own.
 Browser  ──POST /gemini/:model──▶  Worker (adds real key)  ──▶  Gemini API
 Browser  ──POST /openrouter────▶  Worker (adds real key)  ──▶  OpenRouter free vision models
 Browser  ──GET  /lyrics────────▶  Worker (search + scrape) ──▶  allowlisted lyrics sites
-Browser  ──GET  /praise/english─▶  Worker (search + scrape) ──▶  "<곡 제목> 영어 가사" posts, Genius
+Browser  ──GET  /praise/english─▶  Worker (search + scrape) ──▶  "<곡 제목> 영어 가사" posts, Bugs
 Admin   ◀──GET /usage──────────  Worker + Durable Object usage counter
 Everyone ◀──GET /settings──────  shared recognition settings (model pool, excluded titles)
 Admin    ──POST /settings─────▶  update shared settings (관리자 비밀번호 required)
@@ -67,7 +67,7 @@ device from restoring an item deleted elsewhere.
 
 ### 찬양집회 영어 가사 route
 
-`GET /praise/english?title=…[&en=…]` is how a 찬양집회 song whose conti prints
+`GET /praise/english?title=…` is how a 찬양집회 song whose conti prints
 no English gets its English: it searches `"<제목> 영어 가사"` — Google through
 SerpApi when `SERPAPI_API_KEY` is set (one search per song), 다음 블로그 검색,
 네이버 블로그 검색 and DuckDuckGo's keyless HTML results (which often turn a
@@ -80,23 +80,25 @@ are dropped; the English title a post names the song by (`주님의 선하심
 (Goodness of God)`) comes back too, passing over a series tag printed before
 the song's own title (`[K-Gospel Ep-1] 부르신 곳에서`).
 
-When the song's English title is known — `en`, sent by the app when the song
-card has one; the title itself when it is English; or the name most of the
-posts found give it — the **English original** is looked up as well: Genius's
-own song search (`genius.com/api/search/song`, keyless; a song whose title is
-the title, a worship artist's first), and only when that finds nothing,
-`"<English title> lyrics"` on Google (SerpApi, in English) and DuckDuckGo. Up to
-two such pages are read; a Genius page is read from its `data-lyrics-container`
-elements only (its header, description, annotations and credits are not
-lyrics), and its `[Verse 1: …]`/`[Chorus]` headings come back as each block's
-label. The best of these pages is returned after the three best posts, and the
-response says which `englishTitle` was used and whether Google was asked
-(`googleSearch`). A site that refuses the Worker (HTTP 403) is skipped.
+Only the song's **Korean** title is ever searched — never an English title,
+which would only be a guess read off someone's post. Where
+`BUGS_SCRAPING_ALLOWED` is on, **Bugs** is searched by the same Korean title
+(`music.bugs.co.kr/search/track?q=…`): a track listed under the song's title
+and an English one — `At The Place Where You Call (부르신 곳에서)`, not a
+longer title that merely starts the same way, and not an instrumental or MR —
+is the song's English version, and up to two such track pages are read from
+their `lyricsContainer`'s `<xmp>` block. The best of them comes back **first**,
+ahead of the three best posts, and its English name is the `englishTitle`
+returned (else the one most posts give). A Genius page that turns up in the
+searches is still read from its `data-lyrics-container` elements only, its
+`[Verse 1: …]`/`[Chorus]` headings kept as each block's label. The response
+says whether Google was asked (`googleSearch`). A site that refuses the Worker
+(HTTP 403) is skipped.
 
 The browser pairs the blocks and lays each English stanza under the Korean
-slide whose words it matches — or, for a lyrics site's English-only page, under
-the conti's part of the same name — so the Worker never needs to know the
-conti's lyrics. As with `/lyrics`, only titles cross the wire; pages are fetched
+slide whose words it matches — or, for an English-only page, under the conti's
+part of the same name, or the part whose sung length it fits — so the Worker
+never needs to know the conti's lyrics. As with `/lyrics`, only titles cross the wire; pages are fetched
 over https from public hosts only, re-checked after redirects, and capped in
 size. Responses with candidates are cached at the edge for a week, keyed by
 both titles.

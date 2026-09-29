@@ -471,16 +471,20 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
   되풀이해도, 글쓴이의 소개 글이 첫 절에 바로 붙어 있거나 마지막 절 뒤에 영어 한 줄이 더 있어도 제자리에
   들어갑니다. 글에 영어 제목이 있으면 영어 제목도 채웁니다(글 앞머리의 `[K-Gospel Ep-1]` 같은 연재
   이름은 영어 제목으로 치지 않습니다).
-- **영어 원곡은 Genius 같은 가사 사이트에서도 찾습니다** — 곡의 영어 제목을 알면(곡 카드의 영어 제목,
-  영어 제목 곡, 또는 위 글들이 적어 둔 영어 제목) **`<영어 제목> lyrics`** 로도 찾아 봅니다: 먼저 Genius
-  자체 검색, 없으면 Google(`SERPAPI_API_KEY`가 있을 때)과 DuckDuckGo. 같은 제목의 곡이 여럿이면 찬양
-  아티스트의 곡을 먼저 엽니다. 가사 사이트는 영어만 `[Verse 1]`, `[Chorus]`, `[Bridge]`처럼 파트 이름
-  아래 적으므로, 콘티의 **같은 이름 파트**(V/V1 ← Verse 1, V2 ← Verse 2, C ← Chorus, PC ← Pre-Chorus,
-  B ← Bridge, 1절·후렴도) 슬라이드 아래에 그 영어를 넣습니다. 파트가 두 개 이상 맞을 때만 넣고, 한글보다
-  훨씬 길거나 짧은 절은 넣지 않습니다. Genius 페이지에서는 가사 부분만 읽고 곡 설명·주석·크레디트는
-  읽지 않습니다. 서버의 접속을 막는 사이트는 건너뛰고 블로그 글로만 채웁니다.
-- 영어만 적힌 글에 파트 이름이 없으면 절 수(또는 줄 수)가 콘티와 맞을 때만 절마다 넣고, 맞지 않으면
-  억지로 넣지 않고 **영어 가사 한 번에 붙여넣기** 칸에 미리 넣어 둡니다. 곡 카드에는
+- **벅스에서도 한글 제목으로 찾습니다** — 검색은 언제나 **한글 제목**으로만 합니다(영어 제목으로는 찾지
+  않습니다). 벅스에서 한글 제목을 검색해 영어 제목이 함께 붙은 곡(`At The Place Where You Call (부르신
+  곳에서)`)이 있으면 그 곡 페이지의 영어 가사를 가장 먼저 씁니다 — 실제로 부르는 영어 가사입니다. 제목이
+  더 긴 다른 곡(`나는 믿음으로 살리라`는 `나는 믿음으로`가 아님)과 반주(Inst.·MR) 곡은 열지 않습니다.
+  벅스는 Worker의 `BUGS_SCRAPING_ALLOWED`가 켜져 있을 때만 읽습니다. 서버의 접속을 막는 사이트는 건너뛰고
+  나머지로 채웁니다.
+- **영어만 적힌 가사는 길이로 파트에 맞춥니다** — 벅스처럼 영어만 한 번씩(1절, 2절, 후렴, 브릿지) 적힌
+  가사는 콘티가 부르는 순서(1절, 후렴, 2절…)와 달라도, 한글 파트와 영어 절이 같은 멜로디라 **음절 수가
+  비슷하다**는 점으로 파트마다 맞는 절을 골라 넣습니다(1절 영어가 2절 영어보다 뒤로 가지 않게). 한 파트가
+  여러 장이면 장마다 부르는 음절만큼 영어 줄을 나눠 넣고, 후렴을 두 번 적은 영어는 콘티가 후렴을 한 번만
+  적었을 때 앞 절반만 넣습니다. `[Verse 1]`, `[Chorus]`처럼 파트 이름이 붙은 가사는 콘티의 **같은 이름
+  파트**(V/V1 ← Verse 1, V2 ← Verse 2, C ← Chorus, PC ← Pre-Chorus, B ← Bridge, 1절·후렴도)에 넣습니다.
+- 어느 쪽으로도 확실히 맞지 않으면 억지로 넣지 않고 **영어 가사 한 번에 붙여넣기** 칸에 미리 넣어
+  두고, **AI로 빈 칸 채우기**가 그 가사의 줄로만 나누게 합니다. 곡 카드에는
   `웹에서 가져옴 · 확인 필요`와 **출처 링크**가 표시되니 띄우기 전에 확인하세요.
   **웹에서 영어 가사 찾기** 버튼은 다시 찾을 때만 씁니다.
 - **저장된 가사로 불러오기** — 라이브러리에 없는 곡이나 영어로만 부르는 곡(Who Else, Praise)은 이
@@ -489,7 +493,9 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
   문단 수가 안 맞으면 줄을 순서대로 나눠 넣습니다.
 - **AI로 빈 칸 채우기** — 영어 원곡이 있으면 원곡 가사를, 없으면 부를 수 있는 번역을 AI가 채웁니다.
   웹에서 그 곡의 영어 가사를 찾아 둔 경우에는 AI가 **그 가사의 줄만** 골라 슬라이드에 나누도록 하고,
-  그 가사에 없는 줄은 버립니다.
+  그 가사에 없는 줄은 버립니다. 한 모델의 무료 한도가 다 되면(`You exceeded your current quota`)
+  다음 모델에 묻습니다 — 설정된 Gemini, 다른 Gemini(한도가 따로), OpenRouter 무료 모델 순. 모두 한도가
+  다 되었을 때만 그렇게 알려 줍니다.
   `AI 초안 · 확인 필요`로 표시되니 띄우기 전에 확인하세요.
 - 영어로만 된 곡은 가사가 한 번만 나오고, 영어 가사를 비워 둔 장은 한글만 나옵니다.
 - **이 곡 뒤에 기도 / Prayer 슬라이드**를 곡마다 켤 수 있습니다.
@@ -814,14 +820,17 @@ praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
 and matched by text, so different line breaks still line up — then, for a song neither the conti nor
 that store gives English for, from the web with no button pressed: the Worker's `/praise/english`
-searches `"<제목> 영어 가사"` (Google through SerpApi when keyed, 다음·네이버 blogs, DuckDuckGo) and returns
-each post's Korean/English lyric blocks, which `src/praise/englishWeb.ts` pairs back into stanzas — or
-line by line — and matches against the conti's own Korean. When the song's English title is known (sent as
-`en`, or named by the posts), the English original is looked up too: Genius's own search, then
-`"<English title> lyrics"` on Google/DuckDuckGo; a Genius page is read from its lyrics containers only, and
-its `[Verse 1]`/`[Chorus]` headings are laid over the conti's parts of the same name (an English-only page
-without headings is used only when its stanza or line count agrees; otherwise it is offered for pasting and
-as the AI's only source). English can also be pasted, typed, or drafted by AI. Lyrics sit in a box
+searches `"<제목> 영어 가사"` (Google through SerpApi when keyed, 다음·네이버 blogs, DuckDuckGo) — and, where
+`BUGS_SCRAPING_ALLOWED`, Bugs's track search for the same Korean title, whose English-named track
+(`At The Place Where You Call (부르신 곳에서)`) is read from its `<xmp>` lyrics — and returns each page's
+Korean/English lyric blocks, which `src/praise/englishWeb.ts` pairs back into stanzas — or line by line —
+and matches against the conti's own Korean. Only the Korean title is ever searched. English printed on its
+own is laid over the conti's parts by headings (`[Verse 1]`/`[Chorus]`) when it has them, else by
+syllable count: each part takes the stanza whose sung length fits it (verses kept in printed order, a
+doubled chorus halved for a conti that prints it once), and nothing is placed unless the fit is clear —
+it is then offered for pasting and as the AI's only source. English can also be pasted, typed, or drafted
+by AI; the AI moves on from a model out of free quota to the next (Gemini, the other Gemini, OpenRouter's
+free models). Lyrics sit in a box
 centred on the slide and anchored to its middle, and every song title — here and in every other
 generator — is sized to one line of its box and set not to wrap (`fitTitleFontSize`/`singleLineBody` in
 `src/lib/pptx/textFit.ts`). A CCLI
