@@ -35,6 +35,7 @@ import {
 } from '../lib/storage/deckAutoSave';
 import { useSaveSoon } from '../lib/storage/saveSoon';
 import PraiseEnglishStep from './PraiseEnglishStep';
+import PraiseSongList from './PraiseSongList';
 import { englishFromWeb, fetchWebEnglish, hasWebEnglishLookup, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
 import { buildPraiseDeck, formatCoverDate, isoDateFromConti, suggestPraiseFileName } from './deckBuilder';
 import {
@@ -87,6 +88,11 @@ const STEPS = [
   { id: 'additional', label: '추가 자료' },
   { id: 'download', label: '다운로드' },
 ] as const;
+
+/** Where each step that shows the songs puts a song's card: `${prefix}${song.id}`. */
+const SONG_ANCHOR: Partial<Record<number, string>> = { 0: 'song-editor-', 1: 'praise-song-' };
+/** How long a card the 찬양 목록 jumped to stays lit. */
+const JUMP_HIGHLIGHT_MS = 1600;
 
 function slideIcon(kind: DeckOverviewItem['kind']): IconName {
   switch (kind) {
@@ -646,6 +652,53 @@ export default function PraiseApp() {
   }, []);
   const showSongsStep = useCallback(() => setStep(0), []);
 
+  // ---- 찬양 목록: a title pressed there takes the page to that song ----
+  // The 영어 가사 step has a card per song too, so it stays open; from any
+  // other step the song is shown on the 찬양 step. The panel may only just
+  // be opening, so the scroll waits for it to render.
+  const [jump, setJump] = useState<{ songId: string; step: number } | null>(null);
+  const jumpLitRef = useRef<{ card: HTMLElement; timer: number } | null>(null);
+  const goToSong = useCallback(
+    (songId: string) => {
+      const target = SONG_ANCHOR[step] ? step : 0;
+      setStep(target);
+      setJump({ songId, step: target });
+    },
+    [step],
+  );
+  useEffect(() => {
+    if (!jump || jump.step !== step) return;
+    const frame = window.requestAnimationFrame(() => {
+      // Done once: coming back to this step later must not scroll again.
+      setJump(null);
+      const card = document.getElementById(`${SONG_ANCHOR[jump.step]}${jump.songId}`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Lit for a moment, so the eye lands on the song the page stopped at.
+      const lit = jumpLitRef.current;
+      if (lit) {
+        window.clearTimeout(lit.timer);
+        lit.card.classList.remove('is-jump-target');
+        // The same card pressed again glows again from the start.
+        void card.offsetWidth;
+      }
+      card.classList.add('is-jump-target');
+      jumpLitRef.current = {
+        card,
+        timer: window.setTimeout(() => {
+          card.classList.remove('is-jump-target');
+          jumpLitRef.current = null;
+        }, JUMP_HIGHLIGHT_MS),
+      };
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [jump, step]);
+  useEffect(() => () => window.clearTimeout(jumpLitRef.current?.timer), []);
+  const englishTitles = useMemo(
+    () => Object.fromEntries(songs.map((song) => [song.id, extrasFor(extras, song.id).english.title])),
+    [songs, extras],
+  );
+
   // ---- downloads ----
   const downloadDeck = async () => {
     if (songs.length === 0 && additionalFiles.length === 0) {
@@ -736,6 +789,7 @@ export default function PraiseApp() {
       activeStep={step}
       onStepSelect={setStep}
       testIdPrefix="praise"
+      appClassName="app-praise"
       tools={
         <button
           type="button"
@@ -751,6 +805,12 @@ export default function PraiseApp() {
       {libraryOpen && <PptLibraryPanel onClose={() => setLibraryOpen(false)} onEdit={openFromLibrary} />}
 
       <div className="app-body">
+        <PraiseSongList
+          songs={songs}
+          englishTitles={englishTitles}
+          anchorPrefix={SONG_ANCHOR[step] ?? null}
+          onSelect={goToSong}
+        />
         <main id="main-content">
           <section
             className={`wizard-panel${step === 0 ? ' active' : ''}`}

@@ -391,6 +391,14 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 찬양집회 PPT는 **별도 페이지**(`/ppt/praise.html`)에서 만듭니다. 작년(2025년 9월 27일 EM & KM
 Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가사가 함께** 들어갑니다.
 
+### 찬양 목록
+
+모든 단계의 **왼쪽에 찬양 목록**이 있습니다 — 콘티 순서대로 곡 번호와 한글 제목(영어 제목이 있으면 그
+아래)이 나오고, **곡 이름을 누르면 그 곡으로 바로 이동**합니다. 영어 가사 단계에서는 그 곡의 영어 가사
+카드로, 다른 단계에서는 찬양 단계의 그 곡 카드로 가며, 도착한 카드는 잠깐 테두리가 빛납니다. 페이지를
+스크롤하면 지금 보고 있는 곡이 목록에 표시되고, 목록은 스크롤해도 화면 왼쪽에 그대로 남습니다. 화면이
+좁으면(1280px 미만) 목록이 단계 위의 가로 줄로 바뀝니다.
+
 ### 생성되는 슬라이드 순서
 
 ```
@@ -845,7 +853,10 @@ song's Korean and English are saved the moment they change (`useSaveSoon` in
 saved to the lyrics library as a draft). A bilingual slide that would have to shrink below 28pt is split
 into two. Files such as a sermon deck can be placed after any song, a 기도/Prayer slide can follow any
 song, and the cover photo gets this year's date over last year's. 찬양집회 decks are saved with `keep`, so
-the weekly Sunday purge never deletes them — only a manual delete does.
+the weekly Sunday purge never deletes them — only a manual delete does. A 찬양 목록 on the left of every
+step (`src/praise/PraiseSongList.tsx`) lists the songs in order; pressing a title scrolls to that song's
+card (its 영어 가사 card on that step, its 찬양 card from any other) and marks the song at the top of the
+window as the page scrolls. Below 1280px it becomes a strip above the step.
 
 **수련회 (retreat)** has its own page at `/ppt/retreat.html` and makes one deck per session in the
 retreat's design (`public/retreat-template.pptx`, 13 designs derived from the 2026 retreat's first-night

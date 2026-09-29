@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -193,6 +193,67 @@ test.describe('찬양집회 generator', () => {
     await expect(song.getByTestId('praise-web-source')).toHaveAttribute('href', 'https://example.tistory.com/1');
     // One search for the song, by its title, and none started by hand.
     expect(asked).toEqual(['시험의 노래']);
+  });
+
+  test('lists the night’s songs on the left, and a title there takes the page to that song', async ({ page }) => {
+    // No English on the web for these songs, answered at once.
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.goto('praise.html');
+    const list = page.getByTestId('praise-song-list');
+    await expect(list).toBeVisible();
+    await expect(list).toContainText('콘티를 올리거나 곡을 추가하면');
+
+    const titles = ['갈급한 내 맘', '광야를 지나며', '주님의 선하심', '감사함으로', '거친 길 위를 걸어갈 때도'];
+    for (const title of titles) await addLibrarySong(page, title);
+    const items = list.getByTestId('praise-song-list-item');
+    await expect(items).toHaveCount(titles.length);
+    for (const [index, title] of titles.entries()) await expect(items.nth(index)).toContainText(title);
+    // Its English title from last year's deck shows under the Korean one.
+    await expect(items.nth(2)).toContainText('Goodness of God');
+
+    // The list stands to the left of the step.
+    const listBox = (await list.boundingBox())!;
+    const mainBox = (await page.locator('#main-content').boundingBox())!;
+    expect(listBox.x + listBox.width).toBeLessThanOrEqual(mainBox.x);
+
+    const topOf = (locator: Locator) =>
+      locator.evaluate((element) => Math.round(element.getBoundingClientRect().top));
+
+    // A title pressed on the 찬양 step brings that song's card to the top.
+    await items.nth(3).click();
+    await expect.poll(() => topOf(page.getByTestId('song-card').nth(3))).toBeLessThan(40);
+    await expect(items.nth(3)).toHaveAttribute('aria-current', 'true');
+    // The list stays in view while the page scrolls.
+    await expect(list).toBeInViewport();
+
+    // Scrolling back up by hand marks the song now at the top.
+    await page.getByTestId('song-card').nth(3).locator('.song-number').hover();
+    await page.mouse.wheel(0, (await topOf(page.getByTestId('song-card').nth(1))) - 16);
+    await expect(items.nth(1)).toHaveAttribute('aria-current', 'true');
+    await expect(items.nth(3)).not.toHaveAttribute('aria-current', 'true');
+
+    // On the 영어 가사 step it goes to the song's English card instead.
+    await page.getByTestId('praise-next-songs').click();
+    await expect(page.getByTestId('praise-panel-english')).toBeVisible();
+    // The web lookups' notes settle first, so they don't move the cards mid-scroll.
+    const lookups = page.getByTestId('praise-web-status');
+    await expect(lookups.first()).toBeVisible({ timeout: 15_000 });
+    await expect(lookups.filter({ hasText: '찾는 중' })).toHaveCount(0, { timeout: 15_000 });
+    await items.nth(2).click();
+    await expect(page.getByTestId('praise-panel-english')).toBeVisible();
+    const goodness = page.getByTestId('praise-english-song').nth(2);
+    await expect(goodness).toContainText('주님의 선하심');
+    await expect.poll(() => topOf(goodness)).toBeLessThan(40);
+
+    // From a step with no songs on it, the 찬양 step opens at that song.
+    await page.getByTestId('praise-tab-download').click();
+    await expect(items.first()).not.toHaveAttribute('aria-current', 'true');
+    await items.nth(4).click();
+    await expect(page.getByTestId('praise-panel-songs')).toBeVisible();
+    const last = page.getByTestId('song-card').nth(4);
+    await expect(last).toBeInViewport();
+    await expect(items.nth(4)).toHaveAttribute('aria-current', 'true');
   });
 
   test('keeps both languages by itself, and the Sunday page loads only the Korean', async ({ page }) => {
