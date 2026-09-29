@@ -147,18 +147,19 @@ export default function WednesdayApp() {
   }, []);
 
   const saveToLibrary = useCallback(
-    async (fingerprint: string) => {
+    async (fingerprint: string, generated?: Awaited<ReturnType<typeof buildWednesdayDeck>>) => {
       savingRef.current = true;
       setAutoSaveStatus({ state: 'saving' });
       try {
-        const template = await fetchTemplate('wednesday-template.pptx', '수요예배 템플릿');
-        const built = await buildWednesdayDeck({
-          template,
-          service,
-          songs,
-          verses: passage.verses,
-          rangeKo: passage.rangeKo,
-        });
+        const built =
+          generated ??
+          (await buildWednesdayDeck({
+            template: await fetchTemplate('wednesday-template.pptx', '수요예배 템플릿'),
+            service,
+            songs,
+            verses: passage.verses,
+            rangeKo: passage.rangeKo,
+          }));
         const name = fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`;
         const { deck: saved } = await saveDeckToLibrary(
           {
@@ -281,6 +282,8 @@ export default function WednesdayApp() {
         window.setTimeout(() => setAutoSaveRetry((count) => count + 1), AUTO_SAVE_BUSY_POLL_MS);
         return;
       }
+      // A download may have saved these inputs already.
+      if (savedFingerprintRef.current === fingerprint) return;
       void saveToLibrary(fingerprint);
     }, AUTO_SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
@@ -367,6 +370,10 @@ export default function WednesdayApp() {
       setOverview(result.overview);
       setWarnings(result.warnings);
       downloadBytes(result.deck, fileName);
+      // The PPT just made goes into the 라이브러리 at once — these bytes, not
+      // a second build — rather than waiting for the auto-save's pause.
+      const fingerprint = wednesdayFingerprint({ name: fileName, service, songs });
+      if (!savingRef.current && savedFingerprintRef.current !== fingerprint) void saveToLibrary(fingerprint, result);
       for (const warning of result.warnings) showToast(warning, 'warn');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'PPT를 만들지 못했습니다.', 'error');

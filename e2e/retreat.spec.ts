@@ -104,6 +104,8 @@ test.describe('수련회 generator', () => {
       row.getByTestId('retreat-download').click(),
     ]);
     expect(download.suggestedFilename()).toBe('0115_Retreat_Evening.pptx');
+    // The PPT just made is in the 라이브러리 too.
+    await expect(row.getByTestId('retreat-auto-save-status')).toHaveAttribute('data-state', 'saved', { timeout: BUILD_TIMEOUT });
     const saveTo = testInfo.outputPath('retreat.pptx');
     await download.saveAs(saveTo);
     const texts = await slideTexts(await JSZip.loadAsync(await fs.readFile(saveTo)));
@@ -124,6 +126,8 @@ test.describe('수련회 generator', () => {
     await row.getByTestId('retreat-preview').click();
     const grid = row.getByTestId('retreat-preview-grid');
     await expect(grid.locator('.slide-thumb')).toHaveCount(texts.length, { timeout: BUILD_TIMEOUT });
+    // A preview is a generated PPT as well, and is saved the same way.
+    await expect(row.getByTestId('retreat-auto-save-status')).toHaveAttribute('data-state', 'saved', { timeout: BUILD_TIMEOUT });
     await grid.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath('retreat-preview.png'), fullPage: true });
 

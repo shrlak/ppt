@@ -498,6 +498,10 @@ function SundayApp() {
     try {
       const { merged } = await buildMergedDeck();
       downloadDeck(merged);
+      // The PPT just made goes into the 라이브러리 at once — these bytes —
+      // rather than waiting for the auto-save's pause, so a download followed
+      // by closing the tab is never lost.
+      if (!savingRef.current && savedFingerprintRef.current !== fingerprint) void autoSaveNow(fingerprint, merged);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
@@ -511,10 +515,11 @@ function SundayApp() {
    * Build the current deck and write it into the 라이브러리 under `savedName`,
    * archiving the conti PDF, the 설교 PPT and the wizard inputs alongside it.
    * Shared by the 라이브러리에 저장 buttons and by auto-save, so both always
-   * store exactly the same thing.
+   * store exactly the same thing. `built` is a deck already generated from
+   * these same inputs (a download), saved as is instead of built again.
    */
-  async function writeToLibrary(replaceId?: string): Promise<SavedDeckResult> {
-    const { merged } = await buildMergedDeck();
+  async function writeToLibrary(replaceId?: string, built?: Uint8Array): Promise<SavedDeckResult> {
+    const merged = built ?? (await buildMergedDeck()).merged;
     const { slideCount } = await inspectDeckBytes(merged.buffer as ArrayBuffer);
     return saveDeckToLibrary(
       {
@@ -591,12 +596,12 @@ function SundayApp() {
    * session is already writing to (the 편집 entry, or whatever the last save
    * created) so a rename moves that entry instead of forking it.
    */
-  async function autoSaveNow(current: string) {
+  async function autoSaveNow(current: string, built?: Uint8Array) {
     savingRef.current = true;
     setAutoSaveStatus({ state: 'saving' });
     setSavingToLibrary(true);
     try {
-      const { deck: saved } = await writeToLibrary(editingDeck?.id ?? autoSaveTargetRef.current ?? undefined);
+      const { deck: saved } = await writeToLibrary(editingDeck?.id ?? autoSaveTargetRef.current ?? undefined, built);
       savedFingerprintRef.current = current;
       autoSaveTargetRef.current = saved.id;
       autoSaveFailedRef.current = null;
@@ -700,6 +705,8 @@ function SundayApp() {
         setAutoSaveStatus({ state: 'idle' });
         return;
       }
+      // A download may have saved these inputs already.
+      if (savedFingerprintRef.current === fingerprint) return;
       void autoSaveNow(fingerprint);
     };
     timer = window.setTimeout(run, AUTO_SAVE_DEBOUNCE_MS);

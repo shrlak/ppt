@@ -265,12 +265,18 @@ test.describe('찬양집회 generator', () => {
     // A song only last year's deck knew, loaded from it in both languages.
     await page.getByTestId('add-song').click();
     await page.getByTestId('song-title-input').last().fill('춤추는 세대');
+    // 가사 모두 저장 saves every song that has lyrics, in one go.
+    await page.getByTestId('save-all-songs').click();
+    await expect(page.getByText('찬양 1곡의 가사를 라이브러리에 저장했습니다.')).toBeVisible();
     await page.getByTestId('praise-next-songs').click();
     await page
       .getByTestId('praise-english-song')
       .filter({ hasText: '춤추는 세대' })
       .getByTestId('praise-load-library')
       .click();
+    // So does 한글·영어 가사 모두 저장, both languages of every song.
+    await page.getByTestId('praise-save-all-english').click();
+    await expect(page.getByText(/찬양 2곡의 한글·영어 가사를 저장했습니다/)).toBeVisible();
 
     // No save button pressed: the Korean and English are kept once they settle…
     await expect
