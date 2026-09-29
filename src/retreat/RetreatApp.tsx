@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon, { type IconName } from '../components/Icon';
 import ToastHost from '../components/ToastHost';
 import AppShell, { StepNav } from '../components/AppShell';
+import AutoSaveIndicator from '../components/AutoSaveIndicator';
 import PptLibraryPanel from '../components/PptLibraryPanel';
 import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
@@ -29,6 +30,7 @@ import {
   saveUserLibrary,
   upsertEntry,
 } from '../lib/storage/library';
+import type { AutoSaveStatus } from '../lib/storage/deckAutoSave';
 import { useSaveSoon } from '../lib/storage/saveSoon';
 import { getSavedDeck, saveDeckToLibrary, type SavedDeck, type SavedFile } from '../lib/storage/pptLibrary';
 import { loadTranslation } from '../bible/bibleData';
@@ -190,6 +192,8 @@ export default function RetreatApp() {
   const [passageErrors, setPassageErrors] = useState<Record<string, string>>({});
   const [busySession, setBusySession] = useState<string | null>(null);
   const [overviews, setOverviews] = useState<Record<string, DeckOverviewItem[]>>({});
+  // Each session's PPT as last written to the 라이브러리.
+  const [deckSaves, setDeckSaves] = useState<Record<string, AutoSaveStatus>>({});
   const [preview, setPreview] = useState<{ sessionId: string; slides: RenderedSlide[] } | null>(null);
   const previewRef = useRef<RenderedSlide[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -256,8 +260,9 @@ export default function RetreatApp() {
   }, [restoreSaved]);
 
   // Every edit is kept the moment it is made — the whole retreat in this
-  // machine's draft, and lyrics typed or corrected here in the 찬양
-  // 라이브러리 as well, so the next retreat or Sunday finds them.
+  // machine's draft, and its lyrics in the 찬양 라이브러리 as well (typed or
+  // corrected here, or read off this year's 악보 for a song the library does
+  // not have yet), so the next retreat or Sunday finds them.
   const libraryRef = useRef(library);
   libraryRef.current = library;
   const libraryWrittenRef = useRef<Map<string, string>>(new Map());
@@ -450,18 +455,16 @@ export default function RetreatApp() {
     return result;
   }
 
-  async function downloadSession(session: RetreatSession, index: number) {
-    const waiting = session.blocks.some((block) => block.kind === 'scripture' && block.passage.trim() && passages[block.id] === undefined);
-    if (waiting) {
-      showToast('본문을 아직 불러오는 중입니다. 잠시 뒤 다시 눌러 주세요.', 'warn');
-      return;
-    }
-    setBusySession(session.id);
+  /**
+   * Every PPT generated here — for a preview or a download — goes into the
+   * 라이브러리 at once, kept like 찬양집회 decks (a retreat is once a year).
+   * Each session keeps one entry, rewritten each time. A save that fails
+   * only says so on its row: the preview or download itself still happens.
+   */
+  async function saveSessionDeck(session: RetreatSession, index: number, deck: Uint8Array, overview: DeckOverviewItem[]) {
+    const name = fileNameFor(session, index).replace(/(\.pptx)?$/i, '.pptx');
+    setDeckSaves((current) => ({ ...current, [session.id]: { state: 'saving' } }));
     try {
-      const { deck, overview } = await build(session);
-      const name = fileNameFor(session, index).replace(/(\.pptx)?$/i, '.pptx');
-      downloadBytes(deck, name);
-      // Kept in the 라이브러리 like 찬양집회 decks: a retreat is once a year.
       const ids = readLibraryIds();
       const { deck: saved } = await saveDeckToLibrary(
         {
@@ -477,7 +480,31 @@ export default function RetreatApp() {
         },
         ids[session.id],
       );
-      writeLibraryIds({ ...ids, [session.id]: saved.id });
+      writeLibraryIds({ ...readLibraryIds(), [session.id]: saved.id });
+      setDeckSaves((current) => ({
+        ...current,
+        [session.id]: { state: 'saved', at: new Date().toISOString(), syncPending: Boolean(saved.syncPending) },
+      }));
+    } catch (error) {
+      setDeckSaves((current) => ({
+        ...current,
+        [session.id]: { state: 'error', message: error instanceof Error ? error.message : String(error) },
+      }));
+    }
+  }
+
+  async function downloadSession(session: RetreatSession, index: number) {
+    const waiting = session.blocks.some((block) => block.kind === 'scripture' && block.passage.trim() && passages[block.id] === undefined);
+    if (waiting) {
+      showToast('본문을 아직 불러오는 중입니다. 잠시 뒤 다시 눌러 주세요.', 'warn');
+      return;
+    }
+    setBusySession(session.id);
+    try {
+      const { deck, overview } = await build(session);
+      const name = fileNameFor(session, index).replace(/(\.pptx)?$/i, '.pptx');
+      downloadBytes(deck, name);
+      await saveSessionDeck(session, index, deck, overview);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'PPT를 만들지 못했습니다.', 'error');
     } finally {
@@ -485,10 +512,11 @@ export default function RetreatApp() {
     }
   }
 
-  async function previewSession(session: RetreatSession) {
+  async function previewSession(session: RetreatSession, index: number) {
     setBusySession(session.id);
     try {
-      const { deck } = await build(session);
+      const { deck, overview } = await build(session);
+      void saveSessionDeck(session, index, deck, overview);
       const slides = await renderPptxSlides(deck);
       revokeRenderedSlides(previewRef.current);
       previewRef.current = slides;
@@ -878,7 +906,7 @@ export default function RetreatApp() {
             <div className="wizard-page-header">
               <p className="wizard-kicker">3 / 3</p>
               <h2>다운로드</h2>
-              <p>집회마다 PPT를 따로 내려받습니다. 내려받은 PPT는 라이브러리에도 저장되고, 매주 자동 삭제되지 않습니다.</p>
+              <p>집회마다 PPT를 따로 내려받습니다. 미리보기나 다운로드로 만든 PPT는 그때마다 라이브러리에 자동 저장되고, 매주 자동 삭제되지 않습니다.</p>
             </div>
             <ul className="retreat-downloads">
               {state.sessions.map((session, index) => {
@@ -917,7 +945,7 @@ export default function RetreatApp() {
                         className="btn"
                         disabled={busySession !== null}
                         data-testid="retreat-preview"
-                        onClick={() => void previewSession(session)}
+                        onClick={() => void previewSession(session, index)}
                       >
                         <Icon name="slide" />
                         미리보기
@@ -933,6 +961,9 @@ export default function RetreatApp() {
                         {busySession === session.id ? '만드는 중…' : 'PPT 다운로드'}
                       </button>
                     </div>
+                    {deckSaves[session.id] && (
+                      <AutoSaveIndicator status={deckSaves[session.id]} testId="retreat-auto-save-status" />
+                    )}
                     {preview?.sessionId === session.id ? (
                       <div className="praise-preview" data-testid="retreat-preview-grid">
                         <ol>

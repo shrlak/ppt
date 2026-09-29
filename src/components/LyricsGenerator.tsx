@@ -1551,12 +1551,12 @@ export default function LyricsGenerator({
    * are recorded, distinguished by the diff against what recognition produced.
    * Everything after the library write is best-effort and never blocks it.
    */
-  const handleSaveToLibrary = useCallback(
+  const confirmSong = useCallback(
     (song: Song) => {
       const { final, diff, verification } = userReading(song);
 
       const entry = saveToLibrary(song, verification);
-      if (!entry) return;
+      if (!entry) return null;
       librarySavedRef.current.set(song.id, libraryContentKey(entry));
       setAutoSaved((current) => ({
         ...current,
@@ -1569,20 +1569,47 @@ export default function LyricsGenerator({
             : candidate,
         ),
       );
-      showToast(
-        verification === 'verified'
-          ? `'${entry.title}' 을(를) 검증된 가사로 저장했습니다.`
-          : `'${entry.title}' 수정본을 학습 자료로 저장했습니다.`,
-      );
 
-      if (!diff || !song.provenance?.pageHash) return;
-      void submitFeedback(song, final, diff, verification).catch(() => {
-        // Learning is best-effort: a save is never allowed to fail because a
-        // training record could not be built or sent.
-      });
+      if (diff && song.provenance?.pageHash) {
+        void submitFeedback(song, final, diff, verification).catch(() => {
+          // Learning is best-effort: a save is never allowed to fail because a
+          // training record could not be built or sent.
+        });
+      }
+      return { entry, verification };
     },
     [saveToLibrary, submitFeedback],
   );
+
+  const handleSaveToLibrary = useCallback(
+    (song: Song) => {
+      const saved = confirmSong(song);
+      if (!saved) return;
+      showToast(
+        saved.verification === 'verified'
+          ? `'${saved.entry.title}' 을(를) 검증된 가사로 저장했습니다.`
+          : `'${saved.entry.title}' 수정본을 학습 자료로 저장했습니다.`,
+      );
+    },
+    [confirmSong],
+  );
+
+  /**
+   * 가사 모두 저장: the same as pressing 라이브러리에 저장 on every song with a
+   * title and lyrics, with one notice for the lot. A page still being read is
+   * left for its own save, since its lyrics are not settled yet.
+   */
+  const handleSaveAllToLibrary = useCallback(() => {
+    const saved = songs
+      .filter((song) => isAutoSavable(song) && recog[song.id]?.status !== 'running')
+      .map((song) => confirmSong(song))
+      .filter((result): result is NonNullable<typeof result> => result !== null);
+    if (saved.length === 0) {
+      showToast('저장할 가사가 없습니다. 제목과 가사가 있는 곡만 저장됩니다.', 'warn');
+      return;
+    }
+    showToast(`찬양 ${saved.length}곡의 가사를 라이브러리에 저장했습니다.`);
+  }, [songs, recog, confirmSong]);
 
   const removeFromUserLibrary = useCallback((title: string) => {
     const want = normalizeTitle(title);
@@ -2075,6 +2102,18 @@ export default function LyricsGenerator({
             <Icon name="plus" />
             빈 찬양 추가
           </button>
+          {songs.some(isAutoSavable) && (
+            <button
+              type="button"
+              className="btn"
+              data-testid="save-all-songs"
+              title="제목과 가사가 있는 모든 곡을 곡마다 라이브러리에 저장을 누른 것처럼 한 번에 저장합니다."
+              onClick={handleSaveAllToLibrary}
+            >
+              <Icon name="save" />
+              가사 모두 저장
+            </button>
+          )}
           <LibraryAddSearch
             library={library}
             onAdd={(entry) => {

@@ -341,8 +341,17 @@ describe('lyrics typed on the retreat page reach the 찬양 라이브러리', ()
   it('leaves lyrics that only came from a library alone', () => {
     expect(libraryEntryForRetreatSong({ ...typed, source: 'retreat' }, undefined)).toBeNull();
     expect(libraryEntryForRetreatSong({ ...typed, source: 'library' }, undefined)).toBeNull();
-    expect(libraryEntryForRetreatSong({ ...typed, source: 'score' }, undefined)).toBeNull();
     expect(libraryEntryForRetreatSong({ ...typed, lyrics: '  ' }, undefined)).toBeNull();
+  });
+
+  it('keeps lyrics read off this year’s 악보 as a draft, only for a song the library does not have', () => {
+    const read = libraryEntryForRetreatSong({ ...typed, source: 'score' }, undefined)!;
+    expect(read.verification).toBe('draft');
+    expect(read.version).toBe(1);
+    expect(libraryLyricsText(read)).toBe(typed.lyrics);
+    // A draft never replaces anything saved — not even another draft.
+    const saved = { title: '새로운 노래', sections: [{ label: '1', lines: ['가'] }], order: ['1'], verification: 'draft' as const, version: 1 };
+    expect(libraryEntryForRetreatSong({ ...typed, source: 'score' }, saved)).toBeNull();
   });
 
   it('never replaces a confirmed copy whose parts are named, but updates a draft or a numbered copy', () => {

@@ -469,17 +469,47 @@ export default function PraiseApp() {
     showToast(`'${entry.title}'을(를) 저장된 한글·영어 가사로 불러왔습니다.`);
   }, []);
 
+  // The 저장 buttons: one song's, or every song's at once (모두 저장).
+  // Unlike the auto-save, an explicit save always writes the song as it
+  // stands, even over a saved copy with more English.
   const rememberEnglish = useCallback(async (targets: Song[]) => {
     let entries: EnglishSongEntry[] | null = null;
+    const saved: string[] = [];
+    const at = new Date().toISOString();
     for (const song of targets) {
-      if (!song.title.trim()) continue;
+      if (!song.title.trim() || /^새 찬양/.test(song.title.trim())) continue;
       const entry = entryFromSong(song, extrasFor(extras, song.id).english);
       if (entry.slides.length === 0) continue;
       entries = await saveEnglishEntry(entry);
+      englishWrittenRef.current.set(song.id, JSON.stringify(entry));
+      saved.push(song.id);
     }
     if (entries) setEnglishLibrary(mergeEnglishLibraries(seedRef.current, entries));
-    if (targets.length === 1) showToast(`'${targets[0].title}' 영어 가사를 저장했습니다. 다음 찬양집회에서 자동으로 채워집니다.`);
+    if (saved.length > 0) {
+      setEnglishSavedAt((previous) => ({ ...previous, ...Object.fromEntries(saved.map((id) => [id, at])) }));
+    }
+    if (targets.length === 1) {
+      if (saved.length === 1) showToast(`'${targets[0].title}' 영어 가사를 저장했습니다. 다음 찬양집회에서 자동으로 채워집니다.`);
+      return;
+    }
+    showToast(
+      saved.length > 0
+        ? `찬양 ${saved.length}곡의 한글·영어 가사를 저장했습니다. 다음 찬양집회에서 자동으로 채워집니다.`
+        : '저장할 가사가 없습니다.',
+      saved.length > 0 ? 'notice' : 'warn',
+    );
   }, [extras]);
+  const [savingAllEnglish, setSavingAllEnglish] = useState(false);
+  const saveAllEnglish = async () => {
+    setSavingAllEnglish(true);
+    try {
+      await rememberEnglish(songs);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '가사를 저장하지 못했습니다.', 'error');
+    } finally {
+      setSavingAllEnglish(false);
+    }
+  };
 
   // ---- build ----
   const build = useCallback(async () => {
@@ -569,11 +599,11 @@ export default function PraiseApp() {
   );
 
   const saveToLibrary = useCallback(
-    async (fingerprint: string) => {
+    async (fingerprint: string, generated?: Awaited<ReturnType<typeof build>>) => {
       savingRef.current = true;
       setAutoSaveStatus({ state: 'saving' });
       try {
-        const built = await build();
+        const built = generated ?? (await build());
         const { deck: saved } = await saveDeckToLibrary(
           {
             name: savedName,
@@ -626,6 +656,8 @@ export default function PraiseApp() {
         window.setTimeout(() => setAutoSaveRetry((count) => count + 1), AUTO_SAVE_BUSY_POLL_MS);
         return;
       }
+      // A preview or download may have saved these inputs already.
+      if (savedFingerprintRef.current === fingerprint) return;
       void saveToLibrary(fingerprint);
     }, AUTO_SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
@@ -646,6 +678,14 @@ export default function PraiseApp() {
   }, []);
   const showSongsStep = useCallback(() => setStep(0), []);
 
+  // A PPT that was just generated goes into the 라이브러리 at once — the
+  // same bytes, not a second build — rather than waiting for the auto-save's
+  // pause, so a download followed by closing the tab is never lost.
+  const saveGenerated = (result: Awaited<ReturnType<typeof build>>) => {
+    if (savingRef.current || savedFingerprintRef.current === fingerprint) return;
+    void saveToLibrary(fingerprint, result);
+  };
+
   // ---- downloads ----
   const downloadDeck = async () => {
     if (songs.length === 0 && additionalFiles.length === 0) {
@@ -658,6 +698,7 @@ export default function PraiseApp() {
       setOverview(result.overview);
       setWarnings(result.warnings);
       downloadBytes(result.deck, fileName);
+      saveGenerated(result);
       for (const warning of result.warnings) showToast(warning, 'warn');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'PPT를 만들지 못했습니다.', 'error');
@@ -672,6 +713,7 @@ export default function PraiseApp() {
       const result = await build();
       setOverview(result.overview);
       setWarnings(result.warnings);
+      saveGenerated(result);
       const slides = await renderPptxSlides(result.deck);
       revokeRenderedSlides(previewRef.current);
       previewRef.current = slides;
@@ -801,6 +843,21 @@ export default function PraiseApp() {
                     : '모든 한글 슬라이드에 영어 가사가 있습니다.'}
                 </span>
               </p>
+            )}
+            {songs.length > 0 && (
+              <div className="download-actions praise-english-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={savingAllEnglish}
+                  data-testid="praise-save-all-english"
+                  title="모든 곡의 한글·영어 가사를 곡마다 영어 가사 저장을 누른 것처럼 한 번에 저장합니다."
+                  onClick={() => void saveAllEnglish()}
+                >
+                  <Icon name="save" />
+                  {savingAllEnglish ? '저장 중…' : '한글·영어 가사 모두 저장'}
+                </button>
+              </div>
             )}
             <PraiseEnglishStep
               songs={songs}
