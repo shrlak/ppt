@@ -459,7 +459,8 @@ a.btn {
 .slide-overview-header {
   margin: 0 0 var(--s-3);
 }
-.slide-overview-title {
+.slide-overview-title,
+.praise-song-list-title {
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -470,7 +471,8 @@ a.btn {
   white-space: nowrap;
 }
 /* A small brass diamond: the same ornament that closes every page. */
-.slide-overview-title::before {
+.slide-overview-title::before,
+.praise-song-list-title::before {
   content: '';
   flex: none;
   width: 7px;
@@ -4348,6 +4350,166 @@ main[data-direction='back'] .wizard-panel.active {
   font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 찬양 목록 — every song of the night, on the left of every step. It stands
+   beside the page, and stays in view as the page scrolls, only while the
+   page keeps a full reading column next to it (≥1280px, the open rail
+   included); below that it is a strip of songs above the step. */
+.app.app-praise {
+  --praise-list-w: 232px;
+}
+.praise-song-list {
+  margin-top: var(--s-6);
+  padding: var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.praise-song-list.is-empty {
+  display: none;
+}
+.praise-song-list-title {
+  margin: 0 0 var(--s-3);
+}
+.praise-song-list-count {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.praise-song-list-empty {
+  margin: 0;
+}
+.praise-song-list-items {
+  display: flex;
+  gap: var(--s-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.praise-song-list-items li {
+  flex: none;
+  max-width: 220px;
+}
+.praise-song-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-2);
+  border: none;
+  /* Nested radius: the 20px pane less its 16px padding. */
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.praise-song-list-item:hover {
+  background: var(--surface-hover);
+}
+.praise-song-list-item[aria-current] {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+.praise-song-list-number {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s-6);
+  height: var(--s-6);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink-muted);
+  font-family: var(--font-serif);
+  font-feature-settings: 'lnum';
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.praise-song-list-item[aria-current] .praise-song-list-number {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.praise-song-list-names {
+  display: grid;
+  min-width: 0;
+}
+.praise-song-list-name,
+.praise-song-list-english {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.praise-song-list-name {
+  font-weight: 500;
+}
+.praise-song-list-english {
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+@media (min-width: 1280px) {
+  .app.app-praise {
+    max-width: calc(var(--content-max) + var(--praise-list-w) + var(--s-8));
+  }
+  .app-praise .app-body {
+    display: grid;
+    grid-template-columns: var(--praise-list-w) minmax(0, 1fr);
+    gap: var(--s-8);
+    align-items: start;
+  }
+  /* Level with the step's heading, and held there while the step scrolls. */
+  .praise-song-list,
+  .praise-song-list.is-empty {
+    display: block;
+    position: sticky;
+    top: var(--s-4);
+    max-height: calc(100vh - var(--s-8));
+    overflow-y: auto;
+    margin-top: var(--s-10);
+  }
+  .praise-song-list-items {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+  .praise-song-list-items li {
+    max-width: none;
+  }
+}
+
+/* The card the 찬양 목록 just took the page to glows for a moment, so the
+   eye lands on it. */
+.is-jump-target > .song-card::after,
+.praise-song.is-jump-target::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent);
+  border-radius: inherit;
+  box-shadow: 0 0 0 var(--s-1) var(--accent-soft);
+  pointer-events: none;
+  animation: jump-target-glow 1.6s var(--ease) both;
+}
+@keyframes jump-target-glow {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 @media (max-width: 760px) {
