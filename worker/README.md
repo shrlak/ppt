@@ -127,6 +127,13 @@ is one hit — also when the searches give it under two addresses, as a 티스�
 post's `/145` and `/entry/<title>`: two hits on one blog with the same title
 (or a title Google cut short with "...") are the same post.
 
+Each hit Google returned carries `google`, where Google listed it (1 for its
+first result; the first phrasing's results, then new ones from a later
+phrasing). The candidates are ranked for the app's own tries, and Google's
+first six are always among them however they rank, because when the app is
+not sure it offers the hits in Google's order — the order a person searching
+by hand would see — before what the other searches found.
+
 Google is asked through [SerpApi](https://serpapi.com), which returns Google's
 own results as JSON: Google answers a server's plain fetch of its results page
 with a CAPTCHA (`/sorry/`), and its Custom Search JSON API takes no new

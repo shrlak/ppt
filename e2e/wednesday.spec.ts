@@ -280,6 +280,50 @@ test.describe('수요예배 generator', () => {
     await expect(page.getByTestId('wednesday-library')).toContainText('나의 반석이신 하나님');
   });
 
+  test('offers Google\'s results first, in Google\'s order, each with a link to look first', async ({ page }) => {
+    const hit = (url: string, title: string, google?: number) => ({
+      token: `token-${url}`,
+      url,
+      host: new URL(url).host,
+      title,
+      direct: false,
+      decision: 'review',
+      ...(google ? { google } : {}),
+    });
+    await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
+      route.fulfill({
+        json: {
+          title: '은혜',
+          // As the proxy ranks them; the page shows Google's order instead.
+          candidates: [
+            hit('https://blog.naver.com/church/1', '은혜 PPT 네이버'),
+            hit('https://b.tistory.com/2', '은혜 PPT 둘째', 2),
+            hit('https://a.tistory.com/1', '은혜 PPT 첫째', 1),
+          ],
+          links: [],
+        },
+      }),
+    );
+    await page.route(`${PROXY}/wednesday/songs/sheets?*`, (route) =>
+      route.fulfill({ json: { title: '은혜', candidates: [] } }),
+    );
+
+    await page.getByTestId('wednesday-tab-songs').click();
+    await page.getByTestId('wednesday-song-add').click();
+    await page.getByTestId('wednesday-song-title-0').fill('은혜');
+    await page.getByTestId('wednesday-song-search-0').click();
+
+    const rows = page.getByTestId('wednesday-song-candidates-0').getByRole('listitem');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText('구글 1위');
+    await expect(rows.nth(0)).toContainText('은혜 PPT 첫째');
+    await expect(rows.nth(1)).toContainText('구글 2위');
+    await expect(rows.nth(1)).toContainText('은혜 PPT 둘째');
+    await expect(rows.nth(2)).toContainText('은혜 PPT 네이버');
+    await expect(rows.nth(2)).not.toContainText('구글');
+    await expect(rows.nth(0).getByRole('link', { name: '열기' })).toHaveAttribute('href', 'https://a.tistory.com/1');
+  });
+
   test('says so when the search finds nothing fetchable', async ({ page }) => {
     await page.route(`${PROXY}/wednesday/songs?*`, (route) =>
       route.fulfill({

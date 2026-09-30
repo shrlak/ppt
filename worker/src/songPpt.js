@@ -443,6 +443,8 @@ function blogPostHits(labels, isPost, env, limit) {
  * Pull hits out of a Google search answered as JSON (see fetchGoogleSearch):
  * `organic_results` is the results page, each with its address, title and
  * snippet. The same rules as the HTML searches decide what may be fetched.
+ * Hits come back in Google's own order, which fetchSongPptCandidates records
+ * so that a list of choices can show them the way Google did.
  */
 export function extractGoogleResults(payload, env = {}, limit = MAX_SONG_PPT_CANDIDATES * 2) {
   const results = [];
@@ -976,15 +978,14 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
     requests: endpoints.map((endpoint) => (query) => fetchWithTimeout(endpoint(query))),
     read: async (response) => extract(await readBoundedText(response), env),
   });
+  const googleSearch = googleSearchKey(env)
+    ? {
+        requests: [(query) => fetchGoogleSearch(query, env)],
+        read: async (response) => extractGoogleResults(JSON.parse(await readBoundedText(response)), env),
+      }
+    : null;
   const searches = [
-    ...(googleSearchKey(env)
-      ? [
-          {
-            requests: [(query) => fetchGoogleSearch(query, env)],
-            read: async (response) => extractGoogleResults(JSON.parse(await readBoundedText(response)), env),
-          },
-        ]
-      : []),
+    ...(googleSearch ? [googleSearch] : []),
     htmlSearch([daumBlogSearchUrl], extractDaumBlogResults),
     htmlSearch([naverBlogSearchUrl], extractNaverBlogResults),
     htmlSearch(SEARCH_ENDPOINTS, extractSongPptResults),
@@ -1006,8 +1007,14 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
   const results = [];
   const links = [];
   const seen = new Map();
+  // Where each hit stood in Google's results, 1 for its first: the first
+  // phrasing's results in Google's order, then any new ones a later phrasing
+  // turned up.
+  let googleOrder = 0;
   for (const query of queries) {
-    for (const found of await Promise.all(searches.map((search) => runSearch(search, query)))) {
+    const answers = await Promise.all(searches.map((search) => runSearch(search, query)));
+    for (const [index, found] of answers.entries()) {
+      const fromGoogle = searches[index] === googleSearch;
       for (const hit of found.results) {
         const key = postKey(hit.url);
         const existing = seen.get(key) ?? results.find((other) => isSamePost(other, hit));
@@ -1015,8 +1022,10 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
           // The other search may have seen the snippet that names the file.
           existing.attachment ??= hit.attachment;
           existing.sheet ||= hit.sheet;
+          if (fromGoogle) existing.google ??= ++googleOrder;
           continue;
         }
+        if (fromGoogle) hit.google = ++googleOrder;
         seen.set(key, hit);
         results.push(hit);
       }
@@ -1027,8 +1036,17 @@ export async function fetchSongPptCandidates(title, env = {}, secret = '') {
     if (results.length >= MAX_SONG_PPT_CANDIDATES) break;
   }
 
+  // The ranking decides what the app tries by itself. The list it offers when
+  // it is not sure also carries Google's own first results, however they
+  // rank here, because those are what a person searching by hand would see
+  // first — the page lists them first, in Google's order (see `google`).
+  const ranked = rankSongPptHits(title, results);
+  const chosen = ranked.slice(0, MAX_SONG_PPT_CANDIDATES);
+  for (const hit of ranked) {
+    if (hit.google !== undefined && hit.google <= MAX_SONG_PPT_CANDIDATES && !chosen.includes(hit)) chosen.push(hit);
+  }
   const candidates = [];
-  for (const hit of rankSongPptHits(title, results).slice(0, MAX_SONG_PPT_CANDIDATES)) {
+  for (const hit of chosen) {
     candidates.push({ ...hit, token: await signSongPptToken(hit.url, secret) });
   }
   return { candidates, links: links.slice(0, MAX_SONG_PPT_CANDIDATES) };

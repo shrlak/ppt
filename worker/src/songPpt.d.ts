@@ -10,6 +10,8 @@ export interface SongPptHit {
   attachment?: 'pptx' | 'ppt';
   /** True when the hit's title or snippet says its PPT has the 악보. */
   sheet?: boolean;
+  /** Where Google listed it, 1 for its first result; absent when only another search found it. */
+  google?: number;
 }
 
 export interface SongPptCandidate extends SongPptHit {

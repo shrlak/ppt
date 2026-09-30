@@ -52,6 +52,23 @@ export interface SongPptCandidate {
   score?: number;
   /** 'auto' — confidently this song; 'review' — a guess worth showing. */
   decision?: 'auto' | 'review';
+  /** Where Google listed it, 1 for its first result; absent when only another search found it. */
+  google?: number;
+}
+
+/**
+ * 찬양 PPT hits as the operator is shown them to choose from: Google's
+ * results first, in the order Google listed them — the order a person
+ * searching by hand would see — and then what the other searches found, in
+ * the proxy's own ranking. Which hit the app tries by itself is not affected;
+ * that stays the proxy's ranking.
+ */
+export function inSearchOrder<T extends Pick<SongPptCandidate, 'google'>>(candidates: readonly T[]): T[] {
+  const place = (candidate: T) => candidate.google ?? Number.POSITIVE_INFINITY;
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((a, b) => place(a.candidate) - place(b.candidate) || a.index - b.index)
+    .map(({ candidate }) => candidate);
 }
 
 /** One 악보 사진 hit. Same token discipline as a 찬양 PPT hit. */
@@ -412,7 +429,7 @@ export async function autoAttachSong(title: string, signal?: AbortSignal): Promi
 
   return {
     kind: 'none',
-    pptCandidates: ppt.candidates,
+    pptCandidates: inSearchOrder(ppt.candidates),
     sheetCandidates: sheets.candidates,
     message: ppt.message ?? sheets.message,
   };
