@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NO_SHEET_MUSIC_MESSAGE, autoAttachSong, downloadSongPpt } from '../../src/wednesday/songSource';
+import { NO_SHEET_MUSIC_MESSAGE, autoAttachSong, downloadSongPpt, inSearchOrder } from '../../src/wednesday/songSource';
 import { deckOf, lyricsSlides, sheetSlides } from '../support/songDeckFixtures';
 
 const PROXY = 'https://proxy.test';
@@ -156,5 +156,46 @@ describe('autoAttachSong with 찬양 PPT', () => {
     await expect(
       downloadSongPpt({ token: 'https://a.tistory.com/lyrics.pptx', url: 'https://a.tistory.com/lyrics.pptx' }),
     ).rejects.toThrow(NO_SHEET_MUSIC_MESSAGE);
+  });
+});
+
+describe('the 찬양 PPT hits offered to choose from', () => {
+  it('lists Google\'s results first, in Google\'s order, and the rest as the proxy ranked them', () => {
+    const hits: { url: string; google?: number }[] = [
+      { url: 'naver-1' },
+      { url: 'google-3', google: 3 },
+      { url: 'daum-1' },
+      { url: 'google-1', google: 1 },
+      { url: 'google-2', google: 2 },
+    ];
+    expect(inSearchOrder(hits).map((hit) => hit.url)).toEqual(['google-1', 'google-2', 'google-3', 'naver-1', 'daum-1']);
+    // Without Google, the proxy's ranking stands.
+    const unranked: { url: string; google?: number }[] = [{ url: 'b' }, { url: 'a' }];
+    expect(inSearchOrder(unranked).map((hit) => hit.url)).toEqual(['b', 'a']);
+  });
+
+  it('offers them in that order when nothing is sure, while the sure-hit tries keep the ranking', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith(`${PROXY}/wednesday/songs?`)) {
+          return Response.json({
+            candidates: [
+              { token: 'n', url: 'https://blog.naver.com/a/1', host: 'blog.naver.com', title: '은혜 PPT', direct: false, decision: 'review' },
+              { token: 'g2', url: 'https://b.tistory.com/2', host: 'b.tistory.com', title: '은혜 PPT', direct: false, decision: 'review', google: 2 },
+              { token: 'g1', url: 'https://a.tistory.com/1', host: 'a.tistory.com', title: '은혜 PPT', direct: false, decision: 'review', google: 1 },
+            ],
+          });
+        }
+        if (url.startsWith(`${PROXY}/wednesday/songs/sheets?`)) return Response.json({ candidates: [] });
+        return new Response('not found', { status: 404 });
+      }),
+    );
+
+    const found = await autoAttachSong('은혜');
+    expect(found.kind).toBe('none');
+    if (found.kind !== 'none') return;
+    expect(found.pptCandidates.map((candidate) => candidate.token)).toEqual(['g1', 'g2', 'n']);
   });
 });

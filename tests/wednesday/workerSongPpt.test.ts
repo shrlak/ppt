@@ -475,6 +475,47 @@ describe('티스토리·갓피플 first, and the 악보 version', () => {
     expect(without.candidates.map((candidate) => candidate.url)).toEqual([BLOG]);
   });
 
+  it('marks where Google listed each hit, and offers Google\'s first results however they rank', async () => {
+    // Google's order: guesses before the sure hit a person would scroll to.
+    const google = [
+      { title: '은혜 아니면 악보 PPT', link: 'https://a.tistory.com/1' },
+      { title: '하나님의 은혜 PPT', link: 'https://b.tistory.com/2' },
+      { title: '[찬양PPT] 은혜 악보', link: 'https://c.tistory.com/3' },
+      { title: '은혜로다 PPT', link: 'https://d.tistory.com/4' },
+    ];
+    // Six sure 네이버 blog posts, enough to fill the ranked list by themselves.
+    const naver = Array.from({ length: 6 }, (_, index) => `https://blog.naver.com/church${index}/${100 + index}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith(`${GOOGLE_SEARCH_ENDPOINT}?`)) {
+          return Response.json({ organic_results: google.map((item) => ({ ...item, snippet: '' })) });
+        }
+        if (url.startsWith('https://search.naver.com/')) {
+          const keys = ['C', 'D', 'E', 'F', 'G', 'A'];
+          return new Response(naver.map((post, index) => `<a href="${post}">은혜 악보 PPT (${keys[index]})</a>`).join(''));
+        }
+        if (url.startsWith('https://search.daum.net/')) {
+          // 다음 finds Google's third hit too; it is still Google's third.
+          return new Response('<c-title data-href="https://c.tistory.com/3">[찬양PPT] 은혜 악보</c-title>');
+        }
+        return new Response('', { status: 403 });
+      }),
+    );
+
+    const { candidates } = await fetchSongPptCandidates('은혜', { SERPAPI_API_KEY: 'key-1' }, 'secret');
+    const byUrl = new Map(candidates.map((candidate) => [candidate.url, candidate]));
+    expect(google.map((item) => byUrl.get(item.link)?.google)).toEqual([1, 2, 3, 4]);
+    expect(naver.every((post) => byUrl.get(post)?.google === undefined)).toBe(true);
+    // The ranking still decides what is tried first: the sure hits.
+    expect(candidates[0].url).toBe('https://c.tistory.com/3');
+    expect(candidates.slice(0, 6).every((candidate) => candidate.decision === 'auto')).toBe(true);
+    // Every Google result is on offer, though the guesses ranked below six sure hits.
+    expect(candidates).toHaveLength(9);
+    expect(candidates.every((candidate) => candidate.token)).toBe(true);
+  });
+
   it('knows one 티스토리 post under its two addresses by its title', () => {
     const post = (host: string, title: string) => ({ host, title });
     const title = '[악보/가사/자막/PPT/새 번역] 주님의 선하심(Goodness of GOD) G/A/Bb Key';

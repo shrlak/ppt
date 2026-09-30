@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
-import { loadConti, type ContiDocument } from '../lib/utils/contiPdf';
+import { loadConti, warmPdfWorker, type ContiDocument } from '../lib/utils/contiPdf';
+import { renderPagePreviews } from '../lib/utils/pagePreviews';
 import { dateFromFileName, deriveSongsFromMusicPages, splitLyricsAndConfessionSongs } from '../lib/utils/contiText';
 import {
   parseChordSheet,
@@ -342,6 +343,9 @@ export default function LyricsGenerator({
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
+  // Settles once the open conti's 악보 previews are drawn; recognition waits
+  // on it so the cards' pages are drawn before its larger copies.
+  const previewsRef = useRef<Promise<void>>(Promise.resolve());
   const autoAttemptedRef = useRef<Set<string>>(new Set());
   // Songs the user changed by hand in this session: their auto-saves carry
   // the user's trust level instead of the machine's.
@@ -442,6 +446,12 @@ export default function LyricsGenerator({
     setLibrary(merged);
     setLibrarySync(synchronized.synced ? 'synced' : synchronized.error ? 'error' : 'local');
     return merged;
+  }, []);
+
+  // A conti is what this step starts from, so pdf.js's worker is started as
+  // the page opens rather than when the file arrives.
+  useEffect(() => {
+    if (typeof Worker !== 'undefined') warmPdfWorker();
   }, []);
 
   useEffect(() => {
@@ -874,14 +884,19 @@ export default function LyricsGenerator({
         let renderedPages = 0;
         const [renderedImages, settings, reliabilities, memory] = await Promise.all([
           // Rendering and recognition are both batched: no per-song request loop.
-          Promise.all(
-            active.map(async (song) => {
-              // PNG: lossless line art reads far better than JPEG for OCR.
-              const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH, 'png');
-              renderedPages += 1;
-              tracked.realFraction = renderedPages / active.length;
-              return url;
-            }),
+          // The cards' previews are drawn first, since they are what is on
+          // screen; a page they have drawn is already read, so drawing it again
+          // larger here only has to paint it.
+          previewsRef.current.then(() =>
+            Promise.all(
+              active.map(async (song) => {
+                // PNG: lossless line art reads far better than JPEG for OCR.
+                const url = await doc.renderPage(song.pageIndex as number, RECOGNITION_RENDER_WIDTH, 'png');
+                renderedPages += 1;
+                tracked.realFraction = renderedPages / active.length;
+                return url;
+              }),
+            ),
           ),
           // Shared settings: concurrent model pool and the
           // excluded-title list, synced across every device via the proxy.
@@ -1654,25 +1669,29 @@ export default function LyricsGenerator({
       const doc = await loadConti(data);
       docRef.current = doc;
       const parsed = doc.parsed;
+
+      // The 악보 previews start now, while the library and settings lookups
+      // below are still out, so the cards come up with their pages mostly
+      // drawn. Until the cards are on screen a drawn page is kept here rather
+      // than shown, so the previous conti's cards never flash this one's pages.
+      const drawn: Record<number, string> = {};
+      let cardsShown = false;
+      previewsRef.current = renderPagePreviews(doc, parsed.musicPages, (page, url) => {
+        if (docRef.current !== doc) return;
+        drawn[page] = url;
+        if (cardsShown) setPageImages((imgs) => ({ ...imgs, [page]: url }));
+      });
+      const showPreviews = () => {
+        cardsShown = true;
+        setPageImages({ ...drawn });
+      };
+
       onContiFileLoaded?.({ name: file.name, data });
 
       // Wait for the song library before matching titles, so a conti uploaded
       // right after page load still pulls saved lyrics instead of scanning.
       const lib = library.length > 0 ? library : ((await libraryPromiseRef.current) ?? []);
       const shared = await getSyncedAiSettings();
-
-      // Score previews render in the background, for the split-screen view.
-      const renderPreviews = () =>
-        void (async () => {
-          for (const page of parsed.musicPages) {
-            try {
-              const url = await doc.renderPage(page, 700);
-              setPageImages((imgs) => ({ ...imgs, [page]: url }));
-            } catch {
-              // preview is best-effort
-            }
-          }
-        })();
 
       // A chord sheet prints every song's lyrics as text: they are read from
       // it directly, in the sheet's order, and no page is recognized.
@@ -1711,7 +1730,7 @@ export default function LyricsGenerator({
         setInfo(null);
         setSongs(kept.map(({ song }) => song));
         setEdited(false);
-        setPageImages({});
+        showPreviews();
         setRecog({});
         autoAttemptedRef.current.clear();
         // Nothing to recognize: the lyrics are the sheet's own text.
@@ -1724,7 +1743,6 @@ export default function LyricsGenerator({
             (service === 'praise' ? ' (한글·영어).' : '.') +
             ' 띄어쓰기와 줄 나눔을 확인해 주세요.',
         );
-        renderPreviews();
         return;
       }
 
@@ -1832,7 +1850,7 @@ export default function LyricsGenerator({
       setInfo(initialInfo);
       setSongs(kept);
       setEdited(false);
-      setPageImages({});
+      showPreviews();
       setRecog({});
       autoAttemptedRef.current.clear();
       onDateDetected?.(parsed.info.date ?? dateFromFileName(file.name));
@@ -1851,8 +1869,6 @@ export default function LyricsGenerator({
       if (postSermonKept) {
         showToast(`'${postSermonKept.title}'은 설교 후 찬양으로 두었습니다 (설교 뒤 기도 슬라이드 다음).`);
       }
-
-      renderPreviews();
 
       // New songs are auto-recognized by the reactive effect above once
       // recognition is ready (on upload, or later when a key is added).

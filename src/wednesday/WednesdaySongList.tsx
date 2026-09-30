@@ -468,12 +468,20 @@ export default function WednesdaySongList({ songs, onChange, onForgetDeck }: Pro
 
             {(row.pptCandidates?.length ?? 0) > 0 && (
               <ul className="wednesday-candidates" data-testid={`wednesday-song-candidates-${index}`}>
+                {/* Google's results come first, in Google's order (see inSearchOrder),
+                    each marked with where Google listed it and a link to look first. */}
                 {row.pptCandidates!.map((candidate) => (
                   <li key={candidate.token || candidate.url}>
+                    {candidate.google != null && (
+                      <span className="chip wednesday-candidate-rank" title="구글 검색에서 나온 순서">
+                        구글 {candidate.google}위
+                      </span>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost"
                       disabled={!!row.busy}
+                      title={candidate.title || candidate.url}
                       onClick={() => void downloadDeckCandidate(song, candidate)}
                     >
                       <Icon name="download" />
@@ -482,6 +490,9 @@ export default function WednesdaySongList({ songs, onChange, onForgetDeck }: Pro
                         {candidate.direct ? ' · pptx' : ' · 게시글'}
                       </span>
                     </button>
+                    <a href={candidate.url} target="_blank" rel="noreferrer noopener">
+                      열기
+                    </a>
                   </li>
                 ))}
               </ul>

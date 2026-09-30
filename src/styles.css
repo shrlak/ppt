@@ -4011,15 +4011,38 @@ main[data-direction='back'] .wizard-panel.active {
 }
 .wednesday-candidates {
   display: grid;
+  /* One column no wider than the card, so a long post title is cut short
+     rather than pushing the card past a phone's screen. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
+.wednesday-candidates li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
 .wednesday-candidates .btn {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   justify-content: flex-start;
   text-align: left;
+}
+/* A long post title gives way to the rank and the 열기 link beside it. */
+.wednesday-candidates .btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wednesday-candidate-rank {
+  flex: none;
+  padding: 0 var(--s-2);
+  font-size: var(--text-xs);
+}
+.wednesday-candidates a {
+  flex: none;
 }
 .wednesday-candidates em {
   color: var(--ink-faint);
