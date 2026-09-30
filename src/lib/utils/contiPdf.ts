@@ -10,12 +10,30 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const BASE: string = (import.meta.env && import.meta.env.BASE_URL) || '/';
 
+/**
+ * One pdf.js worker for every PDF the page opens.
+ *
+ * Starting a worker means fetching and compiling pdf.js's worker script, which
+ * is most of what opening a conti costs before a single page can be read. Left
+ * to itself pdf.js starts a fresh one for every document; a shared one pays
+ * that once, and warmPdfWorker() lets a page pay it before the conti is even
+ * dropped. A document that is destroyed leaves a worker it did not start
+ * running, so the next PDF finds it ready.
+ */
+let sharedWorker: pdfjs.PDFWorker | null = null;
+
+export function warmPdfWorker(): pdfjs.PDFWorker {
+  if (!sharedWorker || sharedWorker.destroyed) sharedWorker = new pdfjs.PDFWorker();
+  return sharedWorker;
+}
+
 export function loadPdfTask(data: ArrayBuffer): pdfjs.PDFDocumentLoadingTask {
   return pdfjs.getDocument({
     data: new Uint8Array(data.slice(0)),
     cMapUrl: BASE + 'cmaps/',
     cMapPacked: true,
     standardFontDataUrl: BASE + 'standard_fonts/',
+    worker: warmPdfWorker(),
   });
 }
 
@@ -84,19 +102,22 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   const loadingTask = loadPdfTask(data);
   const doc = await loadingTask.promise;
 
-  const pageTexts: string[] = [];
-  const positionedPages: PositionedPage[] = [];
-  for (let n = 1; n <= doc.numPages; n++) {
-    const page = await doc.getPage(n);
-    try {
-      const { text, positioned } = await extractPageText(page);
-      pageTexts.push(text);
-      positionedPages.push(positioned);
-    } catch {
-      pageTexts.push('');
-      positionedPages.push({ width: 0, height: 0, items: [] });
-    }
-  }
+  // Every page is asked for at once rather than one after another: the pdf.js
+  // worker then goes straight from one page to the next instead of waiting on
+  // a round trip each time, and nothing — the song cards and their 악보
+  // previews included — can start until the last page is read.
+  const extracted = await Promise.all(
+    Array.from({ length: doc.numPages }, (_, index) =>
+      doc.getPage(index + 1).then((page) =>
+        extractPageText(page).catch(() => ({
+          text: '',
+          positioned: { width: 0, height: 0, items: [] } as PositionedPage,
+        })),
+      ),
+    ),
+  );
+  const pageTexts = extracted.map((page) => page.text);
+  const positionedPages = extracted.map((page) => page.positioned);
 
   const { coverPages, infoPages, musicPages } = classifyPages(pageTexts);
   // The cover is read as ONE document however many pages it spans: a song
