@@ -37,6 +37,7 @@ import {
   saveUserLibrary,
   synchronizeUserLibrary,
   upsertEntry,
+  type LyricsUploadResult,
 } from '../lib/storage/library';
 import { hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { useSaveSoon } from '../lib/storage/saveSoon';
@@ -129,6 +130,31 @@ interface AutoSavedLyrics {
   at: string;
   /** A machine reading left out because a confirmed copy is already saved. */
   skipped?: boolean;
+}
+
+/**
+ * Say so when an explicit 저장 did not reach the shared library. The save
+ * itself is always kept on this device, so the success notice is still true
+ * here — but other devices, and this one after the next sync, load what the
+ * shared library holds, and a save that never got there looks lost.
+ */
+function reportUnsharedSaves(titles: string[], results: LyricsUploadResult[]): void {
+  const quoted = (result: LyricsUploadResult) =>
+    titles
+      .filter((_, index) => results[index] === result)
+      .map((title) => `'${title}'`)
+      .join(', ');
+  const rejected = quoted('rejected');
+  const pending = quoted('pending');
+  if (rejected) {
+    showToast(`공유 서버가 ${rejected}의 저장을 받지 않았습니다. 이 기기에만 저장되어 있습니다.`, 'warn');
+  }
+  if (pending) {
+    showToast(
+      `${pending}을(를) 아직 공유 서버에 올리지 못했습니다. 이 기기에 보관하고, 연결되면 자동으로 다시 올립니다.`,
+      'warn',
+    );
+  }
 }
 
 /** Only a titled song with lyrics is written to the 찬양 라이브러리. */
@@ -554,13 +580,13 @@ export default function LyricsGenerator({
     };
     const user = upsertEntry(loadUserLibrary(), entry);
     saveUserLibrary(user);
-    queueLyricsUpsert(entry);
+    const upload = queueLyricsUpsert(entry);
     setLibrary((lib) => {
       const next = upsertEntry(lib, entry);
       libraryRef.current = next;
       return next;
     });
-    return entry;
+    return { entry, upload };
   }, []);
 
   // Only which pages are still being read matters to auto-save, not every
@@ -611,7 +637,7 @@ export default function LyricsGenerator({
         settled[song.id] = { content, at, skipped: true };
         continue;
       }
-      const entry = saveToLibrary(song, verification);
+      const entry = saveToLibrary(song, verification)?.entry;
       if (!entry) continue;
       settled[song.id] = { content, at };
       updates.set(song.id, { verification, version: entry.version });
@@ -1654,8 +1680,9 @@ export default function LyricsGenerator({
     (song: Song) => {
       const { final, diff, verification } = userReading(song);
 
-      const entry = saveToLibrary(song, verification);
-      if (!entry) return null;
+      const saved = saveToLibrary(song, verification);
+      if (!saved) return null;
+      const { entry, upload } = saved;
       librarySavedRef.current.set(song.id, libraryContentKey(entry));
       setAutoSaved((current) => ({
         ...current,
@@ -1675,7 +1702,7 @@ export default function LyricsGenerator({
           // training record could not be built or sent.
         });
       }
-      return { entry, verification };
+      return { entry, verification, upload };
     },
     [saveToLibrary, submitFeedback],
   );
@@ -1689,6 +1716,7 @@ export default function LyricsGenerator({
           ? `'${saved.entry.title}' 을(를) 검증된 가사로 저장했습니다.`
           : `'${saved.entry.title}' 수정본을 학습 자료로 저장했습니다.`,
       );
+      void saved.upload.then((result) => reportUnsharedSaves([saved.entry.title], [result]));
     },
     [confirmSong],
   );
@@ -1708,6 +1736,12 @@ export default function LyricsGenerator({
       return;
     }
     showToast(`찬양 ${saved.length}곡의 가사를 라이브러리에 저장했습니다.`);
+    void Promise.all(saved.map((result) => result.upload)).then((results) =>
+      reportUnsharedSaves(
+        saved.map((result) => result.entry.title),
+        results,
+      ),
+    );
   }, [songs, recog, confirmSong]);
 
   const removeFromUserLibrary = useCallback((title: string) => {

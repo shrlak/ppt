@@ -20,6 +20,17 @@ async function errorDetail(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+/** A request the shared library answered with an error status. */
+export class CloudLibraryError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'CloudLibraryError';
+    this.status = status;
+  }
+}
+
 export async function cloudLibraryRequest(
   path: string,
   init: RequestInit = {},
@@ -30,7 +41,7 @@ export async function cloudLibraryRequest(
   const headers = new Headers(init.headers);
   if (authenticate) headers.set('Authorization', `Bearer ${ADMIN_PASSWORD}`);
   const response = await fetch(`${base}${path}`, { ...init, headers });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) throw new CloudLibraryError(await errorDetail(response), response.status);
   return response;
 }
 

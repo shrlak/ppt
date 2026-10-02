@@ -37,6 +37,27 @@ describe('mergeLibraries', () => {
     const merged = mergeLibraries([entry('A')], [entry('B')]);
     expect(merged.map((e) => e.title).sort()).toEqual(['A', 'B']);
   });
+
+  it('never lets a machine draft hide a bundled song', () => {
+    // A web reading auto-saved as one long part must not load in place of
+    // the bundled song's parts.
+    const draft: LibraryEntry = { ...entry('그 사랑', 'G'), verification: 'draft' };
+    const merged = mergeLibraries([entry('그 사랑', 'E')], [draft]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].key).toBe('E');
+  });
+
+  it('still lets a confirmed save replace a bundled song', () => {
+    for (const verification of ['verified', 'edited'] as const) {
+      const merged = mergeLibraries([entry('그 사랑', 'E')], [{ ...entry('그 사랑', 'G'), verification }]);
+      expect(merged.map((e) => e.key)).toEqual(['G']);
+    }
+  });
+
+  it('keeps a draft of a song the bundle does not have', () => {
+    const draft: LibraryEntry = { ...entry('새 곡'), verification: 'draft' };
+    expect(mergeLibraries([entry('그 사랑')], [draft]).map((e) => e.title)).toEqual(['그 사랑', '새 곡']);
+  });
 });
 
 describe('findEntry', () => {
