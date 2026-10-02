@@ -136,6 +136,18 @@ async function moveFromBibleToDownload(page: Page): Promise<void> {
 
 const PROXY = '**/ppt/__proxy';
 
+/**
+ * The default 설교 후 찬양 a Sunday conti gets (관리자 설정 → 영접송), with
+ * invented lyrics. The bundled library holds the real song; the stubbed one
+ * holds this, so that card never needs its 악보 read.
+ */
+const DEFAULT_POST_SERMON_ENTRY = {
+  title: '영접송',
+  key: 'G',
+  sections: [{ label: 'V', lines: ['가상의 영접 가사 첫째 줄', '가상의 영접 가사 둘째 줄'] }],
+  order: ['I', 'V'],
+};
+
 /** A page of made-up lyrics in the shape the models are asked to answer with. */
 function stubScore(overrides: Record<string, unknown> = {}) {
   return {
@@ -183,7 +195,7 @@ async function stubRecognitionProxy(page: Page, stubs: ProxyStubs = {}): Promise
   // The bundled starter library already holds the sample conti's songs, and a
   // saved song skips recognition entirely. Emptying it is what makes these
   // tests exercise the recognition path at all.
-  await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [] }));
+  await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [DEFAULT_POST_SERMON_ENTRY] }));
   await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
   await page.route(`${PROXY}/learning/models`, (route) =>
     route.fulfill({ json: { models: stubs.models ?? [] } }),
@@ -339,9 +351,11 @@ test('appends image and PPTX uploads after the final Back/End slide in chosen or
   await page.getByTestId('generate-pptx').click();
   const zip = await loadPptx(await downloadPromise, testInfo.outputPath('post-end-order.pptx'));
 
-  expect(slideFileNames(zip)).toHaveLength(35);
-  expect(await zip.file('ppt/slides/slide29.xml')!.async('string')).toContain('<p:pic>');
-  expect(await zip.file('ppt/slides/slide30.xml')!.async('string')).toContain('주님의 사랑');
+  // The back slides print the default 공동체 고백송 (우리는 주의 움직이는
+  // 교회): five lyric slides where the bundled deck's own song has two.
+  expect(slideFileNames(zip)).toHaveLength(38);
+  expect(await zip.file('ppt/slides/slide32.xml')!.async('string')).toContain('<p:pic>');
+  expect(await zip.file('ppt/slides/slide33.xml')!.async('string')).toContain('주님의 사랑');
 });
 
 test('editor view shows slides and all five content editors together', async ({ page }) => {
@@ -921,11 +935,12 @@ test('keeps a handwritten table title in its slot and names it from its 악보',
 
   // The conti's order, with the unwritten title still first and in its key.
   const songCards = page.getByTestId('song-card');
-  await expect(songCards).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+  await expect(songCards).toHaveCount(5, { timeout: PARSE_TIMEOUT });
   const titles = await songCards
     .getByTestId('song-title-input')
     .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
-  expect(titles).toEqual(['새 찬양 (1번)', '그 사랑', '우리가 넉넉히 이기느니라', '임재']);
+  // The four the table lists, then the default 설교 후 찬양.
+  expect(titles).toEqual(['새 찬양 (1번)', '그 사랑', '우리가 넉넉히 이기느니라', '임재', '영접송']);
   await expect(songCards.first().locator('.song-key')).toHaveValue('G');
 
   // Its title comes off the first score page.
@@ -949,11 +964,17 @@ test.describe('a conti with a Plan A and a Plan B', () => {
     await uploadPlans(page);
 
     const songCards = page.getByTestId('song-card');
-    await expect(songCards).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    await expect(songCards).toHaveCount(5, { timeout: PARSE_TIMEOUT });
     const titles = await songCards
       .getByTestId('song-title-input')
       .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
-    expect(titles).toEqual(planA);
+    // Plan A's four, then the default 설교 후 찬양 from the library.
+    expect(titles).toEqual([...planA, '영접송']);
+    const postSermon = songCards.last();
+    await expect(postSermon.getByTestId('song-post-sermon-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await expect(postSermon.getByTestId('section-textarea').first()).toHaveValue(/가상의 영접 가사 첫째 줄/);
+    // Only the 영접송 card is sung after the sermon.
+    await expect(songCards.locator('[data-testid="song-post-sermon-toggle"][aria-pressed="true"]')).toHaveCount(1);
     await expect(page.locator('.toast-text', { hasText: '콘티 순서에 없는 악보 2장(p.6, p.7)' })).toBeVisible();
   });
 
@@ -984,7 +1005,7 @@ test.describe('a conti with a Plan A and a Plan B', () => {
 
     await expect(card.locator('.score-hint')).toContainText('(p.6)');
     await expect(card.getByTestId('song-title-input')).toHaveValue('그 사랑');
-    await expect(page.getByTestId('song-card')).toHaveCount(4);
+    await expect(page.getByTestId('song-card')).toHaveCount(5);
   });
 });
 
@@ -1004,7 +1025,7 @@ test.describe('the 카톡 공지 pasted with the conti', () => {
     '🎵 우리는 주의 움직이는 교회 (G)',
     '🔑키워드: 소망, 그리스도, 사랑',
   ].join('\n');
-  const final = ['주님의 은혜 넘치네', '그 사랑', '우리가 넉넉히 이기느니라', '임재'];
+  const final = ['주님의 은혜 넘치네', '그 사랑', '우리가 넉넉히 이기느니라', '임재', '영접송'];
 
   async function cardTitles(page: Page): Promise<string[]> {
     return page
@@ -1021,7 +1042,7 @@ test.describe('the 카톡 공지 pasted with the conti', () => {
     await expect(page.getByTestId('notice-preview')).toContainText('공동체 고백: 우리는 주의 움직이는 교회');
 
     await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
-    await expect(page.getByTestId('song-card')).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    await expect(page.getByTestId('song-card')).toHaveCount(5, { timeout: PARSE_TIMEOUT });
     expect(await cardTitles(page)).toEqual(final);
     // The renamed song keeps the conti's 악보 page and key.
     const first = page.getByTestId('song-card').first();
@@ -1037,7 +1058,7 @@ test.describe('the 카톡 공지 pasted with the conti', () => {
     await stubRecognitionProxy(page);
     await page.goto('./?service=sunday');
     await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
-    await expect(page.getByTestId('song-card')).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    await expect(page.getByTestId('song-card')).toHaveCount(5, { timeout: PARSE_TIMEOUT });
     expect((await cardTitles(page))[0]).toBe('주 신실하심 놀라워');
 
     await page.getByTestId('notice-input').fill(NOTICE);
@@ -1053,9 +1074,6 @@ test.describe('the 카톡 공지 pasted with the conti', () => {
     await page.getByTestId('notice-input').fill(NOTICE);
     await page.getByTestId('notice-apply').click();
     await expect.poll(() => cardTitles(page)).toEqual(final);
-    await expect(
-      page.locator('.toast-text', { hasText: "공동체 고백은 공지대로 '우리는 주의 움직이는 교회'" }),
-    ).toBeVisible();
 
     await moveFromLyricsToDownload(page);
     const dlPromise = page.waitForEvent('download');
@@ -1216,8 +1234,8 @@ test('admin panel sets the 공동체 고백송 and the back slides print it', as
   await page.getByTestId('admin-unlock').click();
 
   const input = page.getByTestId('admin-confession-song');
-  await expect(input).toHaveValue('Celebrate the Light');
-  await expect(page.getByTestId('admin-confession-status')).toContainText('Celebrate the Light');
+  await expect(input).toHaveValue('우리는 주의 움직이는 교회');
+  await expect(page.getByTestId('admin-confession-status')).toContainText('우리는 주의 움직이는 교회');
   await input.fill('주 은혜임을');
   await page.getByTestId('admin-confession-save').click();
   // The status line reports what the generator will actually do with it.

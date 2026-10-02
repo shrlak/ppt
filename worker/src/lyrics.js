@@ -23,6 +23,8 @@ import {
 } from './lyricsSources.js';
 import { linkOnlyCandidate, publicCandidate, rankLyricsCandidates } from './lyricsCandidates.js';
 import { decodeHtmlEntities } from './lyricsHtml.js';
+import { extractGenericLyrics } from './lyricsSources.js';
+import { BROWSER_USER_AGENT, bugsLyricsHtml, bugsSearchUrl, extractBugsSongHits } from './praiseEnglishWeb.js';
 
 // Re-exported so existing importers (and the unit tests) keep one entry point
 // for the whole lookup chain.
@@ -61,6 +63,8 @@ const SEARCH_ENDPOINTS = [
 /** Per-request ceilings, so one lookup can never stall the Worker. */
 const FETCH_TIMEOUT_MS = 6000;
 const MAX_CANDIDATES = 3;
+/** Bugs track pages read per lookup, on top of the searched pages. */
+const MAX_BUGS_TRACKS = 2;
 const MAX_HTML_BYTES = 900_000;
 
 /** Search phrasings, most specific first. An artist narrows a common title. */
@@ -172,6 +176,8 @@ export async function fetchLyricsCandidates(query, env = {}) {
   const queries = buildSearchQueries(query.title, query.artist);
   if (queries.length === 0) return { candidates: [], links: [] };
   const adapters = activeSourceAdapters(env);
+  // Bugs is asked directly, alongside the web search, where this deployment may read it.
+  const bugsTracks = bugsScrapingAllowed(env) ? searchBugsTracks(query.title) : Promise.resolve([]);
 
   const urls = [];
   const links = [];
@@ -201,23 +207,69 @@ export async function fetchLyricsCandidates(query, env = {}) {
     if (urls.length >= MAX_CANDIDATES) break;
   }
 
-  const candidates = [];
-  for (const url of urls.slice(0, MAX_CANDIDATES)) {
-    try {
-      const response = await fetchWithTimeout(url);
-      if (!response.ok) continue;
-      // Re-check where we actually landed: an allowlisted host may redirect.
-      const finalUrl = response.url || url;
-      const adapter = adapterForUrl(finalUrl, adapters);
-      if (!adapter) continue;
-      const candidate = adapter.extract(await readBoundedText(response), finalUrl, adapter);
-      if (candidate) candidates.push(candidate);
-    } catch {
-      // Skip a page that refuses the fetch; the next candidate may work.
-    }
-  }
+  const fromBugs = await bugsTracks;
+  const pages = [...fromBugs, ...urls.filter((url) => !fromBugs.includes(url)).slice(0, MAX_CANDIDATES)];
+  // Read together: one slow site must not hold the others past the browser's wait.
+  const read = await Promise.all(
+    pages.map(async (url) => {
+      try {
+        const bugs = isBugsUrl(url);
+        const response = await fetchWithTimeout(url, bugs ? { headers: { 'User-Agent': BROWSER_USER_AGENT } } : {});
+        if (!response.ok) return null;
+        // Re-check where we actually landed: an allowlisted host may redirect.
+        const finalUrl = response.url || url;
+        const adapter = adapterForUrl(finalUrl, adapters);
+        if (!adapter) return null;
+        const html = await readBoundedText(response);
+        return adapter.id === BUGS_ADAPTER.id
+          ? bugsLyricsCandidate(html, finalUrl, adapter)
+          : adapter.extract(html, finalUrl, adapter);
+      } catch {
+        // Skip a page that refuses the fetch; another candidate may work.
+        return null;
+      }
+    }),
+  );
+  const candidates = read.filter((candidate) => candidate !== null);
 
   return { candidates: rankLyricsCandidates(query, candidates).map(publicCandidate), links };
+}
+
+/**
+ * Bugs's own track search for the title: the track pages of this song, sung.
+ *
+ * A web search rarely ranks a Bugs track page for a worship song, while
+ * Bugs's search finds it by the title the way a person would — and its
+ * track pages carry the lyrics as typed. Bugs serves its pages to a browser
+ * only. An unreachable Bugs is no tracks, never a failed lookup.
+ */
+export async function searchBugsTracks(title, limit = MAX_BUGS_TRACKS) {
+  if (!String(title || '').trim()) return [];
+  try {
+    const response = await fetchWithTimeout(bugsSearchUrl(title), { headers: { 'User-Agent': BROWSER_USER_AGENT } });
+    if (!response.ok) return [];
+    return extractBugsSongHits(await readBoundedText(response), title, limit).map((hit) => hit.url);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A Bugs track page as a candidate: only the lyrics block Bugs prints, the
+ * track's title and artist from the page's `제목 / 아티스트` heading.
+ */
+export function bugsLyricsCandidate(html, url, adapter) {
+  const lyrics = bugsLyricsHtml(html);
+  if (!lyrics) return null;
+  const candidate = extractGenericLyrics(lyrics, url, adapter);
+  if (!candidate) return null;
+  const heading = String(html || '').match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? '';
+  const [title, ...artist] = decodeHtmlEntities(heading).split(/\s+\/\s+/);
+  return {
+    ...candidate,
+    title: title.trim() || candidate.title,
+    ...(artist.length > 0 && artist.join(' / ').trim() ? { artist: artist.join(' / ').trim() } : {}),
+  };
 }
 
 /** Bugs result links from a search page, for the permission-off case. */

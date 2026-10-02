@@ -14,9 +14,11 @@ import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib
 import {
   applyAnnouncementToEntries,
   isAnnouncedConfession,
+  isSameSong,
   matchAnnouncement,
   noticeOutcome,
   parseWorshipAnnouncement,
+  settlePostSermonEntry,
   type WorshipAnnouncement,
 } from '../lib/utils/announcement';
 import {
@@ -76,7 +78,7 @@ import { dataUrlToBytes, resizeTrainingImage } from '../lib/learning/trainingCor
 import { loadActiveCorrectionRunner, uploadTrainingRecord } from '../lib/learning/learningClient';
 import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
-import { fetchWebLyrics, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
+import { fetchWebLyricsForTitles, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { findSection } from '../lib/utils/slidePlanner';
@@ -386,6 +388,10 @@ export default function LyricsGenerator({
   // made for them and their lyrics are never read; recognition only reads
   // their titles, so a listed song whose score sits on one can claim it.
   const sparePagesRef = useRef<number[]>([]);
+  // This deck's 설교 후 찬양, when it was added rather than read off the
+  // conti's list: an unnamed 악보 page that turns out to be the same song is
+  // the same card, not a second one.
+  const postSermonTitleRef = useRef<string | null>(null);
   // Settles once the open conti's 악보 previews are drawn; recognition waits
   // on it so the cards' pages are drawn before its larger copies.
   const previewsRef = useRef<Promise<void>>(Promise.resolve());
@@ -632,7 +638,12 @@ export default function LyricsGenerator({
    * the song was removed, so callers stop processing it.
    */
   const excludeRecognizedSong = useCallback((song: Song, title: string, excludedTitles: string[]) => {
-    if (!isExcludedTitle(title, excludedTitles)) return false;
+    // An unnamed page that reads as the 설교 후 찬양 already on its own card
+    // (the default 영접송, filled from the library) is that card's song.
+    const postSermon = postSermonTitleRef.current;
+    const isPostSermonCopy =
+      !!postSermon && !song.postSermon && isPlaceholderTitle(song.title) && isSameSong(title, postSermon);
+    if (!isPostSermonCopy && !isExcludedTitle(title, excludedTitles)) return false;
     scanCancelledRef.current.add(song.id);
     autoAttemptedRef.current.add(song.id);
     setSongs((list) => list.filter((s) => s.id !== song.id));
@@ -640,7 +651,11 @@ export default function LyricsGenerator({
       const { [song.id]: _dropped, ...rest } = r;
       return rest;
     });
-    showToast(`'${title}'은(는) 제외 목록에 있어 찬양 편집에서 제외했습니다.`);
+    showToast(
+      isPostSermonCopy
+        ? `'${title}' 악보는 설교 후 찬양 '${postSermon}' 카드와 같은 곡이라 따로 넣지 않았습니다.`
+        : `'${title}'은(는) 제외 목록에 있어 찬양 편집에서 제외했습니다.`,
+    );
     return true;
   }, []);
 
@@ -848,8 +863,10 @@ export default function LyricsGenerator({
           pending.map(async ([id, { score, engine, title }]) => {
             // What the models read is sent as matching evidence, so a page
             // that merely shares this title cannot be mistaken for this song.
+            // The title read off the 악보 is searched as well as the conti's
+            // (or the notice's): a site such as 벅스 may list it under either.
             const lookup = title
-              ? await fetchWebLyrics({ title, sample: lyricSample(score.sections) })
+              ? await fetchWebLyricsForTitles([score.title, title], { sample: lyricSample(score.sections) })
               : { candidates: [], links: [] };
             if (isCancelled(id)) return;
             const auto = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
@@ -1822,33 +1839,46 @@ export default function LyricsGenerator({
       const contiSongs = hasCover
         ? parsed.info.songs
         : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, lib);
-      // A pasted 카톡 공지 makes the list final: its songs, order, names and
-      // keys, each with the 악보 page and commentary the conti gives it.
-      const byNotice = notice ? applyAnnouncementToEntries(contiSongs, notice, parsed.musicPages) : null;
-      const baseSongs = byNotice?.entries ?? contiSongs;
+      // Which song is the 공동체 고백송 is an administrator setting (read
+      // above) — or this week's notice — and it also decides which entry is
+      // the 설교 후 찬양 (the one listed after it).
+      // A 찬양집회 conti is all praise: nothing is set aside as the 공동체
+      // 고백송, and nothing moves after a sermon.
+      const split =
+        service === 'praise'
+          ? { lyricsSongs: contiSongs, confessionSong: undefined, postSermonSong: undefined }
+          : splitLyricsAndConfessionSongs(contiSongs, notice?.confession?.title ?? shared.confessionSong);
+      const { confessionSong } = split;
+      const excludedPages = new Set<number>();
+      if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
+      const settled =
+        service === 'praise'
+          ? undefined
+          : settlePostSermonEntry(split.lyricsSongs, split.postSermonSong, notice, shared.postSermonSong);
+      const postSermonSong = settled?.entry;
+      const praiseEntries = split.lyricsSongs.filter((entry) => entry !== settled?.replaces);
+      // A pasted 카톡 공지 makes the 찬양 list final: its songs, order, names
+      // and keys, each with the 악보 page and commentary the conti gives it.
+      const byNotice = notice
+        ? applyAnnouncementToEntries(
+            praiseEntries,
+            notice,
+            parsed.musicPages.filter((page) => !excludedPages.has(page) && page !== postSermonSong?.pageIndex),
+          )
+        : null;
+      const lyricsSongs = [...(byNotice?.entries ?? praiseEntries), ...(postSermonSong ? [postSermonSong] : [])];
       // The service's songs are known (from the cover or the notice), so a
       // score page none of them holds is not a song of this service.
       const listedOrder = hasCover || !!byNotice;
       const detected: ContiInfo = notice
         ? {
             ...parsed.info,
-            songs: baseSongs,
+            songs: lyricsSongs,
             date: parsed.info.date ?? notice.date,
             sermonTitle: parsed.info.sermonTitle ?? notice.theme,
             scripture: parsed.info.scripture ?? notice.scripture,
           }
         : parsed.info;
-      // Which song is the 공동체 고백송 is an administrator setting (read
-      // above), and it also decides which entry is the 설교 후 찬양 (the one
-      // listed after it).
-      // A 찬양집회 conti is all praise: nothing is set aside as the 공동체
-      // 고백송, and nothing moves after a sermon.
-      const { lyricsSongs, confessionSong, postSermonSong } =
-        service === 'praise'
-          ? { lyricsSongs: baseSongs, confessionSong: undefined, postSermonSong: undefined }
-          : splitLyricsAndConfessionSongs(baseSongs, shared.confessionSong);
-      const excludedPages = new Set<number>();
-      if (confessionSong?.pageIndex != null) excludedPages.add(confessionSong.pageIndex);
 
       for (const entry of lyricsSongs) {
         // The conti names the song: when 찬양 라이브러리 already holds that
@@ -1897,7 +1927,13 @@ export default function LyricsGenerator({
       // their own pages (see recognizeSongsBatch). Without a cover, every
       // page is a song and none is spare.
       const unlisted = parsed.musicPages.filter((page) => !assigned.has(page) && !excludedPages.has(page));
+      // A 설교 후 찬양 the library has no lyrics for is read off the conti:
+      // it takes the first page no song holds, and the title pass moves it
+      // to the page its title is printed on.
+      const unreadPostSermon = next.find((song) => song.postSermon && song.pageIndex == null && !songHasLyrics(song));
+      if (unreadPostSermon && listedOrder && unlisted.length > 0) unreadPostSermon.pageIndex = unlisted.shift();
       sparePagesRef.current = listedOrder ? unlisted : [];
+      postSermonTitleRef.current = postSermonSong?.title ?? null;
 
       // Cover-listed songs on the administrator exclusion list (공동체
       // 고백송, 예배 전 준비 찬양 등) never become cards in the first place.
@@ -1930,7 +1966,7 @@ export default function LyricsGenerator({
       onConfessionDetected?.(notice?.confession?.title);
       if (byNotice) {
         setAppliedNotice(noticeText);
-        reportNotice(notice as WorshipAnnouncement, byNotice, baseSongs.length, shared.confessionSong, lib);
+        reportNotice(notice as WorshipAnnouncement, byNotice, byNotice.entries.length, shared.confessionSong, lib);
       }
       if (!listedOrder && next.length > 0) {
         showToast(
@@ -2108,7 +2144,11 @@ export default function LyricsGenerator({
     if (!notice) return;
     const lib = library.length > 0 ? library : ((await libraryPromiseRef.current) ?? []);
     const shared = await getSyncedAiSettings();
-    const cards = songs.filter((song) => !isAnnouncedConfession(song.title, notice));
+    // The 설교 후 찬양 is not one of the 찬양곡 — unless the notice sings it there.
+    const inNotice = (song: Song) => notice.songs.some((announced) => isSameSong(announced.title, song.title));
+    const cards = songs.filter(
+      (song) => !isAnnouncedConfession(song.title, notice) && (!song.postSermon || inNotice(song)),
+    );
     const { pairs, dropped } = matchAnnouncement(cards, notice.songs);
     const fromLibrary = (title: string, pageIndex: number | undefined, base?: Song): Song | null => {
       const hit = findLibrarySong(lib, { title });
@@ -2125,12 +2165,34 @@ export default function LyricsGenerator({
         const renamed = normalizeTitle(item.title) !== normalizeTitle(announced.title);
         // A renamed card with nothing in it yet may be saved under its new name.
         const base = renamed && !songHasLyrics(item) ? (fromLibrary(announced.title, item.pageIndex, item) ?? item) : item;
-        return { ...base, title: announced.title, key: announced.key ?? base.key };
+        // Listed among the 찬양곡, it is sung in the opening set.
+        return { ...base, title: announced.title, key: announced.key ?? base.key, postSermon: undefined };
       }
       const pageIndex = free.shift();
       const song = fromLibrary(announced.title, pageIndex) ?? blankSong(announced.title, linesPerSlide);
       return { ...song, title: announced.title, key: announced.key ?? song.key, pageIndex };
     });
+    // The card already sung after the sermon stays, unless the notice names
+    // another; with none, the default.
+    const current = songs.find((song) => song.postSermon && !inNotice(song));
+    const wanted =
+      service === 'praise'
+        ? undefined
+        : (notice.postSermon ??
+          (current || !shared.postSermonSong.trim() || notice.songs.some((song) => isSameSong(song.title, shared.postSermonSong))
+            ? undefined
+            : { title: shared.postSermonSong.trim() }));
+    let postSermon = current;
+    if (wanted && !(current && isSameSong(current.title, wanted.title))) {
+      const fromLib = fromLibrary(wanted.title, undefined);
+      const pageIndex = fromLib || !docRef.current ? undefined : free.shift();
+      const song = fromLib ?? blankSong(wanted.title, linesPerSlide);
+      postSermon = { ...song, title: wanted.title, key: wanted.key ?? song.key, pageIndex };
+    }
+    if (postSermon) {
+      next.push({ ...postSermon, postSermon: true });
+      postSermonTitleRef.current = postSermon.title;
+    }
     sparePagesRef.current = docRef.current ? free : [];
     setSongs(next);
     setEdited(true);

@@ -40,6 +40,12 @@ export function lyricsHosts(env?: Record<string, string | undefined>): string[];
 export function buildSearchQueries(title: string, artist?: string): string[];
 export function isAllowedLyricsUrl(rawUrl: string, env?: Record<string, string | undefined>): boolean;
 export function isBugsUrl(rawUrl: string): boolean;
+export function searchBugsTracks(title: string, limit?: number): Promise<string[]>;
+export function bugsLyricsCandidate(
+  html: string,
+  url: string,
+  adapter: { id: string; trust: number },
+): { title: string; artist?: string; lines: string[]; url: string; host: string; source: string } | null;
 export function extractSearchResultUrls(
   html: string,
   limit?: number,

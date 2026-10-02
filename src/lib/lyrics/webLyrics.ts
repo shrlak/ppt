@@ -180,3 +180,40 @@ export async function fetchWebLyrics(
     signal?.removeEventListener('abort', onAbort);
   }
 }
+
+/**
+ * Look a song up under every title it is known by — the one read off its
+ * 악보 and the one the conti or 카톡 공지 gives it — and pool what comes back.
+ *
+ * The two can differ (`주 신실하심 놀라워` on the score, `주님의 은혜 넘치네`
+ * in the notice), and a lyrics site may list the song under either. Each
+ * title is searched once, together; a page both find is kept once, at its
+ * better score, and the pool is ordered best first.
+ */
+export async function fetchWebLyricsForTitles(
+  titles: (string | undefined)[],
+  query: Omit<WebLyricsQuery, 'title'> = {},
+  signal?: AbortSignal,
+): Promise<WebLyricsLookup> {
+  const seen = new Set<string>();
+  const distinct = titles
+    .map((title) => title?.trim() ?? '')
+    .filter((title) => {
+      const key = title.replace(/\s+/g, '').toLowerCase();
+      if (!title || /^새 찬양/.test(title) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  const lookups = await Promise.all(distinct.map((title) => fetchWebLyrics({ ...query, title }, signal)));
+  const byId = new Map<string, ScoredLyricsCandidate>();
+  for (const candidate of lookups.flatMap((lookup) => lookup.candidates)) {
+    const known = byId.get(candidate.id);
+    if (!known || candidate.score > known.score) byId.set(candidate.id, candidate);
+  }
+  const links = new Map<string, LyricsSourceLink>();
+  for (const link of lookups.flatMap((lookup) => lookup.links)) links.set(link.url, link);
+  return {
+    candidates: [...byId.values()].sort((a, b) => b.score - a.score),
+    links: [...links.values()],
+  };
+}

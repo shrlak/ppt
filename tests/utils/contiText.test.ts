@@ -587,7 +587,7 @@ describe('deriveSongsFromMusicPages', () => {
       { title: 'Celebrate the Light', key: 'G', sections: [{ label: 'C', lines: ['가사'] }], order: ['C'] },
     ];
     const songs = deriveSongsFromMusicPages(['a', 'Celebrate the Light', 'c'], [1, 2, 3], withConfession);
-    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs);
+    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs, 'Celebrate the Light');
     expect(lyricsSongs.map((s) => s.pageIndex)).toEqual([1, 3]);
     expect(confessionSong?.pageIndex).toBe(2);
   });
@@ -600,9 +600,21 @@ describe('splitLyricsAndConfessionSongs', () => {
       { title: 'Celebrate The Light!', key: 'G' },
       { title: '입례', key: 'F' },
     ];
-    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs);
+    const { lyricsSongs, confessionSong } = splitLyricsAndConfessionSongs(songs, 'Celebrate the Light');
     expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '입례']);
     expect(confessionSong?.title).toBe('Celebrate The Light!');
+  });
+
+  it('takes 우리는 주의 움직이는 교회 as the 고백송 by default', () => {
+    const songs = [
+      { title: '주님의 사랑', key: 'E' },
+      { title: '우리는 주의 움직이는 교회', key: 'G' },
+      { title: '영접송', key: 'G' },
+    ];
+    const { lyricsSongs, confessionSong, postSermonSong } = splitLyricsAndConfessionSongs(songs);
+    expect(confessionSong?.title).toBe('우리는 주의 움직이는 교회');
+    expect(postSermonSong?.title).toBe('영접송');
+    expect(lyricsSongs.map((song) => song.title)).toEqual(['주님의 사랑', '영접송']);
   });
 
   it('keeps every song — including a final 입례 — when the 고백송 is absent', () => {
@@ -637,7 +649,7 @@ describe('splitLyricsAndConfessionSongs', () => {
       { title: '축복하노라', key: 'F' },
       { title: '입례', key: 'F' },
     ];
-    const { lyricsSongs, postSermonSong } = splitLyricsAndConfessionSongs(songs);
+    const { lyricsSongs, postSermonSong } = splitLyricsAndConfessionSongs(songs, 'Celebrate the Light');
     expect(postSermonSong?.title).toBe('축복하노라');
     // It still needs generated lyric slides — only its position in the deck
     // differs, so it stays in the list the 찬양 step edits.
@@ -646,7 +658,7 @@ describe('splitLyricsAndConfessionSongs', () => {
 
   it('leaves the 설교 후 찬양 unset when the 고백송 is last or absent', () => {
     expect(
-      splitLyricsAndConfessionSongs([{ title: '주님의 사랑' }, { title: 'Celebrate the Light' }])
+      splitLyricsAndConfessionSongs([{ title: '주님의 사랑' }, { title: 'Celebrate the Light' }], 'Celebrate the Light')
         .postSermonSong,
     ).toBeUndefined();
     expect(

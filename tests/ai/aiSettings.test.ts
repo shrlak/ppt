@@ -3,6 +3,8 @@ import {
   DEFAULT_ATTEMPT_ORDER,
   DEFAULT_CONFESSION_SONG,
   DEFAULT_EXCLUDED_TITLES,
+  DEFAULT_POST_SERMON_SONG,
+  SETTINGS_DEFAULTS_VERSION,
   RECOGNITION_MODEL_CATALOG,
   attemptKey,
   findModelInfo,
@@ -18,6 +20,7 @@ import {
   OPENROUTER_NEMOTRON_MODEL,
   RECOGNITION_MODEL_CATALOG as WORKER_CATALOG,
   DEFAULT_CONFESSION_SONG as WORKER_CONFESSION,
+  DEFAULT_POST_SERMON_SONG as WORKER_POST_SERMON,
   DEFAULT_EXCLUDED_TITLES as WORKER_EXCLUDED,
   migrateEngineName as workerMigrateEngineName,
   resolveOpenRouterRoute,
@@ -63,6 +66,7 @@ describe('recognition model catalog', () => {
     ).toEqual(WORKER_CATALOG);
     expect(DEFAULT_EXCLUDED_TITLES).toEqual(WORKER_EXCLUDED);
     expect(DEFAULT_CONFESSION_SONG).toBe(WORKER_CONFESSION);
+    expect(DEFAULT_POST_SERMON_SONG).toBe(WORKER_POST_SERMON);
   });
 
   it('pins every OpenRouter fallback to an allowlisted free vision model', () => {
@@ -177,6 +181,32 @@ describe('sanitizeConfessionSong', () => {
   it('keeps an explicitly blank title (leave the back slides alone)', () => {
     expect(sanitizeConfessionSong('   ')).toBe('');
   });
+
+  it('defaults to 우리는 주의 움직이는 교회', () => {
+    expect(DEFAULT_CONFESSION_SONG).toBe('우리는 주의 움직이는 교회');
+  });
+
+  it('moves settings saved under the old default to the new one, once', () => {
+    // Saved before version 2: Celebrate the Light was there only as the default.
+    expect(sanitizeSharedSettings({ confessionSong: 'Celebrate the Light' }).confessionSong).toBe(
+      DEFAULT_CONFESSION_SONG,
+    );
+    // Any other song an administrator chose is kept.
+    expect(sanitizeSharedSettings({ confessionSong: '주 은혜임을' }).confessionSong).toBe('주 은혜임을');
+    // Chosen again after the change, Celebrate the Light stays.
+    expect(
+      sanitizeSharedSettings({ confessionSong: 'Celebrate the Light', defaultsVersion: SETTINGS_DEFAULTS_VERSION })
+        .confessionSong,
+    ).toBe('Celebrate the Light');
+  });
+});
+
+describe('the default 설교 후 찬양', () => {
+  it('is 영접송, and can be changed or cleared', () => {
+    expect(sanitizeSharedSettings({}).postSermonSong).toBe('영접송');
+    expect(sanitizeSharedSettings({ postSermonSong: ' 축복하노라 ' }).postSermonSong).toBe('축복하노라');
+    expect(sanitizeSharedSettings({ postSermonSong: '' }).postSermonSong).toBe('');
+  });
 });
 
 describe('shared settings sanitizers (client vs proxy)', () => {
@@ -189,8 +219,13 @@ describe('shared settings sanitizers (client vs proxy)', () => {
       ],
       excludedTitles: [' 공동체 고백송 ', 42, '준비 찬양'],
       confessionSong: '  나의 반석이신 하나님  ',
+      postSermonSong: ' 영접송 ',
     };
     expect(sanitizeSharedSettings(raw)).toEqual(workerSanitize(raw));
+    // The one-time move off the old default happens on both sides alike.
+    expect(sanitizeSharedSettings({ confessionSong: 'Celebrate the Light' })).toEqual(
+      workerSanitize({ confessionSong: 'Celebrate the Light' }),
+    );
   });
 });
 

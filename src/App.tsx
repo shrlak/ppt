@@ -19,7 +19,7 @@ import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
 import { applyConfessionSong } from './lib/pptx/confessionSlides';
 import { lookupDeckConfessionSong } from './lib/utils/confessionSong';
-import { DEFAULT_CONFESSION_SONG } from './lib/ai/aiSettings';
+import { BUNDLED_CONFESSION_SONG } from './lib/ai/aiSettings';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from './lib/pptx/pptxRenderer';
 import ToastHost from './components/ToastHost';
 import AdminPanel from './components/AdminPanel';
@@ -100,7 +100,7 @@ const FRONT_SLIDE_COUNT = 5;
 const BACK_SLIDE_COUNT = 21;
 /**
  * Lyric slides the bundled back deck prints for its own 공동체 고백송
- * (DEFAULT_CONFESSION_SONG). A different confession song replaces exactly
+ * (BUNDLED_CONFESSION_SONG). A different confession song replaces exactly
  * those, so the deck ends up that many slides longer or shorter — which is
  * all the pre-generation slide count needs to stay honest.
  */
@@ -735,7 +735,7 @@ function SundayApp() {
   const confessionSlideDelta =
     !customDecks.back &&
     confessionSlideCount > 0 &&
-    confessionSongTitle.trim().toLowerCase() !== DEFAULT_CONFESSION_SONG.toLowerCase()
+    confessionSongTitle.trim().toLowerCase() !== BUNDLED_CONFESSION_SONG.toLowerCase()
       ? confessionSlideCount - BUNDLED_CONFESSION_LYRIC_SLIDES
       : 0;
   const fixedSlideCount =

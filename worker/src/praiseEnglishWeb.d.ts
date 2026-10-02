@@ -41,6 +41,12 @@ export function bugsTrackId(url: string): string;
 export function bugsTitleNames(trackTitle: string, title: string): boolean;
 export function extractBugsTrackHits(html: string, title: string): (EnglishSearchHit & { englishTitle: string })[];
 export function bugsLyricsHtml(html: string): string;
+export function extractBugsSongHits(
+  html: string,
+  title: string,
+  limit?: number,
+): (EnglishSearchHit & { artist?: string })[];
+export const BROWSER_USER_AGENT: string;
 export function englishCandidateFromPage(
   html: string,
   page: { url: string; host: string; heading?: string; englishTitle?: string },

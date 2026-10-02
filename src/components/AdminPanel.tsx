@@ -9,6 +9,7 @@ import { clearCustomDeck, getCustomDeck, setCustomDeck, type DeckSlot, type Stor
 import {
   attemptKey,
   DEFAULT_CONFESSION_SONG,
+  DEFAULT_POST_SERMON_SONG,
   fetchSharedSettings,
   findModelInfo,
   hasSharedSettings,
@@ -21,7 +22,7 @@ import {
   type ModelRole,
 } from '../lib/ai/aiSettings';
 import { lookupConfessionSong } from '../lib/utils/confessionSong';
-import { fetchBundledLibrary, loadUserLibrary, mergeLibraries } from '../lib/storage/library';
+import { fetchBundledLibrary, findEntry, loadUserLibrary, mergeLibraries } from '../lib/storage/library';
 import { showToast } from '../lib/utils/toast';
 import { ADMIN_PASSWORD, ADMIN_UNLOCK_KEY } from '../lib/adminAuth';
 import Icon from './Icon';
@@ -224,6 +225,7 @@ function RecognitionSettingsSection() {
   const [settings, setSettings] = useState<SharedRecognitionSettings>(() => loadLocalSharedSettings());
   const [excludedText, setExcludedText] = useState(() => settings.excludedTitles.join('\n'));
   const [confessionText, setConfessionText] = useState(() => settings.confessionSong);
+  const [postSermonText, setPostSermonText] = useState(() => settings.postSermonSong);
   // Deployment state rather than a setting: only the Worker's environment can
   // grant permission to read Bugs pages, so this is displayed, never toggled.
   const [bugsScrapingAllowed, setBugsScrapingAllowed] = useState(false);
@@ -246,6 +248,7 @@ function RecognitionSettingsSection() {
         setSettings(shared);
         setExcludedText(shared.excludedTitles.join('\n'));
         setConfessionText(shared.confessionSong);
+        setPostSermonText(shared.postSermonSong);
         setBugsScrapingAllowed(!!(shared as { bugsScrapingAllowed?: boolean }).bugsScrapingAllowed);
         setSync({ state: 'synced', message: '모든 기기와 동기화되어 있습니다.' });
       } else {
@@ -304,6 +307,17 @@ function RecognitionSettingsSection() {
     );
   }
 
+  function savePostSermonSong() {
+    const postSermonSong = postSermonText.trim();
+    setPostSermonText(postSermonSong);
+    persist({ ...settings, postSermonSong });
+    showToast(
+      postSermonSong
+        ? `설교 후 찬양 기본 곡을 '${postSermonSong}'으로 저장했습니다.`
+        : '설교 후 찬양 기본 곡을 비웠습니다 — 콘티에 적힌 곡만 설교 후 찬양으로 넣습니다.',
+    );
+  }
+
   function saveExcluded() {
     const excludedTitles = sanitizeExcludedTitles(excludedText.split('\n'));
     setExcludedText(excludedTitles.join('\n'));
@@ -351,6 +365,12 @@ function RecognitionSettingsSection() {
         onChange={setConfessionText}
         onSave={saveConfessionSong}
       />
+      <PostSermonSongSection
+        savedTitle={settings.postSermonSong}
+        value={postSermonText}
+        onChange={setPostSermonText}
+        onSave={savePostSermonSong}
+      />
       <section className="admin-deck admin-recognition" data-testid="admin-excluded-section">
         <div className="admin-deck-info">
           <h4>찬양 편집 제외 곡</h4>
@@ -375,6 +395,80 @@ function RecognitionSettingsSection() {
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * The 설교 후 찬양 a Sunday deck gets when its conti names none. Like the
+ * 고백송, only the title is stored; the lyrics come from the 곡 라이브러리,
+ * and the status line says whether the library has them.
+ */
+function PostSermonSongSection({
+  savedTitle,
+  value,
+  onChange,
+  onSave,
+}: {
+  savedTitle: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const [status, setStatus] = useState('확인 중…');
+  const [tone, setTone] = useState<'synced' | 'error' | 'local'>('local');
+
+  useEffect(() => {
+    let cancelled = false;
+    const title = savedTitle.trim();
+    if (!title) {
+      setTone('local');
+      setStatus('비워 두면 콘티에 적힌 곡만 설교 후 찬양으로 넣습니다.');
+      return;
+    }
+    void fetchBundledLibrary(BASE).then((bundled) => {
+      if (cancelled) return;
+      const found = findEntry(mergeLibraries(bundled, loadUserLibrary()), title);
+      const hasLyrics = !!found?.sections.some((section) => section.lines.some((line) => line.trim()));
+      setTone(hasLyrics ? 'synced' : 'error');
+      setStatus(
+        hasLyrics
+          ? `'${found?.title}' — 콘티에 설교 후 찬양이 없으면 라이브러리 가사로 넣습니다.`
+          : `라이브러리에 '${title}' 가사가 없어, 콘티에 그 악보가 있으면 인식해서 넣습니다.`,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [savedTitle]);
+
+  return (
+    <section className="admin-deck admin-recognition" data-testid="admin-post-sermon-section">
+      <div className="admin-deck-info">
+        <h4>설교 후 찬양 (기본)</h4>
+        <p>
+          콘티에 설교 후 찬양이 따로 적혀 있지 않으면 이 곡을 <strong>설교 후 찬양</strong>으로 넣어,
+          설교 뒤 기도 슬라이드 다음에 둡니다. 카톡 공지에 <code>설교 후 찬양:</code>이 적혀 있으면
+          그 곡이 우선합니다. 모든 기기에 적용됩니다.
+        </p>
+        <input
+          className="admin-excluded-input"
+          data-testid="admin-post-sermon-song"
+          list="admin-confession-titles"
+          placeholder={DEFAULT_POST_SERMON_SONG}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <p className={`admin-sync admin-sync-${tone}`} data-testid="admin-post-sermon-status" role="status">
+          {status}
+        </p>
+      </div>
+      <div className="admin-deck-actions">
+        <button type="button" className="btn" data-testid="admin-post-sermon-save" onClick={onSave}>
+          <Icon name="save" />
+          설교 후 찬양 저장
+        </button>
+      </div>
+    </section>
   );
 }
 

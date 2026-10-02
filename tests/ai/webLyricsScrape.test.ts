@@ -275,3 +275,65 @@ describe('candidate lookup', () => {
     }
   });
 });
+
+describe('reading Korean lyrics off Bugs, where the deployment allows it', () => {
+  const TITLE = '가나다라 마바사';
+  const bugsSearch = () => `<table><tbody>
+    <tr trackId="11"><th><p class="title"><a>${TITLE}</a></p></th><td><p class="artist"><a>어느 사역팀</a></p></td></tr>
+    <tr trackId="12"><th><p class="title"><a>${TITLE} (Inst.)</a></p></th><td><p class="artist"><a>어느 사역팀</a></p></td></tr>
+    <tr trackId="13"><th><p class="title"><a>${TITLE} 살리라</a></p></th><td><p class="artist"><a>다른 팀</a></p></td></tr>
+  </tbody></table>`;
+  const bugsTrack = () => `<html><head><meta property="og:title" content="${TITLE} / 어느 사역팀"/></head><body>
+    <div class="trackInfo"><p>지금 바로 앱에서 들어보세요</p></div>
+    <div class="lyricsContainer"><p><xmp>${SAMPLE.slice(0, 2).join('\n')}
+
+${SAMPLE.slice(2).join('\n')}</xmp></p></div></body></html>`;
+
+  it('searches Bugs by the title and reads the lyrics of the sung track of that title', async () => {
+    const fetched: { url: string; agent: string | null }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      fetched.push({ url, agent: new Headers(init?.headers).get('User-Agent') });
+      if (url.startsWith('https://music.bugs.co.kr/search/track')) return new Response(bugsSearch(), { status: 200 });
+      if (url === 'https://music.bugs.co.kr/track/11') return new Response(bugsTrack(), { status: 200 });
+      // The web search finds nothing this time.
+      return new Response('<html></html>', { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchLyricsCandidates(
+        { title: TITLE, sample: SAMPLE.join('').replace(/\s+/g, '') },
+        { BUGS_SCRAPING_ALLOWED: 'true' },
+      );
+      const search = fetched.find(({ url }) => url.includes('/search/track'));
+      expect(new URL(search!.url).searchParams.get('q')).toBe(TITLE);
+      // Only the sung track of exactly this title is opened.
+      expect(fetched.filter(({ url }) => url.includes('/track/')).map(({ url }) => url)).toEqual([
+        'https://music.bugs.co.kr/track/11',
+      ]);
+      // Bugs answers a browser only.
+      expect(fetched.find(({ url }) => url.includes('/track/11'))?.agent).toMatch(/Chrome/);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]).toMatchObject({ source: 'bugs', title: TITLE, artist: '어느 사역팀', decision: 'auto' });
+      expect(result.candidates[0].lines.join(' ')).not.toMatch(/앱에서/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not ask Bugs at all while the deployment has not allowed it', async () => {
+    const fetched: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      fetched.push(String(input));
+      return new Response('<html></html>', { status: 200 });
+    }) as typeof fetch;
+    try {
+      await fetchLyricsCandidates({ title: TITLE, sample: '' }, {});
+      expect(fetched.some((url) => url.includes('bugs.co.kr'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
