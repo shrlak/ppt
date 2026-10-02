@@ -24,6 +24,24 @@ describe('alignPagesToConti', () => {
     expect(alignPagesToConti(['A곡', 'B곡', 'C곡'], ['A곡', 'B곡', 'C곡'])).toEqual([0, 1, 2]);
   });
 
+  it('takes a spare page only for a song whose title is on it', () => {
+    // Four listed songs, then two pages the order does not list. 그 사랑's
+    // score was printed over two pages, so every later song sits one late.
+    const songs = ['주 신실하심 놀라워', '그 사랑', '우리가 넉넉히 이기느니라', '임재'];
+    const pages = ['주 신실하심 놀라워', '그 사랑', '', '우리가 넉넉히 이기느니라', '임재', '우리는 주의 움직이는 교회'];
+    const slots = alignPagesToConti(songs, pages);
+    expect(slots).toEqual([0, 1, 3, 4]);
+    expect(new Set(slots).size).toBe(songs.length);
+  });
+
+  it('leaves the spare pages alone when every song is on its own page', () => {
+    expect(alignPagesToConti(['A곡', 'B곡'], ['A곡', 'B곡', '영접송', '고백송'])).toEqual([0, 1]);
+  });
+
+  it('keeps an unnamed song on its own page rather than a spare', () => {
+    expect(alignPagesToConti(['새 찬양 (1번)', 'B곡'], ['무슨 곡', 'B곡', 'C곡'])).toEqual([0, 1]);
+  });
+
   it('puts pages scanned out of order back in conti order', () => {
     const songs = ['주님의 사랑', '주 은혜임을', '매일매일'];
     const pages = ['매일매일', '주님의 사랑', '주 은혜임을'];

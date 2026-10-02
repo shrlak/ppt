@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lookupConfessionSong, songFromLibraryEntry } from '../../src/lib/utils/confessionSong';
+import { lookupConfessionSong, lookupDeckConfessionSong, songFromLibraryEntry } from '../../src/lib/utils/confessionSong';
 import type { LibraryEntry } from '../../src/lib/utils/types';
 
 const bundled: LibraryEntry[] = [
@@ -68,5 +68,31 @@ describe('songFromLibraryEntry', () => {
     song.order.push('C');
     expect(bundled[0].sections[0].lines[0]).toBe('우리에게 임하신 그의 빛으로 난');
     expect(bundled[0].order).toEqual(['V1', 'C']);
+  });
+});
+
+describe('lookupDeckConfessionSong', () => {
+  const weekly: LibraryEntry = {
+    title: '우리는 주의 움직이는 교회',
+    key: 'G',
+    sections: [{ label: 'V', lines: ['우리는 주의 움직이는 교회'] }],
+    order: ['V'],
+  };
+
+  it("prints the notice's 고백송 when the library has its lyrics", async () => {
+    stubLibrary([...bundled, weekly]);
+    const found = await lookupDeckConfessionSong('/', '우리는 주의 움직이는 교회');
+    expect(found.song?.title).toBe('우리는 주의 움직이는 교회');
+  });
+
+  it('falls back to the 관리자 설정 song when the notice names one the library lacks', async () => {
+    stubLibrary();
+    const found = await lookupDeckConfessionSong('/', '아직 저장 안 한 곡');
+    expect(found.song?.title).toBe('Celebrate the Light');
+  });
+
+  it('uses the 관리자 설정 song when no notice names one', async () => {
+    stubLibrary();
+    expect((await lookupDeckConfessionSong('/')).song?.title).toBe('Celebrate the Light');
   });
 });

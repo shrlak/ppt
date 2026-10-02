@@ -48,6 +48,13 @@ describe('deck source snapshots', () => {
     expect(decodeDeckSource(encodeDeckSource(source))!.songs[0]).not.toHaveProperty('postSermon');
   });
 
+  it("keeps the 공동체 고백 the week's notice chose for the deck", () => {
+    const decoded = decodeDeckSource(encodeDeckSource({ ...source, confessionSong: '우리는 주의 움직이는 교회' }));
+    expect(decoded?.confessionSong).toBe('우리는 주의 움직이는 교회');
+    // A deck that used 관리자 설정's song carries none.
+    expect(decodeDeckSource(encodeDeckSource(source))).not.toHaveProperty('confessionSong');
+  });
+
   it('treats a missing snapshot as "nothing to restore"', () => {
     expect(decodeDeckSource(null)).toBeNull();
     expect(decodeDeckSource(undefined)).toBeNull();

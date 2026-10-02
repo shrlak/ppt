@@ -301,6 +301,89 @@ describe('parseCoverText — a title written by hand', () => {
   });
 });
 
+describe('parseCoverText — Plan A, with a Plan B after it', () => {
+  // Laid out like the 2026.10.04 conti: the Plan A table, its commentary
+  // (the first bullet mistyping the title), then a Plan B with no order
+  // column, and a tablet's reading of handwriting drawn after everything.
+  const cover = [
+    '예배 찬양 콘티',
+    '본문 | 로마서 8 장 31 – 39 절',
+    '주제 | 끝까지 흔들리지 않을 이유',
+    '날짜 | 2026.10.04',
+    '1. 말씀 묵상',
+    '하나님의 사랑에서 우리를 끊을 수 없습니다.',
+    '2. 찬양 콘티 (Plan A)',
+    '순서 찬양 키',
+    '1 주 신실하심 놀라워 G',
+    '2 그 사랑 G',
+    '3 우리가 넉넉히 이기느니라 A',
+    '4 임재 G',
+    '• 주 신실하신 놀라워 (G Key)',
+    'o 하나님의 사랑과 은혜는 결코 우리를 놓지',
+    '않으십니다.',
+    '• 그 사랑 (G key)',
+    'o 변함 없으신 사랑입니다.',
+    '• 우리가 넉넉히 이기느니라 (A key)',
+    'o 로마서 8 장의 내용입니다.',
+    '주업의은혜 넘치네',
+    '예넘지네',
+    '3. 찬양 콘티 (PLAN B)',
+    '찬양 키',
+    '예수 피를 힘입어 G',
+    '그 사랑 얼마나 G',
+    '• 예수 피를 힘입어 (G key)',
+    'o 보혈에 힘입어 나아갑니다.',
+    '• 그 사랑 얼마나(G key)',
+    'o 영혼을 채워 주십니다.',
+    '4. 본문',
+    '31. 그런즉 이 일에 대하여 우리가 무슨 말 하리요',
+  ].join('\n');
+  const info = parseCoverText(cover);
+
+  it('lists the Plan A songs in their order, and nothing else', () => {
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['주 신실하심 놀라워', 'G'],
+      ['그 사랑', 'G'],
+      ['우리가 넉넉히 이기느니라', 'A'],
+      ['임재', 'G'],
+    ]);
+  });
+
+  it('gives a mistyped bullet to the row it describes instead of adding a song', () => {
+    expect(info?.songs[0].description).toContain('결코 우리를 놓지 않으십니다.');
+  });
+
+  it('keeps text drawn after a finished description out of it', () => {
+    expect(info?.songs[2].description).toBe('로마서 8 장의 내용입니다.');
+  });
+
+  it('still reads the service fields', () => {
+    expect(info?.date).toBe('2026.10.04');
+    expect(info?.sermonTitle).toBe('끝까지 흔들리지 않을 이유');
+    expect(info?.scripture).toBe('로마서 8 장 31 – 39 절');
+  });
+
+  it('takes a second plan when it is the only one written', () => {
+    const planB = parseCoverText(['날짜 | 2026.10.04', '찬양 콘티 (Plan B)', '순서 찬양 키', '1 첫째 곡 G'].join('\n'));
+    expect(planB?.songs.map((s) => s.title)).toEqual(['첫째 곡']);
+  });
+
+  it('does not join a song a bullet names when the table lists the order', () => {
+    const withExtra = parseCoverText(
+      ['날짜 | 2026.10.04', '순서 찬양 키', '1 첫째 곡 G', '• 첫째 곡 (G Key)', '• 다른 곡 (A Key)'].join('\n'),
+    );
+    expect(withExtra?.songs.map((s) => s.title)).toEqual(['첫째 곡']);
+  });
+
+  it('does not mistake a different song for a typo of a short title', () => {
+    const titles = parseCoverText(
+      ['날짜 | 2026.10.04', '순서 찬양 키', '1 그 사랑 G', '• 그 사랑 얼마나 (G Key)', 'o 다른 곡입니다.'].join('\n'),
+    )?.songs;
+    expect(titles?.map((s) => s.title)).toEqual(['그 사랑']);
+    expect(titles?.[0].description).toBeUndefined();
+  });
+});
+
 describe('parseSermonInfoText', () => {
   it('reads labeled sermon metadata without requiring a song list', () => {
     expect(parseSermonInfoText('설교 제목: “믿음으로 걷기”\n본문: 히브리서 11장 1-3절')).toEqual({

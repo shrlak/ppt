@@ -3,7 +3,7 @@ import type { PositionedPage, PositionedText } from './chordSheet';
 import { normalizeTitle } from '../storage/library';
 import { DEFAULT_CONFESSION_SONG } from '../ai/aiSettings';
 import { extractPartOrder } from './orderParser';
-import { isPlaceholderTitle } from './contiAlignment';
+import { isPlaceholderTitle, isTitleSlip } from './contiAlignment';
 
 /** `주님의 사랑 (E): 설명...` — title, musical key, description. */
 const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:：]\s*(.*)$/;
@@ -72,6 +72,12 @@ const BULLET_BODY_RE = /^[o○◦-]\s+(\S.*)$/;
  * 예배 순서), so match on the heading words rather than the exact phrase.
  */
 const SONG_SECTION_RE = /^(?:\d+\s*[.)]\s*)?.{0,10}(?:찬양\s*콘티|찬양\s*순서|예배\s*순서|콘티)/;
+/**
+ * `(Plan A)`, `PLAN B`, `플랜 2` — which of several alternative song lists a
+ * section is. A conti that writes a Plan B is offering a fallback set: the
+ * service sings the first plan, and the second must not add its songs to it.
+ */
+const PLAN_RE = /(?:plan|플랜)\s*[-:.]?\s*([A-Za-z0-9]|[가-힣])(?![A-Za-z])/i;
 /** Any other numbered section heading ("1. 말씀 묵상", "3. 본문") ends it. */
 const SECTION_HEADING_RE = /^\d+\s*[.)]\s*\S/;
 /**
@@ -270,6 +276,10 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
   const byTitle = new Map<string, ContiSongEntry>();
   /** Rows the table could not name, in order, until a bullet names them. */
   const unnamed: ContiSongEntry[] = [];
+  /** Songs the table itself lists — the service's order. */
+  const tableRows: ContiSongEntry[] = [];
+  /** Songs only a commentary bullet names; kept only when there is no table. */
+  const bulletOnly = new Set<ContiSongEntry>();
   const remember = (song: ContiSongEntry) => {
     const existing = byTitle.get(normalizeTitle(song.title));
     if (existing) return existing;
@@ -280,6 +290,10 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
 
   let inSection = false;
   let bullet: ContiSongEntry | null = null;
+  /** The first plan the conti names (`A`); its list is the one sung. */
+  let firstPlan: string | undefined;
+  /** Inside another plan's section (Plan B): nothing there joins the list. */
+  let otherPlan = false;
   /** Order number of the last row read, so a loose number must be the next one. */
   let lastOrder = 0;
   /**
@@ -296,12 +310,24 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
     if (title) {
       const song = remember({ title, ...(key ? { key } : {}) });
       if (key) song.key ??= key;
+      bulletOnly.delete(song);
+      if (!tableRows.includes(song)) tableRows.push(song);
       return;
     }
     const song: ContiSongEntry = { title: untitledSongTitle(order), ...(key ? { key } : {}) };
     songs.push(song);
     unnamed.push(song);
+    tableRows.push(song);
   };
+  /**
+   * The table row a commentary bullet describes: the row of that title, or
+   * one whose title the bullet merely mistypes, in the same key.
+   */
+  const rowFor = (title: string, key: string): ContiSongEntry | undefined =>
+    byTitle.get(normalizeTitle(title)) ??
+    tableRows.find(
+      (song) => (!song.key || song.key === key) && !unnamed.includes(song) && isTitleSlip(song.title, title),
+    );
   const flushPending = () => {
     if (!pending) return;
     const { order, title, bare } = pending;
@@ -330,9 +356,15 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
     // Either the section heading or the table's header row opens the table.
     if (SONG_SECTION_RE.test(line) || TABLE_HEADER_RE.test(line)) {
       flushPending();
-      inSection = true;
       bullet = null;
       lastOrder = 0;
+      const plan = line.match(PLAN_RE)?.[1]?.toUpperCase();
+      if (plan) {
+        firstPlan ??= plan;
+        otherPlan = plan !== firstPlan;
+      }
+      // A header row inside Plan B names no plan; it is still Plan B's.
+      inSection = !otherPlan;
       continue;
     }
     if (!inSection) continue;
@@ -343,14 +375,22 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
       if (key) {
         flushPending();
         const title = readableTitle(bulletMatch[1]);
-        const known = title ? byTitle.get(normalizeTitle(title)) : undefined;
+        const known = title ? rowFor(title, key) : undefined;
         const row = known ?? claimUnnamed(key);
         if (row && title && !known) {
           // The bullet names the row the table could not.
           row.title = title;
           byTitle.set(normalizeTitle(title), row);
         }
-        bullet = row ?? (title ? remember({ title, key }) : null);
+        if (row) {
+          bullet = row;
+        } else if (title) {
+          const before = songs.length;
+          bullet = remember({ title, key });
+          if (songs.length > before) bulletOnly.add(bullet);
+        } else {
+          bullet = null;
+        }
         if (bullet) bullet.key ??= key;
         continue;
       }
@@ -366,8 +406,12 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
       continue;
     }
     if (bullet && !SECTION_HEADING_RE.test(line) && !SONG_TABLE_ROW.test(line)) {
-      // Wrapped continuation of the previous description line.
-      if (bullet.description) bullet.description += ` ${line}`;
+      // Wrapped continuation of the previous description line — while that
+      // line is mid-sentence, or when it is the song's 진행. Text after a
+      // finished sentence is something else drawn on the page: a tablet adds
+      // its reading of handwriting there, after everything typed.
+      const unfinished = !!bullet.description && !/[.!?。]\s*$/.test(bullet.description);
+      if (bullet.description && (unfinished || extractPartOrder(line))) bullet.description += ` ${line}`;
       continue;
     }
 
@@ -424,7 +468,9 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
   }
   flushPending();
 
-  return songs;
+  // The table is the order the service sings. A song that only a commentary
+  // bullet names is not in it; without a table, the bullets are the list.
+  return tableRows.length > 0 ? songs.filter((song) => !bulletOnly.has(song)) : songs;
 }
 
 /**
