@@ -39,6 +39,11 @@ export interface DeckSource {
   songs: Song[];
   bible: DeckSourceBible;
   announcementText: string;
+  /**
+   * The 공동체 고백 the week's 카톡 공지 named for this deck, in place of
+   * 관리자 설정's song. Absent when the deck used the setting.
+   */
+  confessionSong?: string;
 }
 
 function sectionsOf(value: unknown): Song['sections'] {
@@ -116,5 +121,8 @@ export function decodeDeckSource(file: DeckSourceFile | null | undefined): DeckS
     songs: Array.isArray(raw.songs) ? raw.songs.flatMap((song) => songOf(song) ?? []) : [],
     bible: bibleOf(raw.bible),
     announcementText: typeof raw.announcementText === 'string' ? raw.announcementText : '',
+    ...(typeof raw.confessionSong === 'string' && raw.confessionSong.trim()
+      ? { confessionSong: raw.confessionSong.trim() }
+      : {}),
   };
 }

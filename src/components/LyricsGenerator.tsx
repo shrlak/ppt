@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ContiInfo, LibraryEntry, Song, VerificationState } from '../lib/utils/types';
 import { loadConti, warmPdfWorker, type ContiDocument } from '../lib/utils/contiPdf';
@@ -11,6 +11,14 @@ import {
   type SheetSlide,
 } from '../lib/utils/chordSheet';
 import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
+import {
+  applyAnnouncementToEntries,
+  isAnnouncedConfession,
+  matchAnnouncement,
+  noticeOutcome,
+  parseWorshipAnnouncement,
+  type WorshipAnnouncement,
+} from '../lib/utils/announcement';
 import {
   entryVerification,
   fetchBundledLibrary,
@@ -256,6 +264,11 @@ interface Props {
   onDateDetected?: (date: string | undefined) => void;
   /** Supplies the sermon title/scripture to the Bible section for automatic filling. */
   onContiInfoDetected?: (info: ContiInfo) => void;
+  /**
+   * The 공동체 고백 this week's 카톡 공지 names (undefined when none is
+   * pasted), so the deck can print it on the back slides.
+   */
+  onConfessionDetected?: (title: string | undefined) => void;
   /** Fired with the raw uploaded conti PDF, so it can be archived alongside a saved deck. */
   onContiFileLoaded?: (file: { name: string; data: ArrayBuffer }) => void;
   /** Bumped when a 라이브러리 deck is reopened, to load its songs back in. */
@@ -312,6 +325,7 @@ export default function LyricsGenerator({
   onSongsChange,
   onDateDetected,
   onContiInfoDetected,
+  onConfessionDetected,
   onContiFileLoaded,
   restoreVersion = 0,
   restoreSongs = null,
@@ -330,6 +344,12 @@ export default function LyricsGenerator({
   );
   const [info, setInfo] = useState<ContiInfo | null>(null);
   const infoRef = useRef<ContiInfo | null>(null);
+  // The worship team's KakaoTalk notice, pasted beside the conti. Its 찬양곡
+  // list is final: which songs, in what order, under what names and keys.
+  const [noticeText, setNoticeText] = useState('');
+  const notice = useMemo(() => parseWorshipAnnouncement(noticeText), [noticeText]);
+  // The notice text the song cards were last made final with.
+  const [appliedNotice, setAppliedNotice] = useState<string | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [pageImages, setPageImages] = useState<Record<number, string>>({});
   const [parsing, setParsing] = useState(false);
@@ -1799,9 +1819,25 @@ export default function LyricsGenerator({
       // A conti without a recognized cover page still has usable sheet music:
       // derive the song list straight from the score pages, in page order.
       const hasCover = parsed.info.songs.length > 0;
-      const baseSongs = hasCover
+      const contiSongs = hasCover
         ? parsed.info.songs
         : deriveSongsFromMusicPages(parsed.pageTexts, parsed.musicPages, lib);
+      // A pasted 카톡 공지 makes the list final: its songs, order, names and
+      // keys, each with the 악보 page and commentary the conti gives it.
+      const byNotice = notice ? applyAnnouncementToEntries(contiSongs, notice, parsed.musicPages) : null;
+      const baseSongs = byNotice?.entries ?? contiSongs;
+      // The service's songs are known (from the cover or the notice), so a
+      // score page none of them holds is not a song of this service.
+      const listedOrder = hasCover || !!byNotice;
+      const detected: ContiInfo = notice
+        ? {
+            ...parsed.info,
+            songs: baseSongs,
+            date: parsed.info.date ?? notice.date,
+            sermonTitle: parsed.info.sermonTitle ?? notice.theme,
+            scripture: parsed.info.scripture ?? notice.scripture,
+          }
+        : parsed.info;
       // Which song is the 공동체 고백송 is an administrator setting (read
       // above), and it also decides which entry is the 설교 후 찬양 (the one
       // listed after it).
@@ -1861,7 +1897,7 @@ export default function LyricsGenerator({
       // their own pages (see recognizeSongsBatch). Without a cover, every
       // page is a song and none is spare.
       const unlisted = parsed.musicPages.filter((page) => !assigned.has(page) && !excludedPages.has(page));
-      sparePagesRef.current = hasCover ? unlisted : [];
+      sparePagesRef.current = listedOrder ? unlisted : [];
 
       // Cover-listed songs on the administrator exclusion list (공동체
       // 고백송, 예배 전 준비 찬양 등) never become cards in the first place.
@@ -1876,12 +1912,12 @@ export default function LyricsGenerator({
       }
 
       const hasDetectedInfo = !!(
-        parsed.info.date ||
-        parsed.info.sermonTitle ||
-        parsed.info.scripture ||
-        parsed.info.songs.length > 0
+        detected.date ||
+        detected.sermonTitle ||
+        detected.scripture ||
+        detected.songs.length > 0
       );
-      const initialInfo = hasDetectedInfo ? parsed.info : null;
+      const initialInfo = hasDetectedInfo ? detected : null;
       infoRef.current = initialInfo;
       setInfo(initialInfo);
       setSongs(kept);
@@ -1889,9 +1925,14 @@ export default function LyricsGenerator({
       showPreviews();
       setRecog({});
       autoAttemptedRef.current.clear();
-      onDateDetected?.(parsed.info.date ?? dateFromFileName(file.name));
-      onContiInfoDetected?.(parsed.info);
-      if (!hasCover && next.length > 0) {
+      onDateDetected?.(detected.date ?? dateFromFileName(file.name));
+      onContiInfoDetected?.(detected);
+      onConfessionDetected?.(notice?.confession?.title);
+      if (byNotice) {
+        setAppliedNotice(noticeText);
+        reportNotice(notice as WorshipAnnouncement, byNotice, baseSongs.length, shared.confessionSong, lib);
+      }
+      if (!listedOrder && next.length > 0) {
         showToast(
           `표지를 찾지 못해 악보 순서대로 ${next.length}곡을 정리했습니다.` +
             (confessionSong ? ` '${confessionSong.title}'은 공동체 고백송으로 제외했어요.` : '') +
@@ -2022,6 +2063,99 @@ export default function LyricsGenerator({
     setSongs((list) => list.filter((s) => s.id !== id));
   }
 
+  /** Say what the 카톡 공지 settled: how many songs, and what it renamed, added or dropped. */
+  function reportNotice(
+    announced: WorshipAnnouncement,
+    outcome: { renamed: { from: string; to: string }[]; added: string[]; dropped: { title: string }[] },
+    count: number,
+    adminConfession: string,
+    lib: LibraryEntry[],
+  ) {
+    const parts = [`카톡 공지대로 찬양 ${count}곡의 순서·이름·키를 정했습니다.`];
+    if (outcome.renamed.length > 0) {
+      parts.push(`곡 이름: ${outcome.renamed.map(({ from, to }) => `'${from}' → '${to}'`).join(', ')}.`);
+    }
+    if (outcome.added.length > 0) parts.push(`콘티에 없던 곡: ${outcome.added.map((t) => `'${t}'`).join(', ')}.`);
+    if (outcome.dropped.length > 0) {
+      parts.push(`공지에 없어 뺀 곡: ${outcome.dropped.map(({ title }) => `'${title}'`).join(', ')}.`);
+    }
+    showToast(parts.join(' '));
+    // The back slides print the season's 고백송 from 관리자 설정. A notice
+    // naming another one decides this deck only — when the library holds
+    // its lyrics, since a back slide cannot be built from a title alone.
+    const confession = announced.confession?.title;
+    if (service === 'praise' || !confession || normalizeTitle(confession) === normalizeTitle(adminConfession)) return;
+    if (findLibrarySong(lib, { title: confession })) {
+      showToast(`공동체 고백은 공지대로 '${confession}'을(를) 이 PPT의 백 슬라이드에 넣습니다 (관리자 설정은 그대로).`);
+    } else {
+      showToast(
+        `공지의 공동체 고백 '${confession}'의 가사가 찬양 라이브러리에 없어 백 슬라이드에는 관리자 설정의 ` +
+          `'${adminConfession}'이(가) 들어갑니다. '${confession}'을(를) 라이브러리에 저장하면 이 PPT에 들어갑니다.`,
+        'warn',
+      );
+    }
+  }
+
+  /**
+   * Make the song cards final by the pasted notice, after the conti is
+   * already open — or with no conti at all, when the notice alone lists the
+   * week. A card the notice finds keeps its lyrics, page and recognition; it
+   * only takes the notice's name, key and place. A song only the notice
+   * lists starts from 찬양 라이브러리 when the library has it, on the next
+   * score page no card holds. A card the notice does not list is removed.
+   */
+  async function applyNoticeToCards() {
+    if (!notice) return;
+    const lib = library.length > 0 ? library : ((await libraryPromiseRef.current) ?? []);
+    const shared = await getSyncedAiSettings();
+    const cards = songs.filter((song) => !isAnnouncedConfession(song.title, notice));
+    const { pairs, dropped } = matchAnnouncement(cards, notice.songs);
+    const fromLibrary = (title: string, pageIndex: number | undefined, base?: Song): Song | null => {
+      const hit = findLibrarySong(lib, { title });
+      if (!hit) return null;
+      const song = songFromLibrary(hit, pageIndex, base?.orderFromConti ? base.order : undefined, linesPerSlide);
+      return base ? { ...song, id: base.id, description: base.description, postSermon: base.postSermon } : song;
+    };
+    const held = new Set(pairs.map((pair) => pair.item?.pageIndex).filter((page): page is number => page != null));
+    const free = [...new Set([...sparePagesRef.current, ...dropped.map((song) => song.pageIndex)])]
+      .filter((page): page is number => page != null && !held.has(page))
+      .sort((a, b) => a - b);
+    const next = pairs.map(({ announced, item }): Song => {
+      if (item) {
+        const renamed = normalizeTitle(item.title) !== normalizeTitle(announced.title);
+        // A renamed card with nothing in it yet may be saved under its new name.
+        const base = renamed && !songHasLyrics(item) ? (fromLibrary(announced.title, item.pageIndex, item) ?? item) : item;
+        return { ...base, title: announced.title, key: announced.key ?? base.key };
+      }
+      const pageIndex = free.shift();
+      const song = fromLibrary(announced.title, pageIndex) ?? blankSong(announced.title, linesPerSlide);
+      return { ...song, title: announced.title, key: announced.key ?? song.key, pageIndex };
+    });
+    sparePagesRef.current = docRef.current ? free : [];
+    setSongs(next);
+    setEdited(true);
+    setAppliedNotice(noticeText);
+    const songList = next.map((song) => ({ title: song.title, key: song.key, pageIndex: song.pageIndex }));
+    const before = infoRef.current;
+    const merged: ContiInfo = {
+      ...(before ?? { songs: [] }),
+      songs: songList,
+      date: infoRef.current?.date ?? notice.date,
+      sermonTitle: infoRef.current?.sermonTitle ?? notice.theme,
+      scripture: infoRef.current?.scripture ?? notice.scripture,
+    };
+    infoRef.current = merged;
+    setInfo(merged);
+    // The notice fills only what the conti did not give: the 성경 말씀 step
+    // is not re-filled over what it already has (or what was typed there).
+    if (!before?.date && merged.date) onDateDetected?.(merged.date);
+    if ((!before?.scripture && merged.scripture) || (!before?.sermonTitle && merged.sermonTitle)) {
+      onContiInfoDetected?.(merged);
+    }
+    onConfessionDetected?.(notice.confession?.title);
+    reportNotice(notice, noticeOutcome(pairs, dropped), next.length, shared.confessionSong, lib);
+  }
+
   return (
     <div className="tool">
       <section className="card">
@@ -2078,6 +2212,76 @@ export default function LyricsGenerator({
             </>
           )}
         </button>
+
+        <div className="notice-box">
+          <label className="field-label" htmlFor="notice-input">
+            카톡 공지 (선택)
+          </label>
+          <textarea
+            id="notice-input"
+            className="announcement-textarea notice-textarea"
+            data-testid="notice-input"
+            rows={4}
+            value={noticeText}
+            onChange={(e) => setNoticeText(e.target.value)}
+            placeholder={'🎶찬양곡:\n1️⃣ 주님의 은혜 넘치네 (G)\n2️⃣ 그 사랑 (G)\n🤝공동체 고백:\n🎵 우리는 주의 움직이는 교회 (G)'}
+          />
+          <p className="field-hint">
+            단톡방에 올린 공지를 그대로 붙여 넣으면 🎶찬양곡의 <strong>순서·곡 이름·키</strong>로 찬양을
+            확정합니다. 콘티 PDF와 함께 넣으면 악보 페이지와 곡 설명은 콘티에서 가져오고, 공지에 없는
+            곡의 악보는 인식하지 않습니다.
+          </p>
+          {notice ? (
+            <div className="notice-preview" data-testid="notice-preview">
+              <div className="info-songs">
+                {notice.songs.map((song, i) => (
+                  <span key={i} className="chip chip-song">
+                    {i + 1}. {song.title}
+                    {song.key && <em>{song.key}</em>}
+                  </span>
+                ))}
+              </div>
+              {notice.confession && (
+                <p className="field-hint">
+                  공동체 고백: {notice.confession.title}
+                  {notice.confession.key ? ` (${notice.confession.key})` : ''}
+                </p>
+              )}
+              {appliedNotice === noticeText ? (
+                <p className="field-hint" data-testid="notice-applied">
+                  <Icon name="check" /> 찬양 편집에 공지대로 반영했습니다.
+                </p>
+              ) : docRef.current || songs.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="notice-apply"
+                  onClick={() => void applyNoticeToCards()}
+                >
+                  공지대로 찬양 순서·이름 확정
+                </button>
+              ) : (
+                <div className="notice-actions">
+                  <p className="field-hint">콘티 PDF를 올리면 이 순서대로 곡을 정리합니다.</p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="notice-apply"
+                    onClick={() => void applyNoticeToCards()}
+                  >
+                    콘티 없이 공지로만 곡 만들기
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            noticeText.trim() && (
+              <p className="field-hint notice-warn" data-testid="notice-unread">
+                공지에서 🎶찬양곡 목록을 찾지 못했습니다. `찬양곡:` 아래에 곡을 한 줄씩 적어 주세요.
+              </p>
+            )
+          )}
+        </div>
 
         {info && (
           <div className="conti-info" data-testid="conti-info">

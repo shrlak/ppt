@@ -61,3 +61,19 @@ export async function lookupConfessionSong(
   const slideCount = planSlides(song).filter((plan) => plan.kind === 'lyrics').length;
   return { title: wanted, song: slideCount > 0 ? song : null, slideCount };
 }
+
+/**
+ * The 공동체 고백송 for one deck: the song this week's 카톡 공지 names, when
+ * 찬양 라이브러리 has its lyrics — otherwise the season's song from 관리자
+ * 설정. The notice decides only its own deck; the setting is never changed.
+ */
+export async function lookupDeckConfessionSong(
+  baseUrl: string,
+  preferred?: string,
+): Promise<ConfessionSongLookup> {
+  if (preferred?.trim()) {
+    const found = await lookupConfessionSong(baseUrl, preferred);
+    if (found.song) return found;
+  }
+  return lookupConfessionSong(baseUrl);
+}

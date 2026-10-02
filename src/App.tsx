@@ -18,7 +18,7 @@ import { buildVerseSlidePlan } from './bible/versePlanner';
 import { buildBiblePptx } from './bible/pptxBuilder';
 import { assertPptxIntegrity } from './lib/pptx/pptxPackage';
 import { applyConfessionSong } from './lib/pptx/confessionSlides';
-import { lookupConfessionSong } from './lib/utils/confessionSong';
+import { lookupDeckConfessionSong } from './lib/utils/confessionSong';
 import { DEFAULT_CONFESSION_SONG } from './lib/ai/aiSettings';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from './lib/pptx/pptxRenderer';
 import ToastHost from './components/ToastHost';
@@ -147,6 +147,9 @@ function SundayApp() {
   // a change to the deck (it rewrites a block of the back slides). The build
   // itself always reads the setting fresh.
   const [confessionSongTitle, setConfessionSongTitle] = useState('');
+  // This week's 공동체 고백 as the 카톡 공지 names it. It decides this deck's
+  // back slides when the library has its lyrics; 관리자 설정 stays as it is.
+  const [noticeConfession, setNoticeConfession] = useState<string | undefined>(undefined);
   // Lyric slides that song fills, so the slide count below can allow for a
   // confession song that is longer or shorter than the deck's own.
   const [confessionSlideCount, setConfessionSlideCount] = useState(0);
@@ -226,7 +229,7 @@ function SundayApp() {
   useEffect(() => {
     if (adminOpen) return;
     let cancelled = false;
-    void lookupConfessionSong(BASE).then((found) => {
+    void lookupDeckConfessionSong(BASE, noticeConfession).then((found) => {
       if (cancelled) return;
       setConfessionSongTitle(found.title);
       setConfessionSlideCount(found.song ? found.slideCount : 0);
@@ -234,7 +237,7 @@ function SundayApp() {
     return () => {
       cancelled = true;
     };
-  }, [adminOpen]);
+  }, [adminOpen, noticeConfession]);
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
@@ -340,7 +343,7 @@ function SundayApp() {
     // confession song without anyone editing the .pptx by hand. Nothing is
     // touched when the deck already prints it, or when the library has no
     // lyrics under that title.
-    const confession = await lookupConfessionSong(BASE);
+    const confession = await lookupDeckConfessionSong(BASE, noticeConfession);
     const backSlides = confession.song
       ? await backDeckWithConfessionSong(
           backSlidesSource,
@@ -538,6 +541,7 @@ function SundayApp() {
             versesPerSlide: bibleState.versesPerSlide,
           },
           announcementText,
+          ...(noticeConfession ? { confessionSong: noticeConfession } : {}),
         }),
         additionalFiles: await encodeAdditionalFiles(additionalFiles),
         slideCount,
@@ -829,6 +833,7 @@ function SundayApp() {
     setSermonFile(deck.sermonPptx);
     setAnnouncementText(source?.announcementText ?? '');
     setContiDate(source?.contiDate);
+    setNoticeConfession(source?.confessionSong);
     setRestore((previous) => ({
       version: previous.version + 1,
       songs: source?.songs ?? null,
@@ -946,6 +951,7 @@ function SundayApp() {
               onSongsChange={handleSongsChange}
               onDateDetected={handleDateDetected}
               onContiInfoDetected={handleContiInfoDetected}
+              onConfessionDetected={setNoticeConfession}
               onContiFileLoaded={setContiFile}
               restoreVersion={restore.version}
               restoreSongs={restore.songs}

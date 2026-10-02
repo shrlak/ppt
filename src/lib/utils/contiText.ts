@@ -3,7 +3,7 @@ import type { PositionedPage, PositionedText } from './chordSheet';
 import { normalizeTitle } from '../storage/library';
 import { DEFAULT_CONFESSION_SONG } from '../ai/aiSettings';
 import { extractPartOrder } from './orderParser';
-import { isPlaceholderTitle } from './contiAlignment';
+import { isPlaceholderTitle, isTitleSlip } from './contiAlignment';
 
 /** `주님의 사랑 (E): 설명...` — title, musical key, description. */
 const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:：]\s*(.*)$/;
@@ -111,37 +111,6 @@ function readableTitle(raw: string): string | undefined {
     .replace(/\s+/g, ' ')
     .trim();
   return /\p{L}/u.test(cleaned) ? cleaned : undefined;
-}
-
-/** Single-character edits between two strings (Levenshtein distance). */
-function editDistance(a: string, b: string): number {
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= a.length; i += 1) {
-    const current = [i];
-    for (let j = 1; j <= b.length; j += 1) {
-      current[j] = Math.min(
-        previous[j] + 1,
-        current[j - 1] + 1,
-        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-    previous = current;
-  }
-  return previous[b.length];
-}
-
-/**
- * Two ways of typing one title: the commentary under the table writing
- * `주 신실하신 놀라워` for the row's `주 신실하심 놀라워`. Only a slip of a
- * letter or two counts — `그 사랑` and `그 사랑 얼마나` are different songs,
- * and a two-letter title is too short to tell a slip from another word.
- */
-function isTitleSlip(a: string, b: string): boolean {
-  const left = normalizeTitle(a);
-  const right = normalizeTitle(b);
-  const shorter = Math.min(left.length, right.length);
-  if (shorter < 4) return false;
-  return editDistance(left, right) <= (shorter >= 9 ? 2 : 1);
 }
 
 function normalizeKey(raw: string): string {

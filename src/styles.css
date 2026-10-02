@@ -2023,6 +2023,29 @@ main[data-direction='back'] .wizard-panel.active {
   }
 }
 
+.notice-box {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+.notice-preview {
+  display: grid;
+  gap: var(--s-2);
+  justify-items: start;
+}
+.notice-preview p {
+  margin: 0;
+}
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-4);
+}
+.notice-warn {
+  color: var(--warn-ink, var(--ink-muted));
+}
+
 .conti-info {
   margin-top: var(--s-4);
   border: 1px solid var(--hairline);

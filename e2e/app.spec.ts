@@ -988,6 +988,99 @@ test.describe('a conti with a Plan A and a Plan B', () => {
   });
 });
 
+test.describe('the 카톡 공지 pasted with the conti', () => {
+  const NOTICE = [
+    '🌱2026년 10월 04일 주일예배🌱',
+    '📖 본문: 로마서 8장 31-39절',
+    '📖 주제: 끝까지 흔들리지 않을 이유',
+    '라인업:',
+    '👤 인도자 – 조인서',
+    '🎶찬양곡:',
+    '1️⃣ 주님의 은혜 넘치네 (G)',
+    '2️⃣ 그 사랑 (G)',
+    '3️⃣ 우리가 넉넉히 이기느니라 (A)',
+    '4️⃣ 임재 (G)',
+    '🤝공동체 고백:',
+    '🎵 우리는 주의 움직이는 교회 (G)',
+    '🔑키워드: 소망, 그리스도, 사랑',
+  ].join('\n');
+  const final = ['주님의 은혜 넘치네', '그 사랑', '우리가 넉넉히 이기느니라', '임재'];
+
+  async function cardTitles(page: Page): Promise<string[]> {
+    return page
+      .getByTestId('song-card')
+      .getByTestId('song-title-input')
+      .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
+  }
+
+  test('decides the songs, their order and names when pasted before the conti', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await page.goto('./?service=sunday');
+    await page.getByTestId('notice-input').fill(NOTICE);
+    await expect(page.getByTestId('notice-preview')).toContainText('주님의 은혜 넘치네');
+    await expect(page.getByTestId('notice-preview')).toContainText('공동체 고백: 우리는 주의 움직이는 교회');
+
+    await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
+    await expect(page.getByTestId('song-card')).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    expect(await cardTitles(page)).toEqual(final);
+    // The renamed song keeps the conti's 악보 page and key.
+    const first = page.getByTestId('song-card').first();
+    await expect(first.locator('.song-key')).toHaveValue('G');
+    await expect(first.locator('.score-hint, .score-loading')).toContainText('(p.2)');
+    await expect(page.getByTestId('notice-applied')).toBeVisible();
+    await expect(
+      page.locator('.toast-text', { hasText: "'주 신실하심 놀라워' → '주님의 은혜 넘치네'" }),
+    ).toBeVisible();
+  });
+
+  test('re-orders and renames the cards when applied after the conti', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await page.goto('./?service=sunday');
+    await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
+    await expect(page.getByTestId('song-card')).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    expect((await cardTitles(page))[0]).toBe('주 신실하심 놀라워');
+
+    await page.getByTestId('notice-input').fill(NOTICE);
+    await page.getByTestId('notice-apply').click();
+    await expect.poll(() => cardTitles(page)).toEqual(final);
+    await expect(page.getByTestId('song-card').first().locator('.score-hint, .score-loading')).toContainText('(p.2)');
+    await expect(page.getByTestId('notice-applied')).toBeVisible();
+  });
+
+  test("prints the notice's 공동체 고백 on this deck's back slides", async ({ page }, testInfo) => {
+    // The bundled library holds the week's 고백송, so its lyrics can be printed.
+    await page.goto('./?service=sunday');
+    await page.getByTestId('notice-input').fill(NOTICE);
+    await page.getByTestId('notice-apply').click();
+    await expect.poll(() => cardTitles(page)).toEqual(final);
+    await expect(
+      page.locator('.toast-text', { hasText: "공동체 고백은 공지대로 '우리는 주의 움직이는 교회'" }),
+    ).toBeVisible();
+
+    await moveFromLyricsToDownload(page);
+    const dlPromise = page.waitForEvent('download');
+    await page.getByTestId('generate-pptx').click();
+    const zip = await loadPptx(await dlPromise, testInfo.outputPath('notice-confession.pptx'));
+    const texts = await slideTexts(zip);
+    const marker = texts.findIndex((xml) => xml.includes('공동체 고백송'));
+    expect(texts[marker]).toContain('우리는 주의 움직이는 교회');
+    expect(texts[marker + 1]).toContain('우리는 주의 움직이는 교회');
+    expect(texts.join('\n')).not.toContain('Celebrate the light 온 세상 비추네');
+  });
+
+  test('makes the cards and fills the 성경 말씀 step from the notice alone', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await page.goto('./?service=sunday');
+    await page.getByTestId('notice-input').fill(NOTICE);
+    await page.getByTestId('notice-apply').click();
+    await expect.poll(() => cardTitles(page)).toEqual(final);
+
+    await page.getByTestId('wizard-next-lyrics').click();
+    await expect(page.getByTestId('bible-verse-input')).toHaveValue('롬8:31-39');
+    await expect(page.getByTestId('bible-sermon-title-input')).toHaveValue('끝까지 흔들리지 않을 이유');
+  });
+});
+
 test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {
   await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
