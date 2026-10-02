@@ -978,6 +978,62 @@ test.describe('a conti with a Plan A and a Plan B', () => {
     await expect(page.locator('.toast-text', { hasText: '콘티 순서에 없는 악보 2장(p.6, p.7)' })).toBeVisible();
   });
 
+  test("loads a bundled song's parts even when the shared library holds only a draft of it", async ({ page }) => {
+    await stubRecognitionProxy(page);
+    // Invented lyrics: the bundle has the song by its parts, the shared
+    // library a web reading auto-saved as one long part.
+    const bundled = {
+      title: '그 사랑',
+      key: 'G',
+      sections: [
+        { label: 'V1', lines: ['가상의 첫 절 첫째 줄', '가상의 첫 절 둘째 줄'] },
+        { label: 'C', lines: ['가상의 후렴 첫째 줄', '가상의 후렴 둘째 줄'] },
+      ],
+      order: ['I', 'V1', 'C', 'C'],
+    };
+    const draft = {
+      title: '그 사랑',
+      key: 'G',
+      sections: [{ label: 'V', lines: [...bundled.sections[0].lines, ...bundled.sections[1].lines] }],
+      order: ['I', 'V'],
+      verification: 'draft',
+      version: 1,
+    };
+    await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [DEFAULT_POST_SERMON_ENTRY, bundled] }));
+    await page.route(`${PROXY}/libraries/lyrics`, (route) =>
+      route.fulfill({ json: { entries: [draft], deletedTitles: [] } }),
+    );
+    await uploadPlans(page);
+
+    const card = page.getByTestId('song-card').nth(1);
+    await expect(card.getByTestId('song-title-input')).toHaveValue('그 사랑', { timeout: PARSE_TIMEOUT });
+    const labels = await card
+      .locator('.section-label')
+      .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
+    expect(labels).toEqual(['V1', 'C']);
+    await expect(card.getByTestId('section-textarea').nth(1)).toHaveValue('가상의 후렴 첫째 줄\n가상의 후렴 둘째 줄');
+    await expect(card.getByTestId('order-input')).toHaveValue('I-V1-C-C');
+  });
+
+  test('warns when a save does not reach the shared library', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await page.route(`${PROXY}/libraries/lyrics`, (route) =>
+      route.request().method() === 'PUT'
+        ? route.fulfill({ status: 503, json: { error: 'busy' } })
+        : route.fulfill({ json: { entries: [], deletedTitles: [] } }),
+    );
+    await uploadPlans(page);
+
+    const postSermon = page.getByTestId('song-card').last();
+    await expect(postSermon.getByTestId('song-title-input')).toHaveValue('영접송', { timeout: PARSE_TIMEOUT });
+    await postSermon.getByRole('button', { name: '라이브러리에 저장' }).click();
+    // The save is kept on this device, and the user is told it is not shared yet.
+    await expect(page.locator('.toast-text', { hasText: "'영접송' 을(를) 검증된 가사로 저장했습니다." })).toBeVisible();
+    await expect(
+      page.locator('.toast-text', { hasText: "'영접송'을(를) 아직 공유 서버에 올리지 못했습니다." }),
+    ).toBeVisible();
+  });
+
   test('moves a listed song onto a spare page when its title is printed there', async ({ page }) => {
     await stubRecognitionProxy(page);
     // The title pass reads 그 사랑's own page (p.3) as some other song and

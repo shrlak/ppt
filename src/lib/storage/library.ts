@@ -7,7 +7,7 @@ import type {
   VerificationState,
 } from '../utils/types';
 import { sortSectionsByOrder } from '../utils/slidePlanner';
-import { cloudLibraryJson, hasCloudLibrary } from './cloudLibrary';
+import { CloudLibraryError, cloudLibraryJson, hasCloudLibrary } from './cloudLibrary';
 
 const STORAGE_KEY = 'praise-lyrics-library';
 const SYNC_QUEUE_KEY = 'praise-lyrics-library-sync-queue-v1';
@@ -289,16 +289,45 @@ function saveSyncQueue(operations: LyricsSyncOperation[]): void {
   storage()?.setItem(SYNC_QUEUE_KEY, JSON.stringify(operations));
 }
 
-function enqueueSyncOperation(operation: LyricsSyncOperation): void {
+/**
+ * Where a queued library change stands once the queue has been sent:
+ * on the shared server, still waiting on this device for the next retry,
+ * refused by the server for good, or kept on this device only because no
+ * shared server is connected.
+ */
+export type LyricsUploadResult = 'uploaded' | 'pending' | 'rejected' | 'local';
+
+/** Operations this page sent that the shared server refused for good. */
+const rejectedOperations = new Set<string>();
+
+/**
+ * True when the server will never accept this request as it is: the entry
+ * itself was refused (400), too large (413) or unprocessable (422). Anything
+ * else — offline, a 5xx, a wrong password — may succeed on a later retry.
+ */
+function isPermanentRejection(error: unknown): boolean {
+  return error instanceof CloudLibraryError && [400, 413, 422].includes(error.status);
+}
+
+function uploadResult(id: string): LyricsUploadResult {
+  if (!hasCloudLibrary()) return 'local';
+  if (rejectedOperations.has(id)) return 'rejected';
+  return loadSyncQueue().some((operation) => operation.id === id) ? 'pending' : 'uploaded';
+}
+
+function enqueueSyncOperation(operation: LyricsSyncOperation): Promise<LyricsUploadResult> {
   const queue = loadSyncQueue().filter((candidate) => candidate.titleKey !== operation.titleKey);
   saveSyncQueue([...queue, operation]);
   // Local saving stays instant. The durable queue retries whenever the page
   // starts, regains focus, or another library operation is made.
-  void flushLyricsSyncQueue().catch(() => undefined);
+  return flushLyricsSyncQueue().then(
+    () => uploadResult(operation.id),
+    () => uploadResult(operation.id),
+  );
 }
 
-export function queueLyricsUpsert(entry: LibraryEntry): void {
-  enqueueSyncOperation({
+export function queueLyricsUpsert(entry: LibraryEntry): Promise<LyricsUploadResult> {
+  return enqueueSyncOperation({
     id: operationId(),
     type: 'upsert',
     titleKey: normalizeTitle(entry.title),
@@ -306,8 +335,8 @@ export function queueLyricsUpsert(entry: LibraryEntry): void {
   });
 }
 
-export function queueLyricsDelete(title: string): void {
-  enqueueSyncOperation({
+export function queueLyricsDelete(title: string): Promise<LyricsUploadResult> {
+  return enqueueSyncOperation({
     id: operationId(),
     type: 'delete',
     titleKey: normalizeTitle(title),
@@ -324,22 +353,30 @@ export async function flushLyricsSyncQueue(): Promise<void> {
     while (true) {
       const operation = loadSyncQueue()[0];
       if (!operation) return;
-      if (operation.type === 'upsert') {
-        await cloudLibraryJson('/libraries/lyrics', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entry: operation.entry }),
-        }, true);
-      } else {
-        await cloudLibraryJson('/libraries/lyrics', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: operation.title }),
-        }, true);
+      try {
+        if (operation.type === 'upsert') {
+          await cloudLibraryJson('/libraries/lyrics', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entry: operation.entry }),
+          }, true);
+        } else {
+          await cloudLibraryJson('/libraries/lyrics', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: operation.title }),
+          }, true);
+        }
+      } catch (error) {
+        if (!isPermanentRejection(error)) throw error;
+        // Retrying a request the server refuses can never succeed, and the
+        // queue is sent in order: left at the front, it would hold back every
+        // save made after it, on this device, for good.
+        rejectedOperations.add(operation.id);
       }
-      // Remove only the operation that completed. If a newer operation for
-      // the same song arrived while the request was running, its different ID
-      // remains queued and is sent next.
+      // Remove only the operation that completed (or was refused). If a newer
+      // operation for the same song arrived while the request was running,
+      // its different ID remains queued and is sent next.
       saveSyncQueue(loadSyncQueue().filter((candidate) => candidate.id !== operation.id));
     }
   })();
@@ -395,10 +432,19 @@ export async function synchronizeUserLibrary(): Promise<LyricsLibrarySyncResult>
   }
 }
 
-/** Merge bundled and user libraries; user entries win on matching titles. */
+/**
+ * Merge bundled and user libraries; user entries win on matching titles —
+ * except a draft, which never hides a bundled song. The bundled songs were
+ * put there by hand, so they are ground truth, and a draft must not stand in
+ * front of ground truth here any more than upsertEntry lets it replace one.
+ * Without this, one machine reading auto-saved under a bundled title would
+ * load in place of the bundled lyrics on every conti that names the song.
+ */
 export function mergeLibraries(bundled: LibraryEntry[], user: LibraryEntry[]): LibraryEntry[] {
-  const userTitles = new Set(user.map((e) => normalizeTitle(e.title)));
-  return [...bundled.filter((e) => !userTitles.has(normalizeTitle(e.title))), ...user];
+  const confirmed = new Set(bundled.filter(isGroundTruth).map((e) => normalizeTitle(e.title)));
+  const shown = user.filter((e) => isGroundTruth(e) || !confirmed.has(normalizeTitle(e.title)));
+  const userTitles = new Set(shown.map((e) => normalizeTitle(e.title)));
+  return [...bundled.filter((e) => !userTitles.has(normalizeTitle(e.title))), ...shown];
 }
 
 /**
