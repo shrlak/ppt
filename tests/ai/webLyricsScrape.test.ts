@@ -317,6 +317,8 @@ ${SAMPLE.slice(2).join('\n')}</xmp></p></div></body></html>`;
       expect(result.candidates).toHaveLength(1);
       expect(result.candidates[0]).toMatchObject({ source: 'bugs', title: TITLE, artist: '어느 사역팀', decision: 'auto' });
       expect(result.candidates[0].lines.join(' ')).not.toMatch(/앱에서/);
+      // The blank line between Bugs's stanzas comes through, to divide the song by.
+      expect(result.candidates[0].lines).toEqual([...SAMPLE.slice(0, 2), '', ...SAMPLE.slice(2)]);
     } finally {
       globalThis.fetch = originalFetch;
     }

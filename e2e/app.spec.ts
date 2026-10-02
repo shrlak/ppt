@@ -1477,6 +1477,34 @@ test.describe('web lyrics candidate review', () => {
     await expect(card.getByTestId('section-textarea').first()).toHaveValue(before);
   });
 
+  test('divides a page printed as one block into its parts when the score gave none', async ({ page }) => {
+    const verse1 = ['첫째 절 첫 줄', '첫째 절 둘째 줄', '첫째 절 셋째 줄', '첫째 절 넷째 줄'];
+    const verse2 = ['둘째 절 첫 줄', '둘째 절 둘째 줄', '둘째 절 셋째 줄', '둘째 절 넷째 줄'];
+    const chorus = ['후렴 첫 줄', '후렴 둘째 줄', '후렴 셋째 줄', '후렴 넷째 줄'];
+    await stubRecognitionProxy(page, {
+      // The models read the title but no lyrics off the 악보.
+      score: () => stubScore({ sections: [], order: [] }),
+      lyrics: {
+        candidates: [
+          // Bugs-style: the whole song, no headings, no blank lines.
+          webCandidate({ decision: 'auto', score: 0.95, lines: [...verse1, ...chorus, ...verse2, ...chorus] }),
+        ],
+        links: [],
+      },
+    });
+
+    await page.goto('./?service=sunday');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    const labels = await card.locator('.section-label').evaluateAll((inputs) =>
+      inputs.map((input) => (input as unknown as { value: string }).value),
+    );
+    expect(labels).toEqual(['V', 'C', 'V2']);
+    await expect(card.getByTestId('section-textarea').nth(1)).toHaveValue(chorus.join('\n'));
+    await expect(card.getByTestId('order-input')).toHaveValue(/I.*V.*C.*V2.*C/);
+  });
+
   test('an auto candidate fills the lyrics in without asking', async ({ page }) => {
     await stubRecognitionProxy(page, {
       // One strong, clearly-ahead page: no question to put to the user.

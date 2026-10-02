@@ -186,6 +186,24 @@ describe('mergeWebLyrics', () => {
   });
 });
 
+describe('mergeWebLyrics — a page that prints parts as one block', () => {
+  it('gives each recognized part only its own lines, never the whole block', () => {
+    // The page printed the verse and the chorus as one part.
+    const score: ParsedScore = {
+      order: ['I', 'V', 'C'],
+      sections: [
+        { label: 'V', lines: V_OCR },
+        { label: 'C', lines: C_OCR },
+      ],
+    };
+    const merged = mergeWebLyrics(score, web([{ label: 'V', lines: [...V_TRUE, ...C_TRUE, ...B_TRUE] }]));
+    expect(merged.score.sections).toEqual([
+      { label: 'V', lines: V_TRUE },
+      { label: 'C', lines: C_TRUE },
+    ]);
+  });
+});
+
 describe('mergeRankedWebLyrics', () => {
   const score: ParsedScore = {
     order: ['I', 'V', 'C'],

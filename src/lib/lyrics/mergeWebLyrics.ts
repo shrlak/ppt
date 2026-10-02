@@ -81,6 +81,35 @@ export function partSimilarity(a: Section, b: Section): number {
   return total === 0 ? 0 : (2 * shared) / total;
 }
 
+/**
+ * A published part this many lines longer than the recognized part it reads
+ * like holds more than that part — a page printing a verse and its chorus
+ * as one block. Only the matching stretch of it is taken.
+ */
+const LONGER_BY = 2;
+
+function holdsMore(published: Section, recognized: Section): boolean {
+  return published.lines.length > recognized.lines.length + LONGER_BY;
+}
+
+/**
+ * The lines of a published part that are this recognized part: all of
+ * them, unless the published part holds more — then the stretch, about as
+ * long as the recognized part, that reads most like it.
+ */
+export function matchingStretch(published: Section, recognized: Section): string[] {
+  if (!holdsMore(published, recognized)) return [...published.lines];
+  const want = recognized.lines.length;
+  let best = { score: -1, start: 0, length: want };
+  for (let length = Math.max(1, want - 1); length <= want + 2; length += 1) {
+    for (let start = 0; start + length <= published.lines.length; start += 1) {
+      const score = partSimilarity(recognized, { label: '', lines: published.lines.slice(start, start + length) });
+      if (score > best.score) best = { score, start, length };
+    }
+  }
+  return published.lines.slice(best.start, best.start + best.length);
+}
+
 /** "V1" and "V" name the same part. */
 function canonicalLabel(label: string): string {
   return label.trim().toUpperCase().replace(/^([A-Z]+)1$/, '$1');
@@ -90,9 +119,11 @@ function canonicalLabel(label: string): string {
  * Pair each recognized part with the published part that reads like it.
  *
  * Best match first, and a published part is claimed at most once, so two
- * similar verses can't both collapse onto the same one. A part whose OCR was
- * too poor to match by text then falls back to the published part carrying
- * the same label — the page and the score both number verses in order.
+ * similar verses can't both collapse onto the same one — unless it holds
+ * more than the part (see matchingStretch), when each part it holds takes
+ * its own stretch. A part whose OCR was too poor to match by text then falls
+ * back to the published part carrying the same label — the page and the
+ * score both number verses in order.
  */
 function pairParts(recognized: Section[], published: Section[]): Map<number, number> {
   const pairs: { score: number; recognizedIndex: number; publishedIndex: number }[] = [];
@@ -107,7 +138,9 @@ function pairParts(recognized: Section[], published: Section[]): Map<number, num
   const chosen = new Map<number, number>();
   const takenPublished = new Set<number>();
   for (const pair of pairs) {
-    if (chosen.has(pair.recognizedIndex) || takenPublished.has(pair.publishedIndex)) continue;
+    if (chosen.has(pair.recognizedIndex)) continue;
+    const shared = holdsMore(published[pair.publishedIndex], recognized[pair.recognizedIndex]);
+    if (takenPublished.has(pair.publishedIndex) && !shared) continue;
     chosen.set(pair.recognizedIndex, pair.publishedIndex);
     takenPublished.add(pair.publishedIndex);
   }
@@ -174,8 +207,9 @@ export function mergeWebLyrics(score: ParsedScore, web: ScoredLyricsCandidate | 
     const publishedIndex = pairs.get(index);
     if (publishedIndex === undefined) return section;
     correctedParts += 1;
-    // The score's label and position are kept; the words are the page's.
-    return { label: section.label, lines: [...web.sections[publishedIndex].lines] };
+    // The score's label and position are kept; the words are the page's —
+    // the ones of this part, not the whole block a page printed it in.
+    return { label: section.label, lines: matchingStretch(web.sections[publishedIndex], section) };
   });
 
   // Everything else the page prints goes into the editor as well, under a
