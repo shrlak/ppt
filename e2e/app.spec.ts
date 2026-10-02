@@ -12,6 +12,12 @@ const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
  * PDF, not text — followed by four score pages.
  */
 const HANDWRITTEN_TITLE_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-handwritten-title.pdf');
+/**
+ * A conti with a Plan A table (its first commentary bullet mistyping the
+ * title), a Plan B after it, and six score pages: Plan A's four, then two
+ * the order does not list.
+ */
+const PLAN_A_B_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-plan-a-b.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
@@ -926,6 +932,60 @@ test('keeps a handwritten table title in its slot and names it from its 악보',
   const card = await recognizeFirstSong(page);
   await expect(card.getByTestId('song-title-input')).toHaveValue('주님의 은혜 넘치네');
   await expect(card.locator('.recog-error')).toHaveCount(0);
+});
+
+test.describe('a conti with a Plan A and a Plan B', () => {
+  const planA = ['주 신실하심 놀라워', '그 사랑', '우리가 넉넉히 이기느니라', '임재'];
+
+  async function uploadPlans(page: Page) {
+    await page.goto('./?service=sunday');
+    await expect(page.getByTestId('upload-dropzone')).toBeVisible();
+    await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
+    await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+  }
+
+  test('lists only the Plan A songs and leaves the scores outside the order alone', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await uploadPlans(page);
+
+    const songCards = page.getByTestId('song-card');
+    await expect(songCards).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+    const titles = await songCards
+      .getByTestId('song-title-input')
+      .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
+    expect(titles).toEqual(planA);
+    await expect(page.locator('.toast-text', { hasText: '콘티 순서에 없는 악보 2장(p.6, p.7)' })).toBeVisible();
+  });
+
+  test('moves a listed song onto a spare page when its title is printed there', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    // The title pass reads 그 사랑's own page (p.3) as some other song and
+    // finds its title on p.6, a page the order does not list.
+    const titlePass = (body: string) => body.includes('가사, 파트, 진행 순서는');
+    const titlesRead = ['영접송', '그 사랑', '우리는 주의 움직이는 교회'];
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      if (!titlePass(route.request().postData() ?? '')) return route.fallback();
+      const results = titlesRead.map((title, imageIndex) => ({ imageIndex, ...stubScore({ title, sections: [], order: [] }) }));
+      await route.fulfill({
+        json: { candidates: [{ content: { parts: [{ text: JSON.stringify({ results }) }] } }] },
+      });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      if (!titlePass(route.request().postData() ?? '')) return route.fallback();
+      const results = titlesRead.map((title, imageIndex) => ({ imageIndex, ...stubScore({ title, sections: [], order: [] }) }));
+      await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ results }) } }] } });
+    });
+    await uploadPlans(page);
+
+    const card = page.getByTestId('song-card').nth(1);
+    await expect(card.getByTestId('song-title-input')).toHaveValue('그 사랑', { timeout: PARSE_TIMEOUT });
+    await card.getByTestId('recognize-btn').click();
+    await expect(card.getByTestId('recog-done').or(card.locator('.recog-error'))).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+    await expect(card.locator('.score-hint')).toContainText('(p.6)');
+    await expect(card.getByTestId('song-title-input')).toHaveValue('그 사랑');
+    await expect(page.getByTestId('song-card')).toHaveCount(4);
+  });
 });
 
 test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {

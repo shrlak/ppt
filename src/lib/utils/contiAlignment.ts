@@ -52,20 +52,24 @@ export function titleSimilarity(a: string | undefined, b: string | undefined): n
  *
  * `songTitles[i]` is the title the conti printed for the song currently on
  * page slot `i` (a placeholder for a page the cover never named), and
- * `pageTitles[i]` is the title the models read off that page. Returns
- * `slots` where song `i` should take page slot `slots[i]` — always a
- * permutation, so no page is dropped and none is shared.
+ * `pageTitles[i]` is the title the models read off that page. `pageTitles`
+ * may run past the songs: the extra slots are spare pages no song holds (a
+ * score the conti's order does not list), which a song takes only when its
+ * title is there. Returns `slots` where song `i` should take page slot
+ * `slots[i]` — no slot is shared, and with no spares none is dropped.
  *
  * A song already on a page that reads as its title stays there. The rest are
- * paired best match first; a song nothing matches (or a placeholder) takes
- * whatever pages are left, in page order. When the titles say nothing, the
- * answer is the identity and the conti's pairing stands.
+ * paired best match first; a song nothing matches (or a placeholder) keeps
+ * its own page, or takes whatever pages are left, its own range first. When
+ * the titles say nothing, the answer is the identity and the conti's pairing
+ * stands.
  */
 export function alignPagesToConti(
   songTitles: string[],
   pageTitles: (string | undefined)[],
 ): number[] {
   const count = songTitles.length;
+  const slotCount = Math.max(count, pageTitles.length);
   const slots: (number | undefined)[] = new Array(count).fill(undefined);
   const taken = new Set<number>();
   const named = (i: number) => !isPlaceholderTitle(songTitles[i]);
@@ -80,7 +84,7 @@ export function alignPagesToConti(
   const candidates: { score: number; song: number; slot: number }[] = [];
   for (let song = 0; song < count; song += 1) {
     if (slots[song] !== undefined || !named(song)) continue;
-    for (let slot = 0; slot < count; slot += 1) {
+    for (let slot = 0; slot < slotCount; slot += 1) {
       if (taken.has(slot)) continue;
       const score = titleSimilarity(songTitles[song], pageTitles[slot]);
       if (score >= SAME_TITLE_THRESHOLD) candidates.push({ score, song, slot });
@@ -101,7 +105,7 @@ export function alignPagesToConti(
       taken.add(song);
     }
   }
-  const free = [...Array(count).keys()].filter((slot) => !taken.has(slot));
+  const free = [...Array(slotCount).keys()].filter((slot) => !taken.has(slot));
   return slots.map((slot) => slot ?? (free.shift() as number));
 }
 

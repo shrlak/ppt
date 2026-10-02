@@ -361,6 +361,11 @@ export default function LyricsGenerator({
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
+  // 악보 pages the conti's order does not list (a Plan B song, the 공동체
+  // 고백송 when it is not in the order, a score's second page). No card is
+  // made for them and their lyrics are never read; recognition only reads
+  // their titles, so a listed song whose score sits on one can claim it.
+  const sparePagesRef = useRef<number[]>([]);
   // Settles once the open conti's 악보 previews are drawn; recognition waits
   // on it so the cards' pages are drawn before its larger copies.
   const previewsRef = useRef<Promise<void>>(Promise.resolve());
@@ -895,7 +900,10 @@ export default function LyricsGenerator({
         // Rendering and the setup lookups don't depend on each other, so they
         // run together instead of one after another.
         let renderedPages = 0;
-        const [renderedImages, settings, reliabilities, memory] = await Promise.all([
+        // 악보 pages no card holds: only their titles are read, so a listed
+        // song whose score is on one of them can be moved there.
+        const spares = sparePagesRef.current.filter((page) => !active.some((song) => song.pageIndex === page));
+        const [renderedImages, spareImages, settings, reliabilities, memory] = await Promise.all([
           // Rendering and recognition are both batched: no per-song request loop.
           // The cards' previews are drawn first, since they are what is on
           // screen; a page they have drawn is already read, so drawing it again
@@ -910,6 +918,9 @@ export default function LyricsGenerator({
                 return url;
               }),
             ),
+          ),
+          previewsRef.current.then(() =>
+            Promise.all(spares.map((page) => doc.renderPage(page, RECOGNITION_RENDER_WIDTH, 'png'))),
           ),
           // Shared settings: concurrent model pool and the
           // excluded-title list, synced across every device via the proxy.
@@ -950,10 +961,10 @@ export default function LyricsGenerator({
         // Quick title pass. Best-effort: on failure the full pass still runs,
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
-        let titleScores: ParsedScore[] = active.map(() => ({ order: [], sections: [] }));
+        let titleScores: ParsedScore[] = [...active, ...spares].map(() => ({ order: [], sections: [] }));
         try {
           const titleResult = await recognizeAdaptiveBatch(
-            images,
+            [...images, ...spareImages],
             settings,
             'titles',
             undefined,
@@ -978,17 +989,28 @@ export default function LyricsGenerator({
         // 콘티 순서대로 악보 배치: the cards follow the conti's song order, but
         // scanned pages could only be handed out in PDF order. Now that each
         // page's title is known, give every song the page that carries it.
+        // The spare pages come after the cards' own, so a song only moves
+        // onto one when its title is there.
         const slots = alignPagesToConti(
           active.map((song) => song.title),
           aliasedTitles.map((identity) => identity.title),
         );
         if (slots.some((slot, index) => slot !== index)) {
-          const pages = active.map((song) => song.pageIndex);
+          const pages = [...active.map((song) => song.pageIndex), ...spares];
+          const spareHashes = await Promise.all(
+            spareImages.map((image) => hashPageImage(image).catch(() => undefined)),
+          );
           const permute = <T,>(values: T[]) => slots.map((slot) => values[slot]);
+          const before = active.map((song) => song.pageIndex as number);
           active = active.map((song, index) => ({ ...song, pageIndex: pages[slots[index]] }));
-          images = permute(images);
-          pageHashes = permute(pageHashes);
+          images = permute([...images, ...spareImages]);
+          pageHashes = permute([...pageHashes, ...spareHashes]);
           aliasedTitles = permute(aliasedTitles);
+          // A page a song gave up is spare now; one it took is not.
+          const held = new Set(active.map((song) => song.pageIndex));
+          sparePagesRef.current = [...new Set([...sparePagesRef.current, ...before])]
+            .filter((page) => !held.has(page))
+            .sort((a, b) => a - b);
           active.forEach((song, index) => {
             const found = evidence.get(song.id);
             if (found) evidence.set(song.id, { ...found, pageHash: pageHashes[index], image: images[index] });
@@ -1006,6 +1028,8 @@ export default function LyricsGenerator({
             );
           }
         }
+        // From here on only the cards' own pages are read — spare pages never.
+        aliasedTitles = aliasedTitles.slice(0, active.length);
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
         const titlePlan = planScoreBatch(
@@ -1385,6 +1409,7 @@ export default function LyricsGenerator({
     if (restoreSongs) {
       docRef.current?.destroy();
       docRef.current = null;
+      sparePagesRef.current = [];
       infoRef.current = null;
       setInfo(null);
       setSongs(restoreSongs.map((song) => structuredClone(song)));
@@ -1690,6 +1715,7 @@ export default function LyricsGenerator({
       docRef.current?.destroy();
       const doc = await loadConti(data);
       docRef.current = doc;
+      sparePagesRef.current = [];
       const parsed = doc.parsed;
 
       // The 악보 previews start now, while the library and settings lookups
@@ -1829,25 +1855,13 @@ export default function LyricsGenerator({
         next.push(song);
         if (entry.pageIndex != null) assigned.add(entry.pageIndex);
       }
-      // Music pages the cover didn't list: match against the library by page text,
-      // else add a stub the user can fill in while looking at the score image.
-      for (const page of parsed.musicPages) {
-        if (assigned.has(page) || excludedPages.has(page)) continue;
-        const pageText = normalizeTitle(parsed.pageTexts[page - 1] ?? '');
-        const hit = lib.find((e) => {
-          const t = normalizeTitle(e.title);
-          return t.length >= 2 && pageText.includes(t);
-        });
-        if (hit) {
-          if (confessionSong && normalizeTitle(hit.title) === normalizeTitle(confessionSong.title)) continue;
-          // The page text names a song the library holds: load it right away.
-          next.push(songFromLibrary(hit, page, undefined, linesPerSlide));
-        } else {
-          const stub = blankSong(`새 찬양 (p.${page})`, linesPerSlide);
-          stub.pageIndex = page;
-          next.push(stub);
-        }
-      }
+      // 악보 pages the cover's order does not list are not songs of this
+      // service — a Plan B song, an extra score. They get no card and are
+      // never read for lyrics; their titles only help the listed songs find
+      // their own pages (see recognizeSongsBatch). Without a cover, every
+      // page is a song and none is spare.
+      const unlisted = parsed.musicPages.filter((page) => !assigned.has(page) && !excludedPages.has(page));
+      sparePagesRef.current = hasCover ? unlisted : [];
 
       // Cover-listed songs on the administrator exclusion list (공동체
       // 고백송, 예배 전 준비 찬양 등) never become cards in the first place.
@@ -1886,6 +1900,12 @@ export default function LyricsGenerator({
         );
       } else if (confessionSong) {
         showToast(`'${confessionSong.title}'은 공동체 고백송으로 찬양 슬라이드에서 제외했습니다 (백 슬라이드에 포함).`);
+      }
+      if (sparePagesRef.current.length > 0) {
+        const pages = sparePagesRef.current.map((page) => `p.${page}`).join(', ');
+        showToast(
+          `콘티 순서에 없는 악보 ${sparePagesRef.current.length}장(${pages})은 찬양 편집에 넣지 않고 인식하지 않습니다.`,
+        );
       }
       const postSermonKept = kept.find((song) => song.postSermon);
       if (postSermonKept) {
