@@ -480,7 +480,7 @@ Sunday could never train anything; see `wrangler.toml`.
 | `ADMIN_PASSWORD` | secret | Gate on every shared write, including all learning writes |
 | `SERPAPI_API_KEY` | secret | Optional. Turns on the Google search, through [SerpApi](https://serpapi.com) (free: 250 searches a month): 티스토리·갓피플 for 수요예배 찬양 PPT, and `<곡 제목> 영어 가사` / `<English title> lyrics` for 찬양집회 영어 가사 |
 | `ALLOWED_ORIGINS` | var | Origins allowed to call the proxy, and the only ones allowed to read model files |
-| `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
+| `BUGS_SCRAPING_ALLOWED` | var | `"true"` in this deployment's `wrangler.toml` (the code's default is off). Whether this deployment may read Bugs pages — a permission decision, not a code one. While it is on, `GET /lyrics` also asks Bugs's own track search for the title and reads the lyrics block of up to two sung tracks of exactly that title, scored with the other sites' pages. While it is off, a Bugs search hit may be shown to the user as a **link**, but the page is never fetched. There is deliberately no client-side toggle. |
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD

@@ -86,13 +86,14 @@ describe('lookupDeckConfessionSong', () => {
   });
 
   it('falls back to the 관리자 설정 song when the notice names one the library lacks', async () => {
-    stubLibrary();
+    stubLibrary([...bundled, weekly]);
     const found = await lookupDeckConfessionSong('/', '아직 저장 안 한 곡');
-    expect(found.song?.title).toBe('Celebrate the Light');
+    // The default 관리자 설정 is 우리는 주의 움직이는 교회.
+    expect(found.song?.title).toBe('우리는 주의 움직이는 교회');
   });
 
   it('uses the 관리자 설정 song when no notice names one', async () => {
-    stubLibrary();
-    expect((await lookupDeckConfessionSong('/')).song?.title).toBe('Celebrate the Light');
+    stubLibrary([...bundled, weekly]);
+    expect((await lookupDeckConfessionSong('/')).song?.title).toBe('우리는 주의 움직이는 교회');
   });
 });

@@ -70,7 +70,20 @@ export function isFreeVisionCatalogEntry(entry) {
 export const DEFAULT_EXCLUDED_TITLES = ['공동체 고백송', '예배 전 준비 찬양'];
 
 /** Song the back deck's 공동체 고백 block is rewritten to, unless changed. */
-export const DEFAULT_CONFESSION_SONG = 'Celebrate the Light';
+export const DEFAULT_CONFESSION_SONG = '우리는 주의 움직이는 교회';
+
+/** The 고백송 the bundled back deck prints — and the default before version 2. */
+export const BUNDLED_CONFESSION_SONG = 'Celebrate the Light';
+
+/** The 설교 후 찬양 a Sunday deck gets when its conti names none. */
+export const DEFAULT_POST_SERMON_SONG = '영접송';
+
+/**
+ * Which defaults stored settings were saved under. Before version 2 the
+ * bundled deck's 고백송 was stored because it was the default, and moves to
+ * the new default once; saved at version 2 it is a choice, and stays.
+ */
+export const SETTINGS_DEFAULTS_VERSION = 2;
 
 // Same soft gate as the client's 관리자 설정 — this is a static site with no
 // user accounts, so the password only keeps casual visitors from rewriting
@@ -136,8 +149,17 @@ export function sanitizeExcludedTitles(raw) {
 }
 
 /** A 공동체 고백송 title; a blank one means "leave the back slides alone". */
-export function sanitizeConfessionSong(raw) {
+export function sanitizeConfessionSong(raw, defaultsVersion = SETTINGS_DEFAULTS_VERSION) {
   if (typeof raw !== 'string') return DEFAULT_CONFESSION_SONG;
+  const title = raw.trim().slice(0, 100);
+  const legacyDefault =
+    defaultsVersion !== SETTINGS_DEFAULTS_VERSION && title.toLowerCase() === BUNDLED_CONFESSION_SONG.toLowerCase();
+  return legacyDefault ? DEFAULT_CONFESSION_SONG : title;
+}
+
+/** A 설교 후 찬양 title; a blank one means "add none". */
+export function sanitizePostSermonSong(raw) {
+  if (typeof raw !== 'string') return DEFAULT_POST_SERMON_SONG;
   return raw.trim().slice(0, 100);
 }
 
@@ -158,7 +180,10 @@ export function sanitizeSharedSettings(raw) {
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
-    confessionSong: sanitizeConfessionSong(obj.confessionSong),
+    // No version stored means saved before versions existed (1).
+    confessionSong: sanitizeConfessionSong(obj.confessionSong, obj.defaultsVersion ?? 1),
+    postSermonSong: sanitizePostSermonSong(obj.postSermonSong),
+    defaultsVersion: SETTINGS_DEFAULTS_VERSION,
     roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }

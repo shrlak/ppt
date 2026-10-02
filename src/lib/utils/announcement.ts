@@ -18,7 +18,7 @@
 // 🎵 우리는 주의 움직이는 교회 (G)
 import type { ContiSongEntry } from './types';
 import { normalizeTitle } from '../storage/library';
-import { isTitleSlip } from './contiAlignment';
+import { isTitleSlip, titleSimilarity } from './contiAlignment';
 import { normalizeKeyChain } from './contiText';
 
 export interface AnnouncedSong {
@@ -36,6 +36,8 @@ export interface WorshipAnnouncement {
   songs: AnnouncedSong[];
   /** The 공동체 고백 song, which the back slides carry. */
   confession?: AnnouncedSong;
+  /** The 설교 후 찬양, sung after the sermon rather than in the opening set. */
+  postSermon?: AnnouncedSong;
 }
 
 /** Emoji, keycaps and their joiners — the notice's decoration, never content. */
@@ -46,6 +48,7 @@ const LIST_MARK = /^(?:\d{1,2}\s*️?⃣|\u{1F51F}|[①-⑳]|\d{1,2}\s*[.)](?!\d
 const LABELED = /^([^:：]{1,14})[:：]\s*(.*)$/;
 const SONG_LIST_LABEL = /찬양\s*곡|찬양\s*순서|곡\s*순서|찬양\s*리스트|셋\s*리스트|콘티|set\s*list/i;
 const CONFESSION_LABEL = /공동체\s*고백/;
+const POST_SERMON_LABEL = /설교\s*후/;
 const SCRIPTURE_LABEL = /^(?:본문|말씀)$/;
 const THEME_LABEL = /^(?:주제|설교\s*제목|말씀\s*제목|제목)$/;
 const KOREAN_DATE = /(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/;
@@ -82,7 +85,7 @@ export function parseAnnouncedSong(raw: string): AnnouncedSong | null {
  */
 export function parseWorshipAnnouncement(text: string): WorshipAnnouncement | null {
   const result: WorshipAnnouncement = { songs: [] };
-  let section: 'songs' | 'confession' | 'other' | null = null;
+  let section: 'songs' | 'confession' | 'postSermon' | 'other' | null = null;
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = undecorated(rawLine);
@@ -100,6 +103,10 @@ export function parseWorshipAnnouncement(text: string): WorshipAnnouncement | nu
     const listed = LIST_MARK.test(rawLine.trim()) || LIST_MARK.test(line);
     // `찬양 순서` / `공동체 고백` on a line of their own head a section too.
     if (!listed && line.length <= 14 && !/[()（）[\]]/.test(line)) {
+      if (POST_SERMON_LABEL.test(line)) {
+        section = 'postSermon';
+        continue;
+      }
       if (CONFESSION_LABEL.test(line)) {
         section = 'confession';
         continue;
@@ -113,7 +120,11 @@ export function parseWorshipAnnouncement(text: string): WorshipAnnouncement | nu
     if (labeled && !/https?$/i.test(labeled[1])) {
       const label = labeled[1].trim();
       const value = labeled[2].trim();
-      if (CONFESSION_LABEL.test(label)) {
+      if (POST_SERMON_LABEL.test(label)) {
+        section = 'postSermon';
+        const song = value ? parseAnnouncedSong(value) : null;
+        if (song) result.postSermon ??= song;
+      } else if (CONFESSION_LABEL.test(label)) {
         section = 'confession';
         const song = value ? parseAnnouncedSong(value) : null;
         if (song) result.confession ??= song;
@@ -138,6 +149,9 @@ export function parseWorshipAnnouncement(text: string): WorshipAnnouncement | nu
     } else if (section === 'confession' && !result.confession) {
       const song = parseAnnouncedSong(rawLine.trim());
       if (song) result.confession = song;
+    } else if (section === 'postSermon' && !result.postSermon) {
+      const song = parseAnnouncedSong(rawLine.trim());
+      if (song) result.postSermon = song;
     }
   }
 
@@ -257,4 +271,45 @@ export function noticeOutcome<T extends { title: string }>(
     added: pairs.filter(({ item }) => !item).map(({ announced }) => announced.title),
     dropped,
   };
+}
+
+/**
+ * One song under two ways of writing it: `영접송` and the score's
+ * `영접송 (내 맘을 엽니다)`, or a title with a letter slipped.
+ */
+export function isSameSong(a: string, b: string): boolean {
+  return sameTitle(a, b) || titleSimilarity(a, b) >= 0.9;
+}
+
+/**
+ * Which song is sung after the sermon this week, and which conti entry it
+ * takes the place of.
+ *
+ * The notice's `설교 후 찬양:` decides when it names one. Otherwise the
+ * conti's — the song it lists right after the 공동체 고백송. Otherwise the
+ * default from 관리자 설정 (`영접송`), unless the notice already sings that
+ * song in the 찬양곡. A conti entry of the same song lends its 악보 page and
+ * commentary, and leaves the opening set.
+ */
+export function settlePostSermonEntry(
+  entries: ContiSongEntry[],
+  contiPostSermon: ContiSongEntry | undefined,
+  announcement: WorshipAnnouncement | null,
+  defaultTitle: string,
+): { entry: ContiSongEntry; replaces?: ContiSongEntry } | undefined {
+  const named = announcement?.postSermon;
+  if (named) {
+    const found = entries.find((entry) => isSameSong(entry.title, named.title));
+    const entry: ContiSongEntry = found
+      ? { ...found, title: named.title, key: named.key ?? found.key }
+      : { title: named.title, ...(named.key ? { key: named.key } : {}) };
+    return { entry, ...(found ? { replaces: found } : {}) };
+  }
+  // A song the notice sings in the 찬양곡 is part of the opening set.
+  const inNotice = (title: string) => !!announcement?.songs.some((song) => isSameSong(song.title, title));
+  if (contiPostSermon && !inNotice(contiPostSermon.title)) return { entry: contiPostSermon, replaces: contiPostSermon };
+  const title = defaultTitle.trim();
+  if (!title || inNotice(title)) return undefined;
+  const found = entries.find((entry) => isSameSong(entry.title, title));
+  return found ? { entry: found, replaces: found } : { entry: { title } };
 }

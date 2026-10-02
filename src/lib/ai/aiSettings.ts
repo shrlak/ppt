@@ -149,9 +149,28 @@ export const DEFAULT_EXCLUDED_TITLES: string[] = ['공동체 고백송', '예배
  * The song sung as the 공동체 고백송. Its lyric slides live inside the fixed
  * back-slides deck, so this is what the generator rewrites that block to —
  * and what the 콘티 splits off from the songs that need generated slides.
- * The default is the song the bundled back deck already prints.
  */
-export const DEFAULT_CONFESSION_SONG = 'Celebrate the Light';
+export const DEFAULT_CONFESSION_SONG = '우리는 주의 움직이는 교회';
+
+/**
+ * The 공동체 고백송 the bundled back deck prints as supplied — and the
+ * default before DEFAULT_CONFESSION_SONG replaced it.
+ */
+export const BUNDLED_CONFESSION_SONG = 'Celebrate the Light';
+
+/**
+ * The 설교 후 찬양 a Sunday deck gets when its conti names none: sung after
+ * the sermon, before the closing prayer.
+ */
+export const DEFAULT_POST_SERMON_SONG = '영접송';
+
+/**
+ * Which defaults stored settings were saved under. Settings saved before
+ * version 2 still hold the old default 고백송 because it was the default,
+ * not because anyone chose it — those move to the new default once. A song
+ * saved from 관리자 설정 at version 2 is a choice, and stays.
+ */
+export const SETTINGS_DEFAULTS_VERSION = 2;
 
 /** The part of the settings shared across every device via the proxy. */
 export interface SharedRecognitionSettings {
@@ -163,6 +182,13 @@ export interface SharedRecognitionSettings {
    * the back slides exactly as they were supplied".
    */
   confessionSong: string;
+  /**
+   * Title of the 설교 후 찬양 added when a conti names none, filled from the
+   * 곡 라이브러리. An empty string means "add none".
+   */
+  postSermonSong: string;
+  /** SETTINGS_DEFAULTS_VERSION the settings were saved under. */
+  defaultsVersion: number;
   /**
    * Roles the administrator pinned by hand, keyed by `engine:model`.
    *
@@ -178,6 +204,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedRecognitionSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
   confessionSong: DEFAULT_CONFESSION_SONG,
+  postSermonSong: DEFAULT_POST_SERMON_SONG,
+  defaultsVersion: SETTINGS_DEFAULTS_VERSION,
   roleOverrides: {},
 };
 
@@ -196,6 +224,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   attempts: [...DEFAULT_ATTEMPT_ORDER],
   excludedTitles: [...DEFAULT_EXCLUDED_TITLES],
   confessionSong: DEFAULT_CONFESSION_SONG,
+  postSermonSong: DEFAULT_POST_SERMON_SONG,
+  defaultsVersion: SETTINGS_DEFAULTS_VERSION,
   roleOverrides: {},
   geminiApiKey: '',
   geminiModel: DEFAULT_GEMINI_MODEL,
@@ -282,11 +312,24 @@ export function sanitizeExcludedTitles(raw: unknown): string[] {
 
 /**
  * Coerce a stored/received 공동체 고백송 title. Anything that is not a string
- * falls back to the default (the song the bundled back deck prints); an
- * explicitly blank title is kept, and means "don't touch the back slides".
+ * falls back to the default; an explicitly blank title is kept, and means
+ * "don't touch the back slides".
+ *
+ * `defaultsVersion` is the version the settings were saved under: before
+ * SETTINGS_DEFAULTS_VERSION, the bundled deck's song was simply the old
+ * default, and moves to the new one.
  */
-export function sanitizeConfessionSong(raw: unknown): string {
+export function sanitizeConfessionSong(raw: unknown, defaultsVersion: unknown = SETTINGS_DEFAULTS_VERSION): string {
   if (typeof raw !== 'string') return DEFAULT_CONFESSION_SONG;
+  const title = raw.trim().slice(0, 100);
+  const legacyDefault =
+    defaultsVersion !== SETTINGS_DEFAULTS_VERSION && title.toLowerCase() === BUNDLED_CONFESSION_SONG.toLowerCase();
+  return legacyDefault ? DEFAULT_CONFESSION_SONG : title;
+}
+
+/** Coerce a 설교 후 찬양 title the same way; blank means "add none". */
+export function sanitizePostSermonSong(raw: unknown): string {
+  if (typeof raw !== 'string') return DEFAULT_POST_SERMON_SONG;
   return raw.trim().slice(0, 100);
 }
 
@@ -312,7 +355,10 @@ export function sanitizeSharedSettings(raw: unknown): SharedRecognitionSettings 
   return {
     attempts: sanitizeAttemptOrder(obj.attempts),
     excludedTitles: sanitizeExcludedTitles(obj.excludedTitles),
-    confessionSong: sanitizeConfessionSong(obj.confessionSong),
+    // No version stored means saved before versions existed (1).
+    confessionSong: sanitizeConfessionSong(obj.confessionSong, obj.defaultsVersion ?? 1),
+    postSermonSong: sanitizePostSermonSong(obj.postSermonSong),
+    defaultsVersion: SETTINGS_DEFAULTS_VERSION,
     roleOverrides: sanitizeRoleOverrides(obj.roleOverrides),
   };
 }

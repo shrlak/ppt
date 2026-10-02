@@ -53,7 +53,7 @@ const MAX_LINES = 500;
  * DuckDuckGo turns away a client that does not look like a browser, and
  * Bugs and Genius serve their pages to a browser only.
  */
-const BROWSER_USER_AGENT =
+export const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 /** The search the operator would type: the song's title and "영어 가사". */
@@ -446,6 +446,23 @@ export function bugsTitleNames(trackTitle, title) {
   return segments.some((segment) => titleKey(segment) === titleKey(title));
 }
 
+/** Every track row on a Bugs search page — its id, title and artist — once each, in Bugs's order. */
+function bugsTrackRows(html) {
+  const rows = [];
+  const seen = new Set();
+  for (const row of String(html || '').matchAll(/<tr\b[^>]*\btrackId="(\d{1,12})"[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const [, id, body] = row;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id,
+      trackTitle: plainText(body.match(/<p class="title"[^>]*>([\s\S]*?)<\/p>/i)?.[1]),
+      artist: plainText(body.match(/<p class="artist"[^>]*>([\s\S]*?)<\/p>/i)?.[1]),
+    });
+  }
+  return rows;
+}
+
 /**
  * The tracks on a Bugs search page that are the song's English version: the
  * track is listed under the song's title and an English title too ("At The
@@ -453,18 +470,11 @@ export function bugsTitleNames(trackTitle, title) {
  */
 export function extractBugsTrackHits(html, title) {
   if (!titleKey(title)) return [];
-  const source = String(html || '');
   const hits = [];
-  const seen = new Set();
-  for (const row of source.matchAll(/<tr\b[^>]*\btrackId="(\d{1,12})"[^>]*>([\s\S]*?)<\/tr>/gi)) {
-    const [, id, body] = row;
-    if (seen.has(id)) continue;
-    const trackTitle = plainText(body.match(/<p class="title"[^>]*>([\s\S]*?)<\/p>/i)?.[1]);
-    const artist = plainText(body.match(/<p class="artist"[^>]*>([\s\S]*?)<\/p>/i)?.[1]);
+  for (const { id, trackTitle, artist } of bugsTrackRows(html)) {
     if (!trackTitle || !bugsTitleNames(trackTitle, title) || NOT_SUNG.test(trackTitle)) continue;
     const englishTitle = englishTitleFrom(trackTitle, title);
     if (!englishTitle) continue;
-    seen.add(id);
     hits.push({
       url: `https://music.bugs.co.kr/track/${id}`,
       host: 'music.bugs.co.kr',
@@ -473,6 +483,24 @@ export function extractBugsTrackHits(html, title) {
     });
   }
   return hits;
+}
+
+/**
+ * The tracks on a Bugs search page that are this song, sung — the pages to
+ * read its Korean lyrics from. A track listed under a longer title is
+ * another song, and an instrumental has no lyrics. In Bugs's own order.
+ */
+export function extractBugsSongHits(html, title, limit = MAX_BUGS_PAGES) {
+  if (!titleKey(title)) return [];
+  return bugsTrackRows(html)
+    .filter(({ trackTitle }) => trackTitle && bugsTitleNames(trackTitle, title) && !NOT_SUNG.test(trackTitle))
+    .slice(0, limit)
+    .map(({ id, trackTitle, artist }) => ({
+      url: `https://music.bugs.co.kr/track/${id}`,
+      host: 'music.bugs.co.kr',
+      title: trackTitle.slice(0, 200),
+      ...(artist ? { artist: artist.slice(0, 100) } : {}),
+    }));
 }
 
 /**

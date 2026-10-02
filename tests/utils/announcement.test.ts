@@ -4,6 +4,7 @@ import {
   matchAnnouncement,
   parseAnnouncedSong,
   parseWorshipAnnouncement,
+  settlePostSermonEntry,
 } from '../../src/lib/utils/announcement';
 import type { ContiSongEntry } from '../../src/lib/utils/types';
 
@@ -174,5 +175,50 @@ describe('applyAnnouncementToEntries', () => {
     const result = applyAnnouncementToEntries(withConfession, parseWorshipAnnouncement(NOTICE)!, [4, 5, 6, 7, 8, 9]);
     expect(result.entries.map((e) => e.title)).not.toContain('우리는 주의 움직이는 교회');
     expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('settlePostSermonEntry', () => {
+  const praise: ContiSongEntry[] = [
+    { title: '그 사랑', key: 'G', pageIndex: 5 },
+    { title: '임재', key: 'G', pageIndex: 7 },
+  ];
+
+  it('adds the default 영접송 when neither the conti nor the notice names one', () => {
+    expect(settlePostSermonEntry(praise, undefined, null, '영접송')).toEqual({ entry: { title: '영접송' } });
+  });
+
+  it("keeps the conti's own 설교 후 찬양", () => {
+    const conti = { title: '축복하노라', key: 'F', pageIndex: 9 };
+    expect(settlePostSermonEntry([...praise, conti], conti, null, '영접송')).toEqual({ entry: conti, replaces: conti });
+  });
+
+  it('takes a listed copy of the default song out of the opening set, with its page', () => {
+    const listed = { title: '영접송 (내 맘을 엽니다)', key: 'G', pageIndex: 8 };
+    expect(settlePostSermonEntry([...praise, listed], undefined, null, '영접송')).toEqual({
+      entry: listed,
+      replaces: listed,
+    });
+  });
+
+  it("lets the notice's 설교 후 찬양 decide", () => {
+    const notice = parseWorshipAnnouncement('찬양곡:\n1. 그 사랑 (G)\n설교 후 찬양: 축복하노라 (F)')!;
+    expect(notice.postSermon).toEqual({ title: '축복하노라', key: 'F' });
+    expect(settlePostSermonEntry(praise, undefined, notice, '영접송')?.entry).toEqual({ title: '축복하노라', key: 'F' });
+  });
+
+  it('adds none when the notice already sings the default song in the 찬양곡', () => {
+    const notice = parseWorshipAnnouncement('찬양곡:\n1. 그 사랑 (G)\n2. 영접송 (G)')!;
+    expect(settlePostSermonEntry(praise, undefined, notice, '영접송')).toBeUndefined();
+  });
+
+  it("leaves the conti's 설교 후 찬양 in the opening set when the notice sings it there", () => {
+    const conti = { title: '축복하노라', key: 'F', pageIndex: 9 };
+    const notice = parseWorshipAnnouncement('찬양곡:\n1. 그 사랑 (G)\n2. 축복하노라 (F)')!;
+    expect(settlePostSermonEntry([...praise, conti], conti, notice, '')).toBeUndefined();
+  });
+
+  it('adds none when the default is cleared', () => {
+    expect(settlePostSermonEntry(praise, undefined, null, '  ')).toBeUndefined();
   });
 });
