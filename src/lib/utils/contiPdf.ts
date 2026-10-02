@@ -3,7 +3,13 @@
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ContiInfo, ParsedConti } from './types';
-import { classifyPages, matchSongsToPages, parseCoverText, parseSermonInfoText } from './contiText';
+import {
+  classifyPages,
+  matchSongsToPages,
+  nameUntitledRowsFromLayout,
+  parseCoverText,
+  parseSermonInfoText,
+} from './contiText';
 import { looksLikeChordSheetText, type PositionedPage, type PositionedText } from './chordSheet';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -125,6 +131,12 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   // to the same list, and parsing them separately loses the pairing.
   const coverText = coverPages.map((page) => pageTexts[page - 1]).join('\n');
   const info: ContiInfo = (coverPages.length > 0 ? parseCoverText(coverText) : null) ?? { songs: [] };
+  // A song-table title the text order lost (drawn last, in another font) is
+  // still in its row on the page.
+  nameUntitledRowsFromLayout(
+    info,
+    coverPages.map((page) => positionedPages[page - 1]),
+  );
 
   // The sermon title and 본문 are written together on the cover, so that is
   // where they are taken from first.

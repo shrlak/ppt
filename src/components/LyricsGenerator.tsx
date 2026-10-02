@@ -37,7 +37,12 @@ import LibraryAddSearch from './LibraryAddSearch';
 import { getSyncedAiSettings } from '../lib/ai/aiSettings';
 import { applyScoreToSong, recognizeScoreRaced } from '../lib/ai/scoreRecognition';
 import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
-import { MIN_ATTEMPT_MS, createRecognitionDeadline } from '../lib/ai/recognitionBudget';
+import {
+  CORRECTOR_WAIT_MS,
+  MIN_ATTEMPT_MS,
+  createRecognitionDeadline,
+  rescueAttemptMs,
+} from '../lib/ai/recognitionBudget';
 import { fetchLearningMemory, fetchModelReliabilities } from '../lib/learning/learningClient';
 import {
   applySafeCorrections,
@@ -47,7 +52,7 @@ import {
   EMPTY_MEMORY,
   type LearningMemory,
 } from '../lib/learning/onlineLearning';
-import { ERROR_CATEGORY_LABELS } from '../lib/ai/recognitionObservation';
+import { ERROR_CATEGORY_LABELS, classifyRecognitionError } from '../lib/ai/recognitionObservation';
 import type { RecognitionObservation } from '../lib/ai/recognitionObservation';
 import { hashPageImage, hashText } from '../lib/ai/pageHash';
 import { scoreObservation } from '../lib/ai/modelReliability';
@@ -87,6 +92,19 @@ const RECOGNITION_RENDER_WIDTH = 1600;
  * image per request leaves plenty of payload headroom.
  */
 const RESCUE_RENDER_WIDTH = 2200;
+
+/**
+ * What a card says when its page could not be read, by what went wrong.
+ * A timeout is the one a person can do something about: the models were
+ * slow, not wrong, and the same page read again on its own usually comes
+ * back.
+ */
+function rescueFailureMessage(error: unknown): string {
+  if (classifyRecognitionError(error) === 'timeout') {
+    return 'AI 모델이 제한 시간 안에 답하지 않았습니다. 이 곡만 다시 인식하면 대개 읽힙니다.';
+  }
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** How often the recognition progress percentage refreshes on screen. */
 const PROGRESS_TICK_MS = 400;
@@ -864,11 +882,6 @@ export default function LyricsGenerator({
 
       enterPhase('render', tracked.ids);
 
-      // The whole job runs against one clock (see recognitionBudget.ts): each
-      // stage has a point it must be done by, so a slow or silent model can
-      // no longer stretch a conti past two minutes.
-      const deadline = createRecognitionDeadline();
-
       /** Models whose free daily allowance ran out during this conti. */
       const exhausted = new Set<string>();
 
@@ -929,6 +942,11 @@ export default function LyricsGenerator({
             needsReview: true,
           });
         });
+        // The model calls run against one clock (see recognitionBudget.ts):
+        // each stage has a point it must be done by, so a slow or silent
+        // model cannot stretch a conti out. It starts now, with the pages
+        // drawn — drawing them is not time the models have to read.
+        const deadline = createRecognitionDeadline();
         // Quick title pass. Best-effort: on failure the full pass still runs,
         // it just can't resolve library songs early.
         enterPhase('titles', tracked.ids);
@@ -1120,17 +1138,20 @@ export default function LyricsGenerator({
         // seen this deployment's own hard pages, so it can propose a fix where
         // every vision model made the same mistake and consensus had nothing
         // to choose between. Every failure leaves consensus exactly as it was.
-        // Waited for only as long as the budget allows: a runtime still
-        // downloading past that point is simply not used this time.
+        // Waited for only briefly: it loaded while the models read, and a
+        // runtime still downloading now is simply not used this time — the
+        // pages waiting on a rescue are not held for it.
         const corrector = await Promise.race([
           correctorPromise,
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), deadline.remaining('rescue'))),
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), Math.min(CORRECTOR_WAIT_MS, deadline.remaining('crosscheck'))),
+          ),
         ]);
         if (corrector) {
           enterPhase('crosscheck', [...scoreById.keys()]);
           for (const [id, score] of [...scoreById.entries()]) {
             if (isCancelled(id)) continue;
-            if (deadline.remaining('rescue') < MIN_ATTEMPT_MS) break;
+            if (deadline.remaining('crosscheck') === 0) break;
             const found = evidence.get(id);
             scoreById.set(
               id,
@@ -1211,19 +1232,21 @@ export default function LyricsGenerator({
         enterPhase('rescue', needRescue.map(({ song }) => song.id));
         await Promise.all(
           needRescue.map(async ({ song, image, identity }) => {
-            // Out of time for another model call: a title is still enough for
-            // the web pass to find the lyrics, so hand it straight there.
-            if (deadline.remaining('rescue') < MIN_ATTEMPT_MS) {
-              const lookupTitle = lyricsLookupTitle(song.title, scoreById.get(song.id)?.title ?? identity.title);
-              if (lookupTitle && !/^새 찬양/.test(lookupTitle)) {
-                webQueue.set(song.id, {
-                  score: scoreById.get(song.id) ?? { ...identity, order: [], sections: [] },
-                  engine: lyricEngine,
-                  title: lookupTitle,
-                });
+            // What the batch passes already read off this page.
+            const known: ParsedScore = scoreById.get(song.id) ?? { ...identity, order: [], sections: [] };
+            // No lyrics off the page: a title — the conti's, or the one read
+            // off the 악보 — is still enough for the web pass to find them.
+            const toWebOrFail = (score: ParsedScore, engine: string, failure: string) => {
+              const lookupTitle = lyricsLookupTitle(song.title, score.title);
+              if (lookupTitle && !isPlaceholderTitle(lookupTitle)) {
+                webQueue.set(song.id, { score, engine, title: lookupTitle });
               } else {
-                failures.set(song.id, '인식 시간이 초과되어 가사를 읽지 못했습니다.');
+                failures.set(song.id, failure);
               }
+            };
+            // Out of time for another model call: hand the title straight on.
+            if (deadline.remainingTotal() < MIN_ATTEMPT_MS) {
+              toWebOrFail(known, lyricEngine, '인식 시간이 초과되어 가사를 읽지 못했습니다.');
               return;
             }
             try {
@@ -1232,14 +1255,14 @@ export default function LyricsGenerator({
                 .renderPage(song.pageIndex as number, RESCUE_RENDER_WIDTH, 'png')
                 .catch(() => image);
               // Hard page: race the complete model pool and take the first
-              // non-empty answer.
-              const single = await recognizeScoreRaced(rescueImage, settings, deadline.remaining('rescue'));
+              // non-empty answer. One page takes a model as long to read as
+              // it takes, so the call always gets a full window.
+              const single = await recognizeScoreRaced(rescueImage, settings, rescueAttemptMs(deadline));
               if (isCancelled(song.id)) return;
-              const known = scoreById.get(song.id);
               const merged: ParsedScore = {
                 ...single.score,
-                title: single.score.title ?? known?.title ?? identity.title,
-                key: single.score.key ?? known?.key ?? identity.key,
+                title: single.score.title ?? known.title,
+                key: single.score.key ?? known.key,
               };
               if (discardNonScorePage(song, merged)) {
                 resolvedIds.add(song.id);
@@ -1260,24 +1283,23 @@ export default function LyricsGenerator({
                 fillFromLibrary(song, saved);
                 return;
               }
-              const lookupTitle = lyricsLookupTitle(song.title, merged.title);
               if (merged.sections.length === 0) {
-                // No lyrics off the page, but a title is enough to look the
-                // song up — the web pass fills it or reports the failure.
-                if (lookupTitle && !/^새 찬양/.test(lookupTitle)) {
-                  webQueue.set(song.id, { score: merged, engine: single.engine, title: lookupTitle });
-                } else {
-                  failures.set(song.id, '가사를 읽지 못했습니다.');
-                }
+                // The web pass fills it or reports the failure.
+                toWebOrFail(merged, single.engine, '가사를 읽지 못했습니다.');
                 return;
               }
+              const lookupTitle = lyricsLookupTitle(song.title, merged.title);
               // Same as the batch path: show it now, finish it in the web pass.
               setSongs((current) =>
                 current.map((s) => (s.id === song.id && !isCancelled(song.id) ? applyScoreToSong(s, merged) : s)),
               );
               webQueue.set(song.id, { score: merged, engine: single.engine, title: lookupTitle });
             } catch (error) {
-              failures.set(song.id, error instanceof Error ? error.message : String(error));
+              if (isCancelled(song.id)) return;
+              // The retry failed too — most often every model was too slow
+              // to answer. A song whose title is known still gets its lyrics
+              // from the web rather than a failed card.
+              toWebOrFail(known, lyricEngine, rescueFailureMessage(error));
             }
           }),
         );

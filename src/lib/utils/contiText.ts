@@ -1,7 +1,9 @@
 import type { ContiInfo, ContiSongEntry, LibraryEntry } from './types';
+import type { PositionedPage, PositionedText } from './chordSheet';
 import { normalizeTitle } from '../storage/library';
 import { DEFAULT_CONFESSION_SONG } from '../ai/aiSettings';
 import { extractPartOrder } from './orderParser';
+import { isPlaceholderTitle } from './contiAlignment';
 
 /** `주님의 사랑 (E): 설명...` — title, musical key, description. */
 const SONG_LINE = /^(.{1,40}?)\s*[(（]\s*([A-Ga-g][#♯bB♭]?m?)\s*[)）]\s*[:：]\s*(.*)$/;
@@ -44,9 +46,23 @@ const KEY_ARROW = String.raw`\s*(?:->|=>|→|⇒|~)\s*`;
 const SONG_TABLE_ROW = new RegExp(
   String.raw`^(\d{1,2})\s*[.)]?${LABEL_GAP}(\S.*?)\s+(${KEY}(?:${KEY_ARROW}${KEY})*)\s*$`,
 );
+/**
+ * `1 G` — a row whose 찬양 cell has no text at all. The title was written by
+ * hand (pen on a tablet, or a scan pasted into the cell), so the PDF holds it
+ * only as ink; the order number and the key are still typed.
+ */
+const UNTITLED_TABLE_ROW = new RegExp(
+  String.raw`^(\d{1,2})\s*[.)]?${LABEL_GAP}(${KEY}(?:${KEY_ARROW}${KEY})*)\s*$`,
+);
+/** `1` — an order cell alone on its line: the row's cells sat on different baselines. */
+const ORDER_CELL_RE = /^(\d{1,2})\s*[.)]?$/;
+/** `1 주님의 은혜 넘치네` — order and title, with the key cell on the next line. */
+const ORDER_AND_TITLE_RE = new RegExp(String.raw`^(\d{1,2})\s*[.)]?${LABEL_GAP}(\S.*)$`);
+/** A title cell can wrap, but a table row is never more than a few lines tall. */
+const MAX_TITLE_CELL_LINES = 3;
 
 /** `• 매일매일 (A Key)` — the per-song commentary heading under the table. */
-const SONG_BULLET_RE = /^[•·∙▪▫◦*]\s*(\S.*?)\s*[(（]([^)）]{1,60})[)）]\s*$/;
+const SONG_BULLET_RE = /^[•·∙▪▫◦*]\s*(.*?)\s*[(（]([^)）]{1,60})[)）]\s*$/;
 /** `o 이 찬양은…` — the indented description under a bullet heading. */
 const BULLET_BODY_RE = /^[o○◦-]\s+(\S.*)$/;
 
@@ -66,6 +82,30 @@ const SECTION_HEADING_RE = /^\d+\s*[.)]\s*\S/;
  */
 const TABLE_HEADER_RE =
   /^(?:순서|번호|No\.?)[\s|｜]*(?:찬양|곡|곡명|제목)[\s|｜]*(?:키|key)\s*$/i;
+
+/**
+ * The cover's title for a song the table could not name. It starts with
+ * `새 찬양` like every other unnamed card, so the title read off the song's
+ * 악보 replaces it (see isPlaceholderTitle), and the number keeps it in the
+ * conti's slot until then.
+ */
+export function untitledSongTitle(order: number): string {
+  return `새 찬양 (${order}번)`;
+}
+
+/**
+ * A title cell's text, or undefined when it holds nothing readable. A font
+ * embedded without a Unicode map comes out of the PDF as private-use or
+ * control characters — the handwriting fonts do this — and that is no title
+ * to search the library or the web by.
+ */
+function readableTitle(raw: string): string | undefined {
+  const cleaned = raw
+    .replace(/[\p{Co}\p{Cc}\p{Cf}�]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /\p{L}/u.test(cleaned) ? cleaned : undefined;
+}
 
 function normalizeKey(raw: string): string {
   const key = raw[0].toUpperCase();
@@ -90,6 +130,90 @@ export function normalizeKeyChain(raw: string): string | undefined {
   const keys = cleaned.split('->').map((part) => part.trim());
   if (keys.some((part) => !new RegExp(String.raw`^${KEY}$`).test(part))) return undefined;
   return keys.map(normalizeKey).join(' -> ');
+}
+
+/** The order number untitledSongTitle wrote into a placeholder, if it is one. */
+function untitledSongOrder(title: string): number | undefined {
+  const match = /^새 찬양 \((\d{1,2})번\)$/.exec(title.trim());
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Pieces of one line of text, left to right, with a space where there is a gap. */
+function joinPositioned(items: PositionedText[]): string {
+  let text = '';
+  let end: number | null = null;
+  for (const item of [...items].sort((a, b) => a.x - b.x)) {
+    if (end !== null && item.x - end > 0.3 * item.size && !/\s$/.test(text)) text += ' ';
+    text += item.str;
+    end = item.x + item.width;
+  }
+  return text;
+}
+
+/**
+ * What the page prints in row `order`'s 찬양 cell: everything drawn between
+ * that row's order number and its key, on the row's line.
+ *
+ * The order number and the key are typed in the table's own font, so they
+ * share a baseline; that pair is what finds the row (a numbered 말씀 line has
+ * a number but no key beside it). The title may sit higher or lower — a
+ * larger or handwriting font has its own baseline — so it only has to be
+ * centred on the row, within its own size of the number.
+ */
+function titleCellText(page: PositionedPage, order: number, key: string): string | undefined {
+  const firstKey = key.split(' -> ')[0];
+  const middle = (item: PositionedText) => item.y + item.size / 2;
+  for (const number of page.items) {
+    if (!new RegExp(String.raw`^${order}\s*[.)]?$`).test(number.str.trim())) continue;
+    const numberEnd = number.x + number.width;
+    const keyCell = page.items
+      .filter(
+        (item) =>
+          item !== number &&
+          item.x >= numberEnd &&
+          Math.abs(item.y - number.y) <= Math.max(2, number.size * 0.25) &&
+          normalizeKeyChain(item.str.trim().split(/\s*(?:->|=>|→|⇒|~)\s*|\s+/)[0]) === firstKey,
+      )
+      .sort((a, b) => a.x - b.x)[0];
+    if (!keyCell) continue;
+    const cell = page.items.filter(
+      (item) =>
+        item !== number &&
+        item !== keyCell &&
+        item.x >= numberEnd - 1 &&
+        item.x + item.width <= keyCell.x + 1 &&
+        Math.abs(middle(item) - middle(number)) <= Math.max(item.size, number.size) * 0.75,
+    );
+    const title = readableTitle(joinPositioned(cell));
+    if (title) return title;
+  }
+  return undefined;
+}
+
+/**
+ * Name the table rows the cover's text could not, from where text sits on
+ * the page.
+ *
+ * A PDF lists its text in the order it was drawn, not the order it is read.
+ * A title set in another font is often drawn last — a handwriting font
+ * embedded as a Type 3 font is — so it comes out after the whole page rather
+ * than between its row's number and key, and the row reads as untitled. Its
+ * position still puts it in its row. A row with truly nothing written in it
+ * (a title in ink) finds nothing here and keeps its placeholder, which the
+ * title read off its 악보 replaces. Mutates info.songs.
+ */
+export function nameUntitledRowsFromLayout(info: ContiInfo, pages: PositionedPage[]): void {
+  for (const song of info.songs) {
+    const order = untitledSongOrder(song.title);
+    if (order === undefined || !song.key) continue;
+    for (const page of pages) {
+      const title = titleCellText(page, order, song.key);
+      if (title) {
+        song.title = title;
+        break;
+      }
+    }
+  }
 }
 
 /**
@@ -135,10 +259,17 @@ export function parseSermonInfoText(text: string): Pick<ContiInfo, 'sermonTitle'
  * otherwise be mistaken for table rows. The bullets are matched back to the
  * table by title so a song keeps its order number while gaining a description,
  * and a song that only ever appears as a bullet is still picked up.
+ *
+ * A row whose title cell holds no readable text — written by hand, or in a
+ * font the PDF cannot map back to letters — keeps its place in the order as
+ * an untitledSongTitle placeholder with its key, so it is paired with its own
+ * 악보 page and named from it. A cover bullet that names it fills it in.
  */
 function parseSongTable(lines: string[]): ContiSongEntry[] {
   const songs: ContiSongEntry[] = [];
   const byTitle = new Map<string, ContiSongEntry>();
+  /** Rows the table could not name, in order, until a bullet names them. */
+  const unnamed: ContiSongEntry[] = [];
   const remember = (song: ContiSongEntry) => {
     const existing = byTitle.get(normalizeTitle(song.title));
     if (existing) return existing;
@@ -149,6 +280,48 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
 
   let inSection = false;
   let bullet: ContiSongEntry | null = null;
+  /** Order number of the last row read, so a loose number must be the next one. */
+  let lastOrder = 0;
+  /**
+   * A row whose cells came out on separate lines, still waiting for its key.
+   * `bare` when the order number stood alone — only a table cell does that;
+   * a number with words after it may be a note, and is a row only once its
+   * key turns up.
+   */
+  let pending: { order: number; title: string[]; bare: boolean } | null = null;
+
+  const addRow = (order: number, rawTitle: string, key?: string) => {
+    lastOrder = order;
+    const title = readableTitle(rawTitle);
+    if (title) {
+      const song = remember({ title, ...(key ? { key } : {}) });
+      if (key) song.key ??= key;
+      return;
+    }
+    const song: ContiSongEntry = { title: untitledSongTitle(order), ...(key ? { key } : {}) };
+    songs.push(song);
+    unnamed.push(song);
+  };
+  const flushPending = () => {
+    if (!pending) return;
+    const { order, title, bare } = pending;
+    pending = null;
+    if (bare) addRow(order, title.join(' '));
+  };
+  /**
+   * The table row a commentary bullet with no readable title of its own (or
+   * one no row carries) describes: the first unnamed row, preferring one in
+   * the same key.
+   */
+  const claimUnnamed = (key: string): ContiSongEntry | undefined => {
+    const index = Math.max(
+      0,
+      unnamed.findIndex((song) => song.key === key),
+    );
+    return unnamed.splice(index, 1)[0];
+  };
+  /** Only the next number in sequence is a row; a stray page number is not. */
+  const isNextRow = (order: number) => order === (pending?.order ?? lastOrder) + 1;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -156,8 +329,10 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
 
     // Either the section heading or the table's header row opens the table.
     if (SONG_SECTION_RE.test(line) || TABLE_HEADER_RE.test(line)) {
+      flushPending();
       inSection = true;
       bullet = null;
+      lastOrder = 0;
       continue;
     }
     if (!inSection) continue;
@@ -166,8 +341,17 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
     if (bulletMatch) {
       const key = normalizeKeyChain(bulletMatch[2]);
       if (key) {
-        bullet = remember({ title: bulletMatch[1].trim(), key });
-        bullet.key ??= key;
+        flushPending();
+        const title = readableTitle(bulletMatch[1]);
+        const known = title ? byTitle.get(normalizeTitle(title)) : undefined;
+        const row = known ?? claimUnnamed(key);
+        if (row && title && !known) {
+          // The bullet names the row the table could not.
+          row.title = title;
+          byTitle.set(normalizeTitle(title), row);
+        }
+        bullet = row ?? (title ? remember({ title, key }) : null);
+        if (bullet) bullet.key ??= key;
         continue;
       }
     }
@@ -191,9 +375,45 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
     if (rowMatch) {
       const key = normalizeKeyChain(rowMatch[3]);
       if (key) {
-        remember({ title: rowMatch[2].trim(), key });
+        flushPending();
+        addRow(Number(rowMatch[1]), rowMatch[2], key);
         continue;
       }
+    }
+
+    // `1 G`: the title cell is ink, not text — the row still holds a song.
+    const untitled = line.match(UNTITLED_TABLE_ROW);
+    if (untitled && isNextRow(Number(untitled[1]))) {
+      const key = normalizeKeyChain(untitled[2]);
+      if (key) {
+        flushPending();
+        addRow(Number(untitled[1]), '', key);
+        continue;
+      }
+    }
+
+    // A row whose cells did not share a baseline (a title in a larger or
+    // handwriting font) comes out a cell per line: `1` / `주님의 은혜` / `G`.
+    const bareOrder = line.match(ORDER_CELL_RE);
+    const orderCell = bareOrder ?? line.match(ORDER_AND_TITLE_RE);
+    if (orderCell && isNextRow(Number(orderCell[1])) && !SECTION_HEADING_RE.test(line)) {
+      flushPending();
+      pending = { order: Number(orderCell[1]), title: orderCell[2] ? [orderCell[2]] : [], bare: !!bareOrder };
+      continue;
+    }
+    if (pending) {
+      const key = normalizeKeyChain(line);
+      if (key) {
+        const { order, title } = pending;
+        pending = null;
+        addRow(order, title.join(' '), key);
+        continue;
+      }
+      if (!SECTION_HEADING_RE.test(line) && pending.title.length < MAX_TITLE_CELL_LINES) {
+        pending.title.push(line);
+        continue;
+      }
+      flushPending();
     }
 
     if (SECTION_HEADING_RE.test(line)) {
@@ -202,6 +422,7 @@ function parseSongTable(lines: string[]): ContiSongEntry[] {
       bullet = null;
     }
   }
+  flushPending();
 
   return songs;
 }
@@ -450,6 +671,8 @@ export function matchSongsToPages(
   const taken = new Set<number>();
 
   for (const song of info.songs) {
+    // A row the cover could not name has nothing to look for yet.
+    if (isPlaceholderTitle(song.title)) continue;
     const want = normalizeTitle(song.title);
     if (!want) continue;
     const hit = musicPages.find(

@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
+/**
+ * A 순서/찬양/키 table conti whose first title is handwritten — ink in the
+ * PDF, not text — followed by four score pages.
+ */
+const HANDWRITTEN_TITLE_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-handwritten-title.pdf');
 const ANNOUNCEMENTS_TEXT = path.join(HERE, '..', 'tests', 'fixtures', 'announcements-sample.txt');
 const LYRICS_TEMPLATE_PPTX = path.join(HERE, '..', 'public', 'template.pptx');
 const SERMON_PPTX = path.join(HERE, '..', 'public', 'bible-template.pptx');
@@ -899,6 +904,30 @@ test('parses the example conti PDF and prefills songs', async ({ page }) => {
   await expect(page.getByTestId('bible-sermon-title-input')).toHaveValue('하나님과 화평을 누리자');
 });
 
+test('keeps a handwritten table title in its slot and names it from its 악보', async ({ page }) => {
+  await stubRecognitionProxy(page, {
+    score: () => stubScore({ title: '주님의 은혜 넘치네', key: 'G' }),
+  });
+  await page.goto('./?service=sunday');
+  await expect(page.getByTestId('upload-dropzone')).toBeVisible();
+  await page.getByTestId('pdf-input').setInputFiles(HANDWRITTEN_TITLE_PDF);
+  await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+  // The conti's order, with the unwritten title still first and in its key.
+  const songCards = page.getByTestId('song-card');
+  await expect(songCards).toHaveCount(4, { timeout: PARSE_TIMEOUT });
+  const titles = await songCards
+    .getByTestId('song-title-input')
+    .evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value));
+  expect(titles).toEqual(['새 찬양 (1번)', '그 사랑', '우리가 넉넉히 이기느니라', '임재']);
+  await expect(songCards.first().locator('.song-key')).toHaveValue('G');
+
+  // Its title comes off the first score page.
+  const card = await recognizeFirstSong(page);
+  await expect(card.getByTestId('song-title-input')).toHaveValue('주님의 은혜 넘치네');
+  await expect(card.locator('.recog-error')).toHaveCount(0);
+});
+
 test('generates a valid pptx from the parsed conti alone', async ({ page }, testInfo) => {
   await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
@@ -1298,6 +1327,42 @@ test.describe('web lyrics candidate review', () => {
 
     await expect(card.getByTestId('web-review')).toHaveCount(0);
     await expect(card.getByTestId('section-textarea').first()).toHaveValue(/가나다라 마바사 아자차/);
+  });
+});
+
+test.describe('a page the models cannot read', () => {
+  test('still gets its lyrics from the web by its conti title instead of failing', async ({ page }) => {
+    const counts = await stubRecognitionProxy(page, {
+      lyrics: {
+        candidates: [
+          webCandidate({
+            title: '주님의 사랑',
+            decision: 'auto',
+            score: 0.95,
+            lines: ['웹에서 찾은 첫째 줄', '웹에서 찾은 둘째 줄', '웹에서 찾은 후렴', '웹에서 찾은 마지막 줄'],
+          }),
+        ],
+        links: [],
+      },
+    });
+    // The title pass answers; every read of the lyrics — the batch and the
+    // page's own retry — fails, as it does when every model is too slow.
+    const titlePass = (body: string) => body.includes('가사, 파트, 진행 순서는');
+    for (const route of [`${PROXY}/gemini/**`, `${PROXY}/openrouter`]) {
+      await page.route(route, async (request) => {
+        if (titlePass(request.request().postData() ?? '')) return request.fallback();
+        await request.fulfill({ status: 500, body: 'upstream timed out' });
+      });
+    }
+
+    await page.goto('./?service=sunday');
+    await uploadExamplePdf(page);
+    const card = await recognizeFirstSong(page);
+
+    await expect(card.locator('.recog-error')).toHaveCount(0);
+    await expect(card.getByTestId('recog-done')).toBeVisible();
+    await expect(card.getByTestId('section-textarea').first()).toHaveValue(/웹에서 찾은 첫째 줄/);
+    expect(counts.lyrics).toBeGreaterThan(0);
   });
 });
 
