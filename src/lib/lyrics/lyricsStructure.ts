@@ -69,25 +69,43 @@ function labelFor(family: string, occurrence: number): string {
   return occurrence <= 1 ? family : `${family}${occurrence}`;
 }
 
+/** A song as a page published it: its parts, and the order it sings them. */
+export interface ScrapedSong {
+  sections: Section[];
+  /** Title slide first, then each part every time it is sung. */
+  order: string[];
+}
+
 /**
  * Split scraped lyric text into labeled sections.
  *
- * Two layouts are handled, in priority order:
+ * Layouts are handled in priority order:
  *  1. Explicit headings — every "1절"/"후렴"/"Bridge" line opens a new part.
- *  2. Blank-line groups — with no headings at all, each blank-line-separated
- *     stanza becomes a part, guessed as verse/chorus by repetition: a stanza
- *     whose text repeats later in the song is the chorus.
+ *  2. Blank-line stanzas, one of which is printed again — that one is the
+ *     chorus, the others verses.
+ *  3. Lines that repeat — a page with no headings and no blank lines (Bugs
+ *     flattens a song this way) still prints its chorus every time it is
+ *     sung, so the longest run of lines printed again is the chorus, the run
+ *     every verse ends with is the pre-chorus, and what lies between are the
+ *     verses or the bridge.
+ *  4. Otherwise blank-line stanzas, verse and chorus taken in turn; and a
+ *     long block with nothing to go by is cut into four-line verses rather
+ *     than left as one part holding the whole song.
  *
+ * A part printed more than once is one section — the order names it again.
  * Intro/interlude headings are dropped: they carry no lyrics, and the slide
  * planner already renders "I" as a title slide.
  */
-export function structureScrapedLyrics(rawLines: string[]): Section[] {
+export function structureScrapedSong(rawLines: string[]): ScrapedSong {
   const lines = rawLines.map((line) => line.trim());
   const hasHeadings = lines.some((line) => parsePartHeading(line) !== null);
-  const groups = hasHeadings ? groupByHeadings(lines) : groupByBlankLines(lines);
+  const groups = hasHeadings ? groupByHeadings(lines) : groupWithoutHeadings(lines);
 
   const counts = new Map<string, number>();
+  const used = new Set<string>();
+  const labelOf = new Map<string, string>();
   const sections: Section[] = [];
+  const order = ['I'];
   for (const group of groups) {
     // Verbatim: a published page is the authority on the words, so the only
     // thing removed here is transport noise (see cleanScrapedLyricLines).
@@ -95,14 +113,26 @@ export function structureScrapedLyrics(rawLines: string[]): Section[] {
     if (body.length === 0) continue;
     if (group.family === 'I') continue; // 간주 has no lyrics to show
 
+    // The same part printed again is sung again, not a new part.
+    const key = `${group.family}:${stanzaKey(body)}`;
+    const known = labelOf.get(key);
+    if (known) {
+      order.push(known);
+      continue;
+    }
     const occurrence = (counts.get(group.family) ?? 0) + 1;
     counts.set(group.family, occurrence);
-    sections.push({
-      label: labelFor(group.family, group.index ?? occurrence),
-      lines: body,
-    });
+    const label = uniqueLabel(labelFor(group.family, group.index ?? occurrence), used);
+    labelOf.set(key, label);
+    sections.push({ label, lines: body });
+    order.push(label);
   }
-  return dedupeLabels(sections);
+  return { sections, order };
+}
+
+/** Just the parts of structureScrapedSong. */
+export function structureScrapedLyrics(rawLines: string[]): Section[] {
+  return structureScrapedSong(rawLines).sections;
 }
 
 interface Group {
@@ -137,7 +167,7 @@ function stanzaKey(lines: string[]): string {
   return lines.join(' ').toLowerCase().replace(/[^0-9a-z가-힣]+/g, '');
 }
 
-function groupByBlankLines(lines: string[]): Group[] {
+function splitStanzas(lines: string[]): string[][] {
   const stanzas: string[][] = [];
   let current: string[] = [];
   for (const line of lines) {
@@ -148,46 +178,140 @@ function groupByBlankLines(lines: string[]): Group[] {
     }
   }
   if (current.length > 0) stanzas.push(current);
+  return stanzas;
+}
 
-  // A stanza printed more than once is the chorus; with no repetition at all
-  // the conventional verse/chorus alternation is the best available guess.
+/** Lines per part when a block gives nothing else to divide it by. */
+const CHUNK_LINES = 4;
+/** A block up to this long is one part as it stands. */
+const SHORT_BLOCK_LINES = 8;
+
+function groupWithoutHeadings(lines: string[]): Group[] {
+  const stanzas = splitStanzas(lines);
   const seen = new Map<string, number>();
-  for (const stanza of stanzas) {
-    const key = stanzaKey(stanza);
-    seen.set(key, (seen.get(key) ?? 0) + 1);
+  for (const stanza of stanzas) seen.set(stanzaKey(stanza), (seen.get(stanzaKey(stanza)) ?? 0) + 1);
+  // A stanza printed more than once is the chorus.
+  if ([...seen.values()].some((count) => count > 1)) {
+    return stanzas.map((stanza) => ({ family: (seen.get(stanzaKey(stanza)) ?? 0) > 1 ? 'C' : 'V', lines: stanza }));
   }
-  const repeats = [...seen.values()].some((count) => count > 1);
+  const byRepeats = groupByRepeatedLines(stanzas.flat());
+  if (byRepeats) return byRepeats;
+  // Nothing repeats to give it away: the conventional verse/chorus turns.
+  if (stanzas.length >= 2) {
+    return stanzas.map((stanza, index) => ({ family: index % 2 === 0 ? 'V' : 'C', lines: stanza }));
+  }
+  const flat = stanzas.flat();
+  if (flat.length <= SHORT_BLOCK_LINES) return flat.length > 0 ? [{ family: 'V', lines: flat }] : [];
+  const chunks: Group[] = [];
+  for (let at = 0; at < flat.length; at += CHUNK_LINES) chunks.push({ family: 'V', lines: flat.slice(at, at + CHUNK_LINES) });
+  return chunks;
+}
 
-  return stanzas.map((stanza, index) => ({
-    family: repeats
-      ? (seen.get(stanzaKey(stanza)) ?? 0) > 1
-        ? 'C'
-        : 'V'
-      : index % 2 === 0
-        ? 'V'
-        : 'C',
-    lines: stanza,
-  }));
+/** Comparison key for one line. */
+function lineMatchKey(line: string): string {
+  return line.toLowerCase().replace(/[^0-9a-z가-힣]+/g, '');
 }
 
 /**
- * Make labels unique. An explicitly numbered heading can collide with the
- * running count (a page that labels "1절" then "절"), and two sections with
- * the same label would make 진행 순서 ambiguous.
+ * Find the chorus in lines printed without headings or breaks: the run of
+ * two or more lines printed again most, weighted by its length. Its
+ * printings divide the song; a run every verse ends with just before it is
+ * the pre-chorus; and a stretch between choruses is a verse when it is as
+ * long as the first verse, the bridge when it is not. Null when no run of
+ * lines is printed twice.
  */
-function dedupeLabels(sections: Section[]): Section[] {
-  const used = new Set<string>();
-  return sections.map((section) => {
-    if (!used.has(section.label)) {
-      used.add(section.label);
-      return section;
+function groupByRepeatedLines(lines: string[]): Group[] | null {
+  const keys = lines.map(lineMatchKey);
+  const n = lines.length;
+  let best: { length: number; starts: number[]; score: number } | null = null;
+  for (let length = Math.floor(n / 2); length >= 2; length -= 1) {
+    const at = new Map<string, number[]>();
+    for (let start = 0; start + length <= n; start += 1) {
+      const run = keys.slice(start, start + length);
+      if (run.some((key) => !key)) continue;
+      const joined = run.join('\n');
+      const list = at.get(joined);
+      if (list) list.push(start);
+      else at.set(joined, [start]);
     }
-    const family = section.label.replace(/\d+$/, '');
+    for (const starts of at.values()) {
+      // Printings that overlap are one printing.
+      const apart: number[] = [];
+      for (const start of starts) if (apart.length === 0 || start >= apart[apart.length - 1] + length) apart.push(start);
+      if (apart.length < 2) continue;
+      const score = length * (apart.length - 1);
+      if (!best || score > best.score || (score === best.score && apart[0] < best.starts[0])) {
+        best = { length, starts: apart, score };
+      }
+    }
+  }
+  if (!best) return null;
+
+  // The song, cut at the chorus: stretches between, choruses in place.
+  const pieces: { chorus: boolean; lines: string[] }[] = [];
+  let cursor = 0;
+  for (const start of best.starts) {
+    if (start > cursor) pieces.push({ chorus: false, lines: lines.slice(cursor, start) });
+    pieces.push({ chorus: true, lines: lines.slice(start, start + best.length) });
+    cursor = start + best.length;
+  }
+  if (cursor < n) pieces.push({ chorus: false, lines: lines.slice(cursor) });
+
+  // A pre-chorus: the same lines ending the first two stretches that lead
+  // into a chorus (the verses). A bridge leading into one later need not
+  // end with it, so it is split off only where it is printed.
+  const leading = pieces.filter((piece, index) => !piece.chorus && pieces[index + 1]?.chorus);
+  let preChorus: string[] = [];
+  if (leading.length >= 2) {
+    const [first, second] = leading;
+    let shared = 0;
+    while (
+      shared < Math.min(first.lines.length, second.lines.length) - 1 &&
+      lineMatchKey(first.lines[first.lines.length - 1 - shared]) ===
+        lineMatchKey(second.lines[second.lines.length - 1 - shared])
+    ) {
+      shared += 1;
+    }
+    preChorus = first.lines.slice(first.lines.length - shared).map(lineMatchKey);
+  }
+  const endsWithPreChorus = (piece: { lines: string[] }) =>
+    preChorus.length > 0 &&
+    piece.lines.length > preChorus.length &&
+    piece.lines.slice(piece.lines.length - preChorus.length).every((line, at) => lineMatchKey(line) === preChorus[at]);
+
+  const groups: Group[] = [];
+  let verseLength = 0;
+  pieces.forEach((piece, index) => {
+    if (piece.chorus) {
+      groups.push({ family: 'C', lines: piece.lines });
+      return;
+    }
+    const splitsOff = !!pieces[index + 1]?.chorus && endsWithPreChorus(piece);
+    const body = splitsOff ? piece.lines.slice(0, piece.lines.length - preChorus.length) : piece.lines;
+    // Verses share a length; a stretch of another length is the bridge.
+    const verse = verseLength === 0 || body.length === verseLength;
+    if (verseLength === 0) verseLength = body.length;
+    if (body.length > 0) groups.push({ family: verse ? 'V' : 'B', lines: body });
+    if (splitsOff) groups.push({ family: 'PC', lines: piece.lines.slice(piece.lines.length - preChorus.length) });
+  });
+  return groups;
+}
+
+/**
+ * A label no part uses yet. An explicitly numbered heading can collide with
+ * the running count (a page that labels "1절" then "절"), and two sections
+ * with the same label would make 진행 순서 ambiguous.
+ */
+function uniqueLabel(label: string, used: Set<string>): string {
+  let chosen = label;
+  if (used.has(chosen)) {
+    const family = label.replace(/\d+$/, '');
     let n = 2;
     while (used.has(`${family}${n}`)) n += 1;
-    used.add(`${family}${n}`);
-    return { label: `${family}${n}`, lines: section.lines };
-  });
+    chosen = `${family}${n}`;
+  }
+  used.add(chosen);
+  return chosen;
 }
 
 /**

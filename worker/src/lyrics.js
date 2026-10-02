@@ -263,10 +263,20 @@ export function bugsLyricsCandidate(html, url, adapter) {
   if (!lyrics) return null;
   const candidate = extractGenericLyrics(lyrics, url, adapter);
   if (!candidate) return null;
+  // Bugs prints the song as plain text, so a blank line in it is a real
+  // break between parts — kept as '' for the editor to divide the song by.
+  // (A blog's markup leaves blank lines anywhere; only this page is trusted.)
+  const stanzaLines = [];
+  for (const raw of lyrics.split('<br>')) {
+    const line = decodeHtmlEntities(raw).replace(/[\t 　]+/g, ' ').trim();
+    if (line || (stanzaLines.length > 0 && stanzaLines[stanzaLines.length - 1] !== '')) stanzaLines.push(line);
+  }
+  while (stanzaLines.length > 0 && stanzaLines[stanzaLines.length - 1] === '') stanzaLines.pop();
   const heading = String(html || '').match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? '';
   const [title, ...artist] = decodeHtmlEntities(heading).split(/\s+\/\s+/);
   return {
     ...candidate,
+    lines: stanzaLines.slice(0, 200),
     title: title.trim() || candidate.title,
     ...(artist.length > 0 && artist.join(' / ').trim() ? { artist: artist.join(' / ').trim() } : {}),
   };

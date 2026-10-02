@@ -3,6 +3,7 @@ import {
   orderForSections,
   parsePartHeading,
   structureScrapedLyrics,
+  structureScrapedSong,
 } from '../../src/lib/lyrics/lyricsStructure';
 
 // Invented placeholder text: these tests are about part structure, not about
@@ -52,8 +53,10 @@ describe('structureScrapedLyrics', () => {
   });
 
   it('falls back to blank-line stanzas, calling the repeated one the chorus', () => {
-    const sections = structureScrapedLyrics([...V1, '', ...C, '', ...V2, '', ...C]);
-    expect(sections.map((s) => s.label)).toEqual(['V', 'C', 'V2', 'C2']);
+    const song = structureScrapedSong([...V1, '', ...C, '', ...V2, '', ...C]);
+    // The chorus is one part, sung twice.
+    expect(song.sections.map((s) => s.label)).toEqual(['V', 'C', 'V2']);
+    expect(song.order).toEqual(['I', 'V', 'C', 'V2', 'C']);
   });
 
   it('alternates verse and chorus when nothing repeats to give it away', () => {
@@ -77,6 +80,47 @@ describe('structureScrapedLyrics', () => {
   it('returns nothing for a page with no lyrics on it', () => {
     expect(structureScrapedLyrics([])).toEqual([]);
     expect(structureScrapedLyrics(['후렴', '   '])).toEqual([]);
+  });
+});
+
+describe('structureScrapedSong — a page with no headings and no blank lines', () => {
+  // Four-line parts, as a page usually prints them (invented text).
+  const verse1 = ['첫째 절 첫 줄', '첫째 절 둘째 줄', '첫째 절 셋째 줄', '첫째 절 넷째 줄'];
+  const verse2 = ['둘째 절 첫 줄', '둘째 절 둘째 줄', '둘째 절 셋째 줄', '둘째 절 넷째 줄'];
+  const chorus = ['후렴 첫 줄', '후렴 둘째 줄', '후렴 셋째 줄', '후렴 넷째 줄'];
+  const pre = ['다리 놓는 첫 줄', '다리 놓는 둘째 줄'];
+  const bridge = ['브릿지 첫 줄', '브릿지 둘째 줄'];
+
+  it('finds the chorus by its printing again, and the verses between', () => {
+    const song = structureScrapedSong([...verse1, ...chorus, ...verse2, ...chorus]);
+    expect(song.sections).toEqual([
+      { label: 'V', lines: verse1 },
+      { label: 'C', lines: chorus },
+      { label: 'V2', lines: verse2 },
+    ]);
+    expect(song.order).toEqual(['I', 'V', 'C', 'V2', 'C']);
+  });
+
+  it('splits off the pre-chorus every verse leads in with, and calls a stretch of another length the bridge', () => {
+    const song = structureScrapedSong([
+      ...verse1, ...pre, ...chorus,
+      ...verse2, ...pre, ...chorus,
+      ...bridge, ...chorus, ...chorus,
+    ]);
+    expect(song.sections.map((s) => s.label)).toEqual(['V', 'PC', 'C', 'V2', 'B']);
+    expect(song.sections.find((s) => s.label === 'PC')?.lines).toEqual(pre);
+    expect(song.sections.find((s) => s.label === 'B')?.lines).toEqual(bridge);
+    expect(song.order).toEqual(['I', 'V', 'PC', 'C', 'V2', 'PC', 'C', 'B', 'C', 'C']);
+  });
+
+  it('cuts a long block with nothing repeated into four-line verses, not one part', () => {
+    const sections = structureScrapedLyrics([...verse1, ...verse2, ...chorus]);
+    expect(sections.map((s) => s.label)).toEqual(['V', 'V2', 'V3']);
+    expect(sections.every((s) => s.lines.length === 4)).toBe(true);
+  });
+
+  it('keeps a short song as one part', () => {
+    expect(structureScrapedLyrics(verse1).map((s) => s.label)).toEqual(['V']);
   });
 });
 

@@ -9,7 +9,7 @@
 // editor's parsing rules; the words are not touched at all, because a scraped
 // page goes into the editor 그대로 (see koreanSpelling).
 import type { Section } from '../utils/types';
-import { orderForSections, structureScrapedLyrics } from './lyricsStructure';
+import { structureScrapedSong } from './lyricsStructure';
 
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
 
@@ -91,7 +91,7 @@ function toCandidate(raw: unknown): ScoredLyricsCandidate | null {
     ? value.lines.filter((line): line is string => typeof line === 'string')
     : [];
   if (lines.length === 0) return null;
-  const sections = structureScrapedLyrics(lines);
+  const { sections, order } = structureScrapedSong(lines);
   if (sections.length === 0) return null;
   const decision = DECISIONS.includes(value.decision as CandidateDecision)
     ? (value.decision as CandidateDecision)
@@ -101,7 +101,7 @@ function toCandidate(raw: unknown): ScoredLyricsCandidate | null {
     title: typeof value.title === 'string' ? value.title : '',
     artist: typeof value.artist === 'string' && value.artist ? value.artist : undefined,
     sections,
-    order: orderForSections(sections),
+    order,
     sourceUrl: typeof value.url === 'string' ? value.url : '',
     sourceHost: typeof value.host === 'string' ? value.host : '',
     source: typeof value.source === 'string' ? value.source : 'web',
