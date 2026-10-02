@@ -10,10 +10,13 @@ import {
   deriveSongsFromMusicPages,
   looksLikeInfoPage,
   matchSongsToPages,
+  nameUntitledRowsFromLayout,
   parseCoverText,
   parseSermonInfoText,
   splitLyricsAndConfessionSongs,
+  untitledSongTitle,
 } from '../../src/lib/utils/contiText';
+import { isPlaceholderTitle } from '../../src/lib/utils/contiAlignment';
 import type { LibraryEntry } from '../../src/lib/utils/types';
 
 const coverText = readFileSync(join(__dirname, '..', 'fixtures', 'cover.txt'), 'utf-8');
@@ -126,6 +129,175 @@ describe('parseCoverText — layout variations', () => {
   it('needs service context, not just something table-shaped', () => {
     // A song list with no date, sermon title or 본문 is not a cover page.
     expect(parseCoverText('순서 찬양 키\n1 첫째 곡 A')).toBeNull();
+  });
+});
+
+/** The 2026.08.09-style cover with the first song's title written by hand. */
+function handwrittenCover(rows: string[], tail: string[] = []): string {
+  return [
+    '본문 | 전도서 12 장 1-8 절',
+    '날짜 | 2026.10.04',
+    '2. 찬양 콘티 (Plan A)',
+    '순서 찬양 키',
+    ...rows,
+    ...tail,
+    '3. 본문',
+    '1. 너는 청년의 때에 너의 창조주를 기억하라 G',
+  ].join('\n');
+}
+
+describe('parseCoverText — a title written by hand', () => {
+  const rest = ['2 그 사랑 G', '3 우리가 넉넉히 이기느니라 A', '4 임재 G'];
+
+  it('keeps a row with no title text in its slot, with its key', () => {
+    // The handwritten title is ink: only the order number and the key are text.
+    const info = parseCoverText(handwrittenCover(['1 G', ...rest]));
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      [untitledSongTitle(1), 'G'],
+      ['그 사랑', 'G'],
+      ['우리가 넉넉히 이기느니라', 'A'],
+      ['임재', 'G'],
+    ]);
+    // A placeholder is what the 악보's own title replaces.
+    expect(isPlaceholderTitle(info?.songs[0].title)).toBe(true);
+  });
+
+  it('treats a title in glyphs the PDF cannot map to letters as unwritten', () => {
+    const info = parseCoverText(handwrittenCover(['1 \uE01A\uE02B\uE03C G', ...rest]));
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      [untitledSongTitle(1), 'G'],
+      ['그 사랑', 'G'],
+      ['우리가 넉넉히 이기느니라', 'A'],
+      ['임재', 'G'],
+    ]);
+  });
+
+  it('puts back together a row whose cells came out on separate lines', () => {
+    // A handwriting font sits on its own baseline, so each cell is a line.
+    const info = parseCoverText(handwrittenCover(['1', '주님의 은혜 넘치네', 'G', ...rest]));
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['주님의 은혜 넘치네', 'G'],
+      ['그 사랑', 'G'],
+      ['우리가 넉넉히 이기느니라', 'A'],
+      ['임재', 'G'],
+    ]);
+  });
+
+  it('keeps a row whose title and key both came out empty', () => {
+    const info = parseCoverText(handwrittenCover(['1', ...rest]));
+    expect(info?.songs.map((s) => s.title)).toEqual([
+      untitledSongTitle(1),
+      '그 사랑',
+      '우리가 넉넉히 이기느니라',
+      '임재',
+    ]);
+    expect(info?.songs[0].key).toBeUndefined();
+  });
+
+  it('names the row from the commentary bullet that describes it', () => {
+    const info = parseCoverText(
+      handwrittenCover(
+        ['1 G', ...rest],
+        ['• 주님의 은혜 넘치네 (G Key)', 'o 주님의 은혜를 고백하는 찬양입니다.', '• 그 사랑 (G Key)', 'o 십자가의 사랑.'],
+      ),
+    );
+    expect(info?.songs.map((s) => s.title)).toEqual(['주님의 은혜 넘치네', '그 사랑', '우리가 넉넉히 이기느니라', '임재']);
+    expect(info?.songs[0].description).toContain('은혜를 고백');
+    expect(info?.songs[1].description).toContain('십자가의 사랑');
+  });
+
+  it('gives a bullet whose title is also handwritten to the unnamed row', () => {
+    const info = parseCoverText(
+      handwrittenCover(
+        ['1 G', ...rest],
+        ['• 그 사랑 (G Key)', 'o 십자가의 사랑.', '• (G Key)', 'o 은혜를 고백하는 찬양입니다.'],
+      ),
+    );
+    expect(info?.songs.map((s) => s.title)).toEqual([
+      untitledSongTitle(1),
+      '그 사랑',
+      '우리가 넉넉히 이기느니라',
+      '임재',
+    ]);
+    expect(info?.songs[0].description).toContain('은혜를 고백');
+    // The unnamed bullet's text never runs on into the song above it.
+    expect(info?.songs[1].description).not.toContain('은혜를 고백');
+  });
+
+  it('does not take a stray page number for a song', () => {
+    const info = parseCoverText(handwrittenCover(['1 매일매일 A', '2 청년의 기도 F', '1']));
+    expect(info?.songs.map((s) => s.title)).toEqual(['매일매일', '청년의 기도']);
+  });
+
+  it('reads a number and title whose key cell came out on the next line', () => {
+    const info = parseCoverText(handwrittenCover(['1 주님의 은혜 넘치네', 'G', ...rest]));
+    expect(info?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['주님의 은혜 넘치네', 'G'],
+      ['그 사랑', 'G'],
+      ['우리가 넉넉히 이기느니라', 'A'],
+      ['임재', 'G'],
+    ]);
+  });
+
+  it('does not take a numbered note under the table for a song', () => {
+    const info = parseCoverText(handwrittenCover(['1 G', ...rest, '5 분 기도 후 마무리']));
+    expect(info?.songs.map((s) => s.title)).toEqual([
+      untitledSongTitle(1),
+      '그 사랑',
+      '우리가 넉넉히 이기느니라',
+      '임재',
+    ]);
+  });
+
+  it('pairs the unnamed row with the first score page', () => {
+    const info = parseCoverText(handwrittenCover(['1 G', ...rest]))!;
+    const pageTexts = ['cover', '', '', '', ''];
+    matchSongsToPages(info, pageTexts, [2, 3, 4, 5]);
+    expect(info.songs.map((s) => s.pageIndex)).toEqual([2, 3, 4, 5]);
+  });
+
+  it('finds a title the PDF drew last, in its row between the number and the key', () => {
+    // The handwriting font came out after the whole page, so the text read
+    // the row as `1 G` — but the title still sits in row 1 on the page.
+    const info = parseCoverText(handwrittenCover(['1 G', ...rest]))!;
+    const at = (str: string, x: number, y: number, size = 10.5) => ({ str, x, y, width: str.length * size, size });
+    nameUntitledRowsFromLayout(info, [
+      {
+        width: 595,
+        height: 842,
+        items: [
+          // `1. 말씀 묵상` has a number but no key beside it: not a table row.
+          at('1.', 40, 700),
+          at('말씀 묵상', 60, 700),
+          at('1', 150, 500),
+          at('G', 440, 500),
+          at('2', 150, 480),
+          at('그 사랑', 270, 480),
+          at('G', 440, 480),
+          // Larger, and on a baseline of its own.
+          at('주님의 은혜 넘치네', 230, 503, 18),
+        ],
+      },
+    ]);
+    expect(info.songs.map((s) => s.title)).toEqual(['주님의 은혜 넘치네', '그 사랑', '우리가 넉넉히 이기느니라', '임재']);
+  });
+
+  it('keeps the placeholder when the row really holds no text', () => {
+    const info = parseCoverText(handwrittenCover(['1 G', ...rest]))!;
+    const at = (str: string, x: number, y: number) => ({ str, x, y, width: str.length * 10.5, size: 10.5 });
+    nameUntitledRowsFromLayout(info, [
+      { width: 595, height: 842, items: [at('1', 150, 500), at('G', 440, 500), at('2', 150, 480), at('그 사랑', 270, 480)] },
+    ]);
+    expect(info.songs[0].title).toBe(untitledSongTitle(1));
+  });
+
+  it('leaves the typed table exactly as it read before', () => {
+    expect(parseCoverText(coverTableText)?.songs.map((s) => [s.title, s.key])).toEqual([
+      ['매일매일', 'A'],
+      ['청년의 기도', 'F -> Gb'],
+      ['어려운 일 당할 때', 'F -> Ab -> G'],
+      ['입례', 'F -> G'],
+    ]);
   });
 });
 
