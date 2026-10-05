@@ -3979,10 +3979,68 @@ main[data-direction='back'] .wizard-panel.active {
   gap: var(--s-4);
   justify-items: stretch;
 }
+/* The cards alone, so a dragged card's neighbours are measured among themselves. */
+.wednesday-song-cards {
+  display: grid;
+  gap: var(--s-4);
+}
+.wednesday-order-hint {
+  margin: 0;
+}
+.wednesday-photo-drop .dropzone {
+  padding: var(--s-6) var(--s-6);
+}
+.wednesday-photo-drop .dropzone:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.wednesday-photo-drop .additional-files-status {
+  margin-top: var(--s-3);
+}
 .wednesday-song {
   display: grid;
   gap: var(--s-3);
   transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+/* While one card is dragged, the others step aside to show where it lands. */
+.wednesday-song.making-room {
+  transition: transform 0.18s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.wednesday-song.dragging {
+  position: relative;
+  z-index: 2;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--s-1) var(--accent-soft), var(--shadow-lg);
+}
+/* "올린 사진으로 되돌리기" reads as the action it is, not as more of the note. */
+.wednesday-song .banner button {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wednesday-song-grip {
+  flex: none;
+  cursor: grab;
+  /* A finger on the handle drags the card instead of scrolling the page. */
+  touch-action: none;
+  color: var(--ink-faint);
+}
+.wednesday-song-grip:hover:not(:disabled) {
+  color: var(--ink);
+}
+.wednesday-song.dragging .wednesday-song-grip {
+  cursor: grabbing;
+  color: var(--accent);
+}
+:root.reordering,
+:root.reordering * {
+  user-select: none;
+  cursor: grabbing;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wednesday-song.making-room {
+    transition: none;
+  }
 }
 /* Same focus lift as the Sunday song slab: an evergreen edge and halo. */
 .wednesday-song:focus-within {

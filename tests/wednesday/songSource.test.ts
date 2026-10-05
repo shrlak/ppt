@@ -151,6 +151,35 @@ describe('autoAttachSong with 찬양 PPT', () => {
     expect(downloaded).toEqual(['https://a.tistory.com/lyrics.pptx', 'https://img.test/a1.png']);
   });
 
+  it('counts a deck by the 악보 slides it puts in, not its title slide', async () => {
+    stubDecks({ 'https://a.tistory.com/sheet.pptx': await deckOf([{ shapes: [] }, ...sheetSlides(3)]) });
+    const loaded = await downloadSongPpt({ token: 'https://a.tistory.com/sheet.pptx', url: 'https://a.tistory.com/sheet.pptx' });
+    expect(loaded.slideCount).toBe(3);
+  });
+
+  it('only looks for a 찬양 PPT for a song that has the operator\'s own photo', async () => {
+    const downloaded = stubDecks({ 'https://a.tistory.com/lyrics.pptx': await deckOf(lyricsSlides(3)) }, [
+      sheet('https://img.test/a1.png', 'https://blog.test/a'),
+    ]);
+
+    const found = await autoAttachSong('은혜', undefined, { sheets: false });
+    expect(found.kind).toBe('none');
+    if (found.kind === 'none') {
+      expect(found.pptCandidates.map((candidate) => candidate.url)).toEqual(['https://a.tistory.com/lyrics.pptx']);
+      expect(found.sheetCandidates).toEqual([]);
+    }
+    // No web photo is fetched, nor even searched for.
+    expect(downloaded).toEqual(['https://a.tistory.com/lyrics.pptx']);
+    const asked = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(asked.some((url) => url.includes('/wednesday/songs/sheets'))).toBe(false);
+  });
+
+  it('still takes a sure 악보 PPT for a song that has the operator\'s own photo', async () => {
+    stubDecks({ 'https://b.tistory.com/sheet.pptx': await deckOf(sheetSlides(2)) });
+    const found = await autoAttachSong('은혜', undefined, { sheets: false });
+    expect(found.kind).toBe('deck');
+  });
+
   it('says why when a 가사 PPT is picked by hand', async () => {
     stubDecks({ 'https://a.tistory.com/lyrics.pptx': await deckOf(lyricsSlides(3)) });
     await expect(

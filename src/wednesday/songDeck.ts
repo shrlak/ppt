@@ -5,14 +5,18 @@
 // photo background or 무배경 — and a post does not always say which file is
 // which. So a downloaded deck is looked at before it is attached: one with no
 // 악보 on its slides is refused, and the next hit (or the 악보 사진) is tried
-// instead. Whatever background a deck arrives with is taken off when the
-// service deck is built, uploaded decks included.
+// instead. When the service deck is built, a 악보 PPT's slides are cut down
+// to the 악보 alone — no background, and none of what sits around it: the
+// title text, the 1절·후렴 jump buttons along the bottom, a logo or a
+// copyright line. A slide left with no 악보 (a title slide, a blank end one)
+// is dropped. A deck with no 악보 at all only loses its background.
 //
 // "The 악보" is pictures: a sheet is always an image on the slide (one full
 // page, or a line per picture), and a 가사 PPT is text. "The background" is
 // what sits behind it — the slide's own fill or picture, the layout's and the
 // master's, or a photo someone inserted and sent to the back on every slide.
 import JSZip from 'jszip';
+import { pruneToSlides } from '../lib/pptx/pptxPackage';
 import { slideOrderOf } from '../lib/pptx/pptxSlices';
 import { matchingCloseIndex, readSlideSizeOf, type SlideSize } from '../lib/pptx/slideGeometry';
 
@@ -20,6 +24,16 @@ import { matchingCloseIndex, readSlideSizeOf, type SlideSize } from '../lib/pptx
 const SHEET_AREA = 0.1;
 /** A picture covering this much of both axes fills the slide. */
 const FULL_SLIDE = 0.95;
+/**
+ * What sits on a photo for it to be a background: lyrics, or a 악보. A row of
+ * jump buttons is less than this, so a 악보 page with buttons on it stays a
+ * 악보 even when the same page is repeated on most slides.
+ */
+const COVERED_BACKGROUND = 0.05;
+/** The least one picture of the 악보 covers: a staff with its lyrics, at least. */
+const SHEET_PICTURE = { area: 0.02, width: 0.1, height: 0.06 };
+/** A picture this far under the slide's largest 악보 picture is decoration (a logo, a badge). */
+const SHEET_PICTURE_RATIO = 0.25;
 
 const WHITE_BACKGROUND =
   '<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>';
@@ -33,6 +47,9 @@ const STANDARD_COLOR_MAP =
 const DARK_FILL = '<a:solidFill><a:srgbClr val="000000"/></a:solidFill>';
 
 const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+/** A slide's jump-to-slide and web links, which go with the shapes that carried them. */
+const LINK_RELATIONSHIP = /\bType="[^"]*\/relationships\/(?:slide|hyperlink)"/;
 
 interface Box {
   x: number;
@@ -68,6 +85,10 @@ interface Analysis {
   backgroundIsSheet: boolean[];
   /** Per slide: the share of it the 악보 covers (may exceed 1). */
   sheetShare: number[];
+  /** Per slide: which of its top-level shapes are the 악보 itself. */
+  sheetShapes: number[][];
+  /** True when the deck carries its 악보 (see hasSheetMusic). */
+  sheetMusic: boolean;
 }
 
 function relationshipTargets(relsXml: string | null): Map<string, string> {
@@ -107,15 +128,12 @@ function coverage(box: Box, size: SlideSize): { x: number; y: number } {
 
 const TOP_LEVEL = /<(p:sp|p:pic|p:graphicFrame|p:grpSp|p:cxnSp|p:contentPart|mc:AlternateContent)\b/g;
 
-/** The shapes directly in the slide's tree, bottom first. */
-function topLevelShapes(xml: string, targets: Map<string, string>): Shape[] {
-  const treeStart = xml.indexOf('<p:spTree>');
-  const treeEnd = xml.lastIndexOf('</p:spTree>');
-  if (treeStart === -1 || treeEnd === -1) return [];
+/** The shapes directly inside `xml` between `from` and `to`, bottom first. */
+function shapesBetween(xml: string, from: number, to: number, targets: Map<string, string>): Shape[] {
   const shapes: Shape[] = [];
   const pattern = new RegExp(TOP_LEVEL.source, 'g');
-  pattern.lastIndex = treeStart;
-  for (let match = pattern.exec(xml); match && match.index < treeEnd; match = pattern.exec(xml)) {
+  pattern.lastIndex = from;
+  for (let match = pattern.exec(xml); match && match.index < to; match = pattern.exec(xml)) {
     const end = matchingCloseIndex(xml, match.index, match[1]);
     const shapeXml = xml.slice(match.index, end);
     shapes.push({
@@ -130,12 +148,57 @@ function topLevelShapes(xml: string, targets: Map<string, string>): Shape[] {
   return shapes;
 }
 
+/** The shapes directly in the slide's tree, bottom first. */
+function topLevelShapes(xml: string, targets: Map<string, string>): Shape[] {
+  const treeStart = xml.indexOf('<p:spTree>');
+  const treeEnd = xml.lastIndexOf('</p:spTree>');
+  if (treeStart === -1 || treeEnd === -1) return [];
+  return shapesBetween(xml, treeStart, treeEnd, targets);
+}
+
+/** Where a tree's (or a group's) own shapes begin: just past its `<p:grpSpPr>`. */
+function shapesStart(xml: string, from = 0): number {
+  const pattern = /<p:grpSpPr\b[^>]*\/>|<\/p:grpSpPr>/g;
+  pattern.lastIndex = from;
+  const match = pattern.exec(xml);
+  return match ? match.index + match[0].length : from;
+}
+
+/** The share of the slide a shape covers; one with no position of its own (a placeholder) counts as all of it. */
+function areaOf(shape: Shape, size: SlideSize): number {
+  if (!shape.box) return 1;
+  const { x, y } = coverage(shape.box, size);
+  return x * y;
+}
+
 /** The picture a slide's bottom shape shows when that shape fills the slide and something sits on it. */
 function bottomFullPicture(slide: Slide, size: SlideSize): string | undefined {
   const [bottom, ...above] = slide.shapes;
   if (!bottom || above.length === 0 || bottom.tag !== 'p:pic' || !bottom.image || !bottom.box) return undefined;
+  const covered = above.reduce((share, shape) => share + areaOf(shape, size), 0);
+  if (covered < COVERED_BACKGROUND) return undefined;
   const { x, y } = coverage(bottom.box, size);
   return x >= FULL_SLIDE && y >= FULL_SLIDE ? bottom.image : undefined;
+}
+
+/**
+ * The top-level shapes that are a slide's 악보: pictures big enough to hold a
+ * staff, and not far smaller than the slide's largest — the rest is a logo, a
+ * badge or a strip along the bottom. A background photo is never one.
+ */
+function sheetShapesOf(slide: Slide, size: SlideSize, backgroundShape: boolean): number[] {
+  const candidates = slide.shapes.flatMap((shape, position) => {
+    if (!shape.image || (position === 0 && backgroundShape)) return [];
+    if (shape.box) {
+      const { x, y } = coverage(shape.box, size);
+      if (x < SHEET_PICTURE.width || y < SHEET_PICTURE.height || x * y < SHEET_PICTURE.area) return [];
+    }
+    return [{ position, area: areaOf(shape, size) }];
+  });
+  const largest = Math.max(0, ...candidates.map((candidate) => candidate.area));
+  return candidates
+    .filter((candidate) => candidate.area >= largest * SHEET_PICTURE_RATIO)
+    .map((candidate) => candidate.position);
 }
 
 function countOf(values: (string | undefined)[]): Map<string, number> {
@@ -190,13 +253,28 @@ async function analyze(zip: JSZip): Promise<Analysis> {
       pictureShare[index] < SHEET_AREA,
   );
 
+  // A deck carries its 악보 when pictures cover a tenth of the slide or more
+  // on at least half of its slides (a title slide or a blank end one aside).
+  const sheetShare = pictureShare.map((share, index) => share + (backgroundIsSheet[index] ? 1 : 0));
+  const sheets = sheetShare.filter((share) => share >= SHEET_AREA).length;
+
   return {
     size,
     slides,
     backgroundShape,
     backgroundIsSheet,
-    sheetShare: pictureShare.map((share, index) => share + (backgroundIsSheet[index] ? 1 : 0)),
+    sheetShare,
+    sheetShapes: slides.map((slide, index) => sheetShapesOf(slide, size, backgroundShape[index])),
+    sheetMusic: sheets > 0 && sheets * 2 >= sheetShare.length,
   };
+}
+
+/** True when a slide has a 악보 to keep: pictures of its own, or a page set as its background. */
+function carriesSheet(analysis: Analysis, index: number): boolean {
+  return (
+    analysis.sheetShapes[index].length > 0 ||
+    (analysis.backgroundIsSheet[index] && !analysis.backgroundShape[index])
+  );
 }
 
 /**
@@ -205,9 +283,24 @@ async function analyze(zip: JSZip): Promise<Analysis> {
  * aside). A 가사 PPT has only text, whatever it has behind it.
  */
 export async function hasSheetMusic(data: ArrayBuffer | Uint8Array): Promise<boolean> {
-  const { sheetShare } = await analyze(await JSZip.loadAsync(data));
-  const sheets = sheetShare.filter((share) => share >= SHEET_AREA).length;
-  return sheets > 0 && sheets * 2 >= sheetShare.length;
+  return (await analyze(await JSZip.loadAsync(data))).sheetMusic;
+}
+
+export interface SongDeckInfo {
+  /** Whether the deck carries its 악보 (see hasSheetMusic). */
+  sheetMusic: boolean;
+  /** How many slides it puts into the service deck (see prepareSongDeck). */
+  slideCount: number;
+}
+
+/** What a song deck will contribute, without building anything. */
+export async function inspectSongDeck(data: ArrayBuffer | Uint8Array): Promise<SongDeckInfo> {
+  const analysis = await analyze(await JSZip.loadAsync(data));
+  const kept = analysis.slides.filter((_slide, index) => analysis.sheetMusic && carriesSheet(analysis, index));
+  return {
+    sheetMusic: analysis.sheetMusic,
+    slideCount: kept.length > 0 ? kept.length : analysis.slides.length,
+  };
 }
 
 function isLightColor(colorXml: string): boolean {
@@ -261,21 +354,49 @@ function sheetPicture(id: number, rId: string, size: SlideSize): string {
   );
 }
 
-/** One slide, on white, with nothing of its layout's or master's behind it. */
-function plainSlide(analysis: Analysis, index: number): string {
+/** A group of the 악보, with only its pictures: a caption or a button grouped with a page goes. */
+function picturesOnly(groupXml: string): string {
+  const children = shapesBetween(groupXml, shapesStart(groupXml), groupXml.lastIndexOf('</p:grpSp>'), new Map());
+  let out = groupXml;
+  for (const child of [...children].reverse()) {
+    if (!/<a:blip\b/.test(groupXml.slice(child.start, child.end))) out = out.slice(0, child.start) + out.slice(child.end);
+  }
+  return out;
+}
+
+/** A click or hover link, on whatever carries it. */
+const LINK = /<a:(hlinkClick|hlinkHover)\b[^>]*?(?:\/>|>[\s\S]*?<\/a:\1>)/g;
+
+/**
+ * One slide, on white, with nothing of its layout's or master's behind it.
+ * `sheetOnly` keeps the 악보 alone: every shape that is not one of its
+ * pictures goes, and with them every link a shape carried.
+ */
+function plainSlide(analysis: Analysis, index: number, sheetOnly = false): string {
   const slide = analysis.slides[index];
   let xml = slide.xml;
 
-  const bottom = slide.shapes[0];
-  if (analysis.backgroundShape[index]) {
-    xml = xml.slice(0, bottom.start) + xml.slice(bottom.end);
-  } else if (analysis.backgroundIsSheet[index] && slide.background) {
+  const sheets = new Set(analysis.sheetShapes[index]);
+  // Back to front, so each cut leaves the earlier offsets where they were.
+  for (let position = slide.shapes.length - 1; position >= 0; position--) {
+    const shape = slide.shapes[position];
+    const background = position === 0 && analysis.backgroundShape[index];
+    if (background || (sheetOnly && !sheets.has(position))) {
+      xml = xml.slice(0, shape.start) + xml.slice(shape.end);
+    } else if (sheetOnly && shape.tag === 'p:grpSp') {
+      xml = xml.slice(0, shape.start) + picturesOnly(xml.slice(shape.start, shape.end)) + xml.slice(shape.end);
+    }
+  }
+
+  if (!analysis.backgroundShape[index] && analysis.backgroundIsSheet[index] && slide.background) {
     // The page moves from the background onto the slide, at the bottom.
     const ids = [...xml.matchAll(/<p:cNvPr\b[^>]*?\bid="(\d+)"/g)].map((match) => Number(match[1]));
-    const at = bottom?.start ?? xml.lastIndexOf('</p:spTree>');
+    const at = shapesStart(xml, xml.indexOf('<p:spTree>'));
     xml =
       xml.slice(0, at) + sheetPicture(Math.max(1, ...ids) + 1, slide.background.rId, analysis.size) + xml.slice(at);
   }
+
+  if (sheetOnly) xml = xml.replace(LINK, '');
 
   xml = /<p:bg\b[^>]*>[\s\S]*?<\/p:bg>/.test(xml)
     ? xml.replace(/<p:bg\b[^>]*>[\s\S]*?<\/p:bg>/, WHITE_BACKGROUND)
@@ -310,4 +431,81 @@ export async function removeSongBackgrounds(
   const analysis = await analyze(zip);
   analysis.slides.forEach((slide, index) => zip.file(slide.path, plainSlide(analysis, index)));
   return zip.generateAsync({ type: 'uint8array', compression });
+}
+
+function relsPathOf(slidePath: string): string {
+  return slidePath.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels';
+}
+
+/** Take slides out of the presentation's list; pruning then removes their parts and content types. */
+async function dropSlides(zip: JSZip, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const names = new Set(paths.map((path) => path.split('/').pop()));
+  let presentation = await zip.file('ppt/presentation.xml')!.async('string');
+  let rels = await zip.file('ppt/_rels/presentation.xml.rels')!.async('string');
+  for (const [tag] of rels.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    const name = tag.match(/\bTarget="(?:\/ppt\/)?slides\/([^"]+)"/)?.[1];
+    const id = tag.match(/\bId="([^"]+)"/)?.[1];
+    if (!name || !id || !names.has(name)) continue;
+    rels = rels.replace(tag, '');
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    presentation = presentation.replace(new RegExp(`<p:sldId\\b[^>]*\\br:id="${escaped}"[^>]*/>`), '');
+  }
+  zip.file('ppt/presentation.xml', presentation);
+  zip.file('ppt/_rels/presentation.xml.rels', rels);
+}
+
+export interface PreparedSongDeck {
+  data: Uint8Array;
+  /** Slides it puts into the service deck. */
+  slideCount: number;
+}
+
+/**
+ * A song's PPT as it goes into the service deck.
+ *
+ * A deck with its 악보 keeps the 악보 and nothing else: each slide on plain
+ * white, its 악보 pictures where they were, and everything else gone — the
+ * background, the title and lyric text, the jump buttons along the bottom, a
+ * logo. A slide with no 악보 on it is dropped, since it would be blank. A
+ * deck with no 악보 only loses its background (see removeSongBackgrounds).
+ */
+export async function prepareSongDeck(
+  data: ArrayBuffer | Uint8Array,
+  compression: 'STORE' | 'DEFLATE' = 'STORE',
+): Promise<PreparedSongDeck> {
+  const zip = await JSZip.loadAsync(data);
+  const analysis = await analyze(zip);
+  const keep = analysis.slides.map((_slide, index) => analysis.sheetMusic && carriesSheet(analysis, index));
+
+  if (!keep.some(Boolean)) {
+    analysis.slides.forEach((slide, index) => zip.file(slide.path, plainSlide(analysis, index)));
+    return { data: await zip.generateAsync({ type: 'uint8array', compression }), slideCount: analysis.slides.length };
+  }
+
+  for (const [index, slide] of analysis.slides.entries()) {
+    if (!keep[index]) continue;
+    zip.file(slide.path, plainSlide(analysis, index, true));
+    // The links went with the shapes; a jump to a dropped slide would dangle.
+    const relsFile = zip.file(relsPathOf(slide.path));
+    if (relsFile) {
+      const rels = await relsFile.async('string');
+      zip.file(
+        relsPathOf(slide.path),
+        rels.replace(/<Relationship\b[^>]*\/>/g, (tag) => (LINK_RELATIONSHIP.test(tag) ? '' : tag)),
+      );
+    }
+  }
+  await dropSlides(
+    zip,
+    analysis.slides.filter((_slide, index) => !keep[index]).map((slide) => slide.path),
+  );
+  // The background photos, logos and dropped slides' pictures would otherwise
+  // be copied into the service deck with the rest of the song's media.
+  if (zip.file('_rels/.rels')) await pruneToSlides(zip);
+
+  return {
+    data: await zip.generateAsync({ type: 'uint8array', compression }),
+    slideCount: keep.filter(Boolean).length,
+  };
 }

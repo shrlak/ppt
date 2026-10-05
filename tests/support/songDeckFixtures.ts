@@ -1,6 +1,7 @@
 // Tiny 찬양 PPT packages for the 수요예배 tests: just the parts
 // src/wednesday/songDeck.ts reads (presentation.xml, its rels, and each
-// slide with its rels), built with the shapes a real deck would carry.
+// slide with its rels and pictures, under a package root), built with the
+// shapes a real deck would carry.
 import JSZip from 'jszip';
 
 export const SIZE = { cx: 9144000, cy: 6858000 };
@@ -36,18 +37,68 @@ export function textBox(text: string, { fill, color }: { fill?: string; color?: 
   );
 }
 
+/**
+ * A 1절·후렴 jump button along the bottom: a small filled shape whose click
+ * goes to another slide through `rId` (see SlideSpec.jumps).
+ */
+export function jumpButton(text: string, rId: string, x: number): string {
+  const id = nextId++;
+  return (
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="단추 ${id}"><a:hlinkClick r:id="${rId}" action="ppaction://hlinksldjump"/></p:cNvPr>` +
+    '<p:cNvSpPr/><p:nvPr/></p:nvSpPr>' +
+    `<p:spPr><a:xfrm><a:off x="${x}" y="6300000"/><a:ext cx="800000" cy="400000"/></a:xfrm>` +
+    '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill></p:spPr>' +
+    `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ko-KR" sz="1400"/><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`
+  );
+}
+
+/** A group of shapes, laid out in the slide's own coordinates. */
+export function group(shapes: string[], box: { x?: number; y?: number; cx: number; cy: number } = SIZE): string {
+  const id = nextId++;
+  const xfrm =
+    `<a:off x="${box.x ?? 0}" y="${box.y ?? 0}"/><a:ext cx="${box.cx}" cy="${box.cy}"/>` +
+    `<a:chOff x="${box.x ?? 0}" y="${box.y ?? 0}"/><a:chExt cx="${box.cx}" cy="${box.cy}"/>`;
+  return (
+    `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${id}" name="그룹 ${id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
+    `<p:grpSpPr><a:xfrm>${xfrm}</a:xfrm></p:grpSpPr>${shapes.join('')}</p:grpSp>`
+  );
+}
+
 export interface SlideSpec {
   shapes: string[];
   /** The slide's own `<p:bg>`. */
   background?: string;
   /** Relationship id → media file name. */
   media?: Record<string, string>;
+  /** Relationship id → the 1-based slide a jump button goes to. */
+  jumps?: Record<string, number>;
 }
 
 export const PHOTO_BACKGROUND = '<p:bg><p:bgPr><a:blipFill><a:blip r:embed="rIdBg"/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg>';
 
 export async function deckOf(slides: SlideSpec[]): Promise<Uint8Array> {
   const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>' +
+      '<Default Extension="jpg" ContentType="image/jpeg"/>' +
+      '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>' +
+      slides
+        .map(
+          (_, index) =>
+            `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`,
+        )
+        .join('') +
+      '</Types>',
+  );
+  zip.file(
+    '_rels/.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>' +
+      '</Relationships>',
+  );
   zip.file(
     'ppt/presentation.xml',
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation ${NS}><p:sldIdLst>` +
@@ -79,11 +130,18 @@ export async function deckOf(slides: SlideSpec[]): Promise<Uint8Array> {
           `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${name}"/>`,
       )
       .join('');
+    for (const name of Object.values(slide.media ?? {})) zip.file(`ppt/media/${name}`, new Uint8Array([1, 2, 3]));
+    const jumps = Object.entries(slide.jumps ?? {})
+      .map(
+        ([rId, target]) =>
+          `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slide${target}.xml"/>`,
+      )
+      .join('');
     zip.file(
       `ppt/slides/_rels/slide${index + 1}.xml.rels`,
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
         '<Relationship Id="rIdL" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>' +
-        `${media}</Relationships>`,
+        `${media}${jumps}</Relationships>`,
     );
   });
   return zip.generateAsync({ type: 'uint8array' });
