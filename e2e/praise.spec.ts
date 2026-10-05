@@ -229,7 +229,8 @@ test.describe('찬양집회 generator', () => {
     expect(texts[topics + 3]).toMatch(/^감사함으로/);
     expect(texts.at(-1)).toBe('축도 |  | Benediction');
     expect(texts.at(-2)).toMatch(/^광야를 지나며/);
-    expect(texts.filter((text) => text.includes('Prayer'))).toHaveLength(1);
+    // One 기도 / Prayer: the middle song's empty 기도 left with its check.
+    expect(texts.filter((text) => text === '기도 |  | Prayer')).toHaveLength(1);
 
     // The preview draws the 기도 slides in last year's designs.
     await page.getByTestId('praise-preview').click();
