@@ -713,13 +713,13 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 ## 🌙 수요예배
 
 수요예배는 주일예배와 만드는 방식이 완전히 달라 **별도 페이지**(`/ppt/wednesday.html`)에서
-만듭니다. 콘티가 없고, 찬양 슬라이드는 각 곡의 PPT 파일에서 **악보·가사 장을 그대로 가져오며**,
+만듭니다. 콘티가 없고, 찬양 슬라이드는 각 곡의 PPT 파일에서 **악보만 가져오며**,
 설교 슬라이드는 앱이 넣지 않습니다.
 
 ### 생성되는 슬라이드 순서
 
 ```
-표지  →  수요예배  →  경배와 찬양  →  [찬양 제목 + 그 곡 PPT 전체] × N  →  기도
+표지  →  수요예배  →  경배와 찬양  →  [찬양 제목 + 그 곡의 악보 장] × N  →  기도
       →  말씀  →  말씀 본문 × N  →  설교  →  기도  →  합심기도  →  마지막 장
 ```
 
@@ -740,11 +740,28 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 
 ### 2단계 · 찬양
 
-**곡 제목만 적으면 됩니다.** 제목을 입력하면 앱이 알아서 인터넷을 찾아 그 곡의 자료를 받아
+**악보 사진을 맨 위에 올리면 됩니다.** `악보 사진으로 곡 한꺼번에 넣기` 상자에 이번 주 곡의 악보
+사진(PNG·JPG)을 한꺼번에 끌어다 놓거나 눌러서 고르면:
+
+- **사진 한 장이 곡 하나**가 됩니다. 곡 순서는 파일 이름 순서(`2.jpg`가 `10.jpg`보다 앞, 카톡 사진은
+  보낸 시간 순서)이고, 아래에서 끌어서 바로 바꿀 수 있습니다. 비어 있던 곡 카드(제목도 자료도 없는
+  카드)는 사진 곡으로 대신합니다.
+- **사진이 곧 그 곡의 슬라이드**로 바로 붙습니다(악보 사진 한 장 = 슬라이드 한 장).
+- **곡 제목은 사진에서 읽어 채웁니다.** 주일예배 콘티를 읽는 것과 같은 인식 모델로 제목만 읽고,
+  수요예배 찬양 라이브러리나 찬양 라이브러리에 같은 곡이 있으면 그 표기를 씁니다(띄어쓰기나 한
+  글자 정도 다르게 읽어도). 제목을 못 읽으면 파일 이름이 곡 제목이면 그것을 쓰고, 그것도 아니면
+  카드에 알려 드리니 제목을 적으시면 됩니다. 두 장짜리 악보처럼 **연달아 같은 제목으로 읽힌 사진은
+  한 곡의 두 페이지**로 묶습니다.
+- **제목이 채워지면 바로 인터넷에서 찬양 PPT를 찾습니다.** 악보가 있는 찬양 PPT를 확실히 찾으면
+  올린 사진 대신 그 PPT를 넣고, 카드의 **올린 사진으로 되돌리기**로 언제든 사진으로 돌아갈 수
+  있습니다. 확실한 PPT가 없으면 **올린 사진을 그대로 쓰고**, 찾은 PPT가 있으면 아래에 보여 주니
+  골라서 바꿀 수 있습니다. 인터넷의 다른 악보 사진으로 올린 사진을 바꾸지는 않습니다.
+
+**곡 제목만 적어도 됩니다.** 제목을 입력하면 앱이 알아서 인터넷을 찾아 그 곡의 자료를 받아
 붙입니다. 붙는 것은 둘 중 하나입니다.
 
-- **찬양 PPT** — 그 파일의 **모든 슬라이드가** 찬양 제목 장 뒤에 순서대로 들어갑니다. **악보가 있는
-  PPT만** 받고, **배경은 없앤 채**(흰 바탕) 넣습니다.
+- **찬양 PPT** — 그 파일의 **악보 슬라이드가** 찬양 제목 장 뒤에 순서대로 들어갑니다. **악보가 있는
+  PPT만** 받고, **악보만 남긴 채**(흰 바탕) 넣습니다.
 - **악보 사진** — 사진 **한 장이 슬라이드 한 장**이 됩니다. 사진은 비율을 그대로 유지한 채 슬라이드
   가운데에 맞춰 들어갑니다.
 
@@ -769,11 +786,15 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
   **악보가 있는 것**, 그중에서도 **무배경**을 받습니다. 받은 PPT는 슬라이드를 직접 열어 보고, 악보(그림)
   없이 **가사만 있는 PPT면 넣지 않고** 다음 결과를 받아 보거나 악보 사진으로 넘어갑니다. 직접 고른
   결과가 가사 PPT면 그렇다고 알려 드립니다.
-- **배경은 없앱니다** — 곡 PPT의 슬라이드는 모두 **흰 바탕**으로 바꾸고, 마스터·레이아웃에 깔린
-  배경 그림(PowerPoint의 "배경 그래픽 숨기기")과 모든 장 맨 뒤에 깔린 같은 배경 사진도 뺍니다.
-  악보는 그대로 둡니다 — 악보를 슬라이드 배경으로 넣어 둔 PPT도 악보가 사라지지 않습니다. 어두운
-  배경에 맞춘 흰 글자는 검은색으로 바꿉니다(색이 칠해진 버튼 안의 글자는 그대로). 직접 올린 PPT도
-  똑같이 배경을 없앱니다.
+- **악보만 남깁니다** — 곡 PPT의 슬라이드는 모두 **흰 바탕**으로 바꾸고, 그 위에는 **악보 그림만**
+  남깁니다. 마스터·레이아웃에 깔린 배경 그림(PowerPoint의 "배경 그래픽 숨기기"), 모든 장 맨 뒤에
+  깔린 같은 배경 사진, 곡 제목·가사 글자, 아래쪽의 `1절`·`후렴` 같은 이동 버튼, 블로그 로고나
+  저작권 줄처럼 작은 그림은 모두 뺍니다. 악보 그림은 위치 그대로 둡니다 — 악보를 한 줄씩 잘라 여러
+  장 넣은 PPT도 줄이 모두 남고, 악보를 슬라이드 배경으로 넣어 둔 PPT도 악보가 사라지지 않습니다.
+  **악보가 없는 장**(곡 제목만 있는 첫 장, 빈 마지막 장)은 빈 슬라이드가 되므로 아예 넣지 않습니다
+  (찬양 제목 장은 앱이 따로 만듭니다). 직접 올린 PPT도 똑같이 악보만 남기고, 악보가 하나도 없는
+  PPT(가사 PPT를 직접 올린 경우)는 배경만 없애고 글자는 그대로 둡니다(어두운 배경에 맞춘 흰 글자는
+  검은색으로).
 - **다른 곡을 붙이지 않습니다** — 검색 결과 제목에 곡 제목이 **따로 떨어져** 있어야(따옴표·괄호·`-`
   사이, 앞뒤에 악보·가사·PPT·코드 정도만) 확실한 결과로 봅니다. 그래서 `은혜`를 찾을 때
   `하나님의 은혜`, `은혜 아니면`, `은혜로다`는 붙이지 않고 보여 주기만 합니다. 여러 곡이 든
@@ -792,7 +813,9 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
   ✕로 지우고, 검색이 찾아 둔 나머지 장은 한 번 눌러 추가할 수 있습니다.
 - **다시 찾기** 버튼으로 같은 곡을 다시 찾아볼 수 있습니다.
 
-곡은 위·아래 버튼으로 순서를 바꾸고, 필요하면 지울 수 있습니다. 자료를 아직 못 구한 곡도 제목만
+**곡 순서는 카드 왼쪽의 손잡이(⋮⋮)를 끌어서** 바꿉니다(마우스·손가락 모두). 끄는 동안 다른 곡이
+비켜서 놓일 자리를 보여 주고, 화면 끝으로 끌면 페이지가 따라 움직입니다. 오른쪽 위·아래 버튼이나
+손잡이에서 ↑·↓ 키로도 바꿀 수 있고, 필요하면 지울 수 있습니다. 자료를 아직 못 구한 곡도 제목만
 적어 두면 **찬양 제목 장**은 만들어집니다.
 
 > 브라우저는 다른 사이트의 파일을 직접 받을 수 없어(CORS) Worker가 대신 받아 옵니다. 곡 자료는
@@ -806,8 +829,6 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 
 - **슬라이드 크기가 다르면 자동으로 맞춥니다** — 내려받은 곡 PPT가 수요예배 PPT와 크기가 다르면
   비율을 유지한 채 가운데로 맞추고, 다운로드 화면에 그 사실을 알려 줍니다.
-- **곡 안의 이동 버튼이 그대로 동작합니다** — 찬양 PPT 아래쪽의 `1절`·`2절` 같은 버튼(슬라이드
-  바로가기)은 합쳐진 뒤에도 자기 곡의 슬라이드를 가리킵니다.
 
 ### 수요예배 찬양 라이브러리
 
@@ -1003,17 +1024,24 @@ saved to the library with `keep`, like 찬양집회 decks.
 
 **수요예배 (Wednesday service)** is prepared differently enough to get its own page at
 `/ppt/wednesday.html`: there is no 콘티 to read, each song's slides are the 악보 pages of that
-song's own downloaded `.pptx` spliced in whole, and the sermon slides are inserted by hand after
+song's own downloaded `.pptx` cut down to the 악보 alone, and the sermon slides are inserted by hand after
 the deck is made. The operator types the date, sermon title, preacher and a scripture range; the
 verses come from the same 개역개정 text, the file is named after that week's Wednesday
-(`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. Typing a song's title is the whole
-interaction: the app searches, downloads and attaches what it is confident about by itself — the
+(`MMDD.pptx`), and a one-slide 16:9 썸네일 is downloaded beside it. The quickest way in is to drop
+the week's 악보 photos at the top of the songs step: each photo becomes a song with the photo as its
+slide, its title is read off the page by the same recognition models (snapped to a title the
+libraries already know), and the search below starts at once — a sure 악보 PPT replaces the photo
+(with one click back to it), otherwise the photo stays. Songs are reordered by dragging a card's
+handle (pointer events, so touch works too) or with the arrow buttons. Typing a song's title is the whole
+interaction otherwise: the app searches, downloads and attaches what it is confident about by itself — the
 song's own 찬양 PPT when one is found (Google restricted to 티스토리·갓피플 via SerpApi when
 `SERPAPI_API_KEY` is set, plus 다음·네이버 블로그 search and the web; 악보 posts first, then 티스토리·갓피플),
 otherwise its 악보 사진 (네이버 이미지 검색), one slide per page, centred on the deck's canvas. Only a
 찬양 PPT with the 악보 on its slides is taken (a 가사-only deck is refused and the next hit tried), and
-every song deck is put on plain white — slide, layout and master backgrounds and a photo sent to the
-back of every slide are removed, the 악보 itself kept. A hit counts as sure only when
+every song deck is cut down to its 악보 on plain white — slide, layout and master backgrounds, a photo
+sent to the back of every slide, title and lyric text, the 1절·후렴 jump buttons along the bottom and
+small pictures such as a logo are removed, and a slide left with no 악보 (a title or blank slide) is
+dropped. A hit counts as sure only when
 its title names the song on its own, so 하나님의 은혜 is never taken for 은혜, and only same-size pages of
 one post are attached together. A browser cannot fetch a cross-origin file, so the proxy does it
 (`GET /wednesday/songs` and `/wednesday/songs/sheets` search; `POST /wednesday/songs/file` and

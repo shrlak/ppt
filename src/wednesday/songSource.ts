@@ -22,7 +22,7 @@
 // a .pptx or a PNG/JPEG. See worker/src/songPpt.js and worker/src/songSheet.js.
 import { cloudLibraryBaseUrl, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { inspectDeckBytes } from '../lib/storage/pptLibrary';
-import { hasSheetMusic } from './songDeck';
+import { inspectSongDeck } from './songDeck';
 
 /**
  * How long a search or a download may take before the page stops waiting. A
@@ -195,8 +195,10 @@ export async function downloadSongPpt(
     }
     const { slideCount } = await inspectDeckBytes(deck);
     if (slideCount < 1) throw new Error('받은 파일에 슬라이드가 없습니다.');
-    if (!(await hasSheetMusic(deck))) throw new Error(NO_SHEET_MUSIC_MESSAGE);
-    return { deck, slideCount, fileName: fileNameFromUrl(candidate.url) };
+    const song = await inspectSongDeck(deck);
+    if (!song.sheetMusic) throw new Error(NO_SHEET_MUSIC_MESSAGE);
+    // Counted as it goes in: the 악보 slides, not a title or blank one.
+    return { deck, slideCount: song.slideCount, fileName: fileNameFromUrl(candidate.url) };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
@@ -325,7 +327,7 @@ export async function readUploadedSongDeck(file: File): Promise<LoadedSongDeck> 
   const deck = await file.arrayBuffer();
   const { slideCount } = await inspectDeckBytes(deck);
   if (slideCount < 1) throw new Error('이 파일에서 슬라이드를 찾지 못했습니다.');
-  return { deck, slideCount, fileName: file.name };
+  return { deck, slideCount: (await inspectSongDeck(deck)).slideCount, fileName: file.name };
 }
 
 export function hostOf(url: string): string {
@@ -344,6 +346,15 @@ export const MAX_AUTO_SHEET_TRIES = 3;
 
 /** How many sure 찬양 PPT hits are tried before falling back to 악보 사진. */
 export const MAX_AUTO_DECK_TRIES = 3;
+
+export interface AutoAttachOptions {
+  /**
+   * Whether 악보 사진 off the web may be attached. Off for a song that has the
+   * operator's own photo: only a 찬양 PPT is worth swapping that for, and web
+   * pictures of it are at best the same page.
+   */
+  sheets?: boolean;
+}
 
 export type AutoAttachResult =
   | { kind: 'deck'; deck: LoadedSongDeck; candidate: SongPptCandidate }
@@ -368,13 +379,18 @@ export type AutoAttachResult =
  * Only pages of one post are put together. Two sure images from two blogs are
  * two arrangements, often in two keys, not the two pages of one 악보.
  */
-export async function autoAttachSong(title: string, signal?: AbortSignal): Promise<AutoAttachResult> {
+export async function autoAttachSong(
+  title: string,
+  signal?: AbortSignal,
+  options: AutoAttachOptions = {},
+): Promise<AutoAttachResult> {
   const trimmed = title.trim();
   if (!trimmed) return { kind: 'none', pptCandidates: [], sheetCandidates: [] };
+  const withSheets = options.sheets ?? true;
 
   // Both searches start at once; the 악보 사진 one is simply not read when a
   // 찬양 PPT turns up. Neither throws.
-  const sheetSearch = searchSheetImages(trimmed, signal);
+  const sheetSearch = withSheets ? searchSheetImages(trimmed, signal) : Promise.resolve<SheetImageSearch>({ candidates: [] });
   const ppt = await searchSongPpt(trimmed, signal);
   // Most hits are a post rather than the file, and a post does not always
   // still have its attachment — so try the next sure hit down, the way a
@@ -389,6 +405,10 @@ export async function autoAttachSong(title: string, signal?: AbortSignal): Promi
       // That one would not come; try the next, then 악보 사진.
       if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
     }
+  }
+
+  if (!withSheets) {
+    return { kind: 'none', pptCandidates: inSearchOrder(ppt.candidates), sheetCandidates: [], message: ppt.message };
   }
 
   const sheets = await sheetSearch;

@@ -50,6 +50,51 @@ async function foreignMediaSongDeck(count: number): Promise<ArrayBuffer> {
   return toArrayBuffer(await extractSlideSubset(bibleTemplate, positions, 'STORE'));
 }
 
+/**
+ * A 악보 PPT as they are shared: the stand-in deck with a 악보 page on every
+ * slide but its title slide, and a button on each that jumps to that title
+ * slide — which does not come along into the service.
+ */
+async function sheetSongDeck(): Promise<ArrayBuffer> {
+  const zip = await JSZip.loadAsync(foreignDeck);
+  zip.file('ppt/media/test-sheet.png', readFileSync(join(__dirname, '..', 'fixtures', 'sheet-page.png')));
+  const types = await zip.file('[Content_Types].xml')!.async('string');
+  if (!/Extension="png"/i.test(types)) {
+    zip.file('[Content_Types].xml', types.replace(/<Types\b[^>]*>/, (open) => `${open}<Default Extension="png" ContentType="image/png"/>`));
+  }
+  const names = await slideOrderOf(zip);
+  for (const name of names.slice(1)) {
+    const relsName = `ppt/slides/_rels/${name}.rels`;
+    zip.file(
+      relsName,
+      (await zip.file(relsName)!.async('string')).replace(
+        '</Relationships>',
+        '<Relationship Id="rIdTestSheet" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/test-sheet.png"/>' +
+          `<Relationship Id="rIdTestJump" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${names[0]}"/></Relationships>`,
+      ),
+    );
+    const xml = await zip.file(`ppt/slides/${name}`)!.async('string');
+    zip.file(
+      `ppt/slides/${name}`,
+      xml.replace(
+        '</p:spTree>',
+        '<p:pic><p:nvPicPr><p:cNvPr id="9001" name="악보"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>' +
+          '<p:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdTestSheet"/>' +
+          '<a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+          '<p:spPr><a:xfrm><a:off x="500000" y="300000"/><a:ext cx="8100000" cy="5800000"/></a:xfrm>' +
+          '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>' +
+          '<p:sp><p:nvSpPr><p:cNvPr id="9002" name="처음으로">' +
+          '<a:hlinkClick xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rIdTestJump" action="ppaction://hlinksldjump"/>' +
+          '</p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>' +
+          '<p:spPr><a:xfrm><a:off x="500000" y="6300000"/><a:ext cx="900000" cy="400000"/></a:xfrm>' +
+          '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom></p:spPr>' +
+          '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ko-KR"/><a:t>처음으로</a:t></a:r></a:p></p:txBody></p:sp></p:spTree>',
+      ),
+    );
+  }
+  return toArrayBuffer(await zip.generateAsync({ type: 'uint8array' }));
+}
+
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 }
@@ -264,6 +309,32 @@ describe('buildWednesdayDeck', () => {
         expect(xml).toMatch(/<p:sld\b[^>]*\sshowMasterSp="0"/);
       }
       expect([...slides.slice(0, 4), ...slides.slice(songEnd)]).toEqual(without);
+    },
+    30_000,
+  );
+
+  it(
+    'puts a 악보 PPT in as its 악보 alone, without its title slide, text or buttons',
+    async () => {
+      const song = songFrom('s1', '악보 PPT 곡', await sheetSongDeck(), 5);
+      const { deck, overview } = await buildWednesdayDeck({
+        template,
+        service,
+        songs: [song],
+        verses: verses.slice(0, 3),
+        rangeKo,
+      });
+
+      const texts = await slideTexts(deck);
+      // 표지·인트로·경배와 찬양 + [제목 + 악보 4장] + 기도·말씀·본문 1장·설교·기도·합심기도·마지막
+      expect(texts).toHaveLength(15);
+      expect(texts[3]).toContain('악보 PPT 곡');
+      // Nothing but the picture: no slide text, no 처음으로 button.
+      expect(texts.slice(4, 8)).toEqual(['', '', '', '']);
+      expect(texts.join('\n')).not.toContain('처음으로');
+      expect(overview.filter((item) => item.songId === 's1')).toHaveLength(5);
+      await expect(assertPptxIntegrity(deck)).resolves.toBeUndefined();
+      expect(await findBrokenRelationships(await JSZip.loadAsync(deck))).toEqual([]);
     },
     30_000,
   );

@@ -23,6 +23,7 @@ export type IconName =
   | 'trash'
   | 'up'
   | 'down'
+  | 'grip'
   | 'next'
   | 'back'
   | 'plus'
@@ -86,6 +87,15 @@ const PATHS: Record<IconName, string[]> = {
   ],
   up: ['m5 12 7-7 7 7', 'M12 19V5'],
   down: ['M12 5v14', 'm19 12-7 7-7-7'],
+  // Six dots: a handle to drag by.
+  grip: [
+    'M9 4a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+    'M15 4a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+    'M9 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+    'M15 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+    'M9 18a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+    'M15 18a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+  ],
   next: ['M5 12h14', 'm12 5 7 7-7 7'],
   back: ['M19 12H5', 'm12 19-7-7 7-7'],
   plus: ['M5 12h14', 'M12 5v14'],

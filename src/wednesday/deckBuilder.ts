@@ -4,7 +4,7 @@
 // deck this template was derived from:
 //
 //   표지 · 인트로 · 경배와 찬양
-//     곡마다: [찬양 제목] + [그 곡 PPT의 모든 슬라이드, 또는 악보 사진 한 장씩]
+//     곡마다: [찬양 제목] + [그 곡 PPT의 악보 슬라이드, 또는 악보 사진 한 장씩]
 //   기도 · 말씀 · 말씀 본문 ×N · 설교 · 기도 · 합심기도 · 마지막
 //
 // 설교 slides are not generated: the deck stops at the 설교 구분 장 and the
@@ -24,11 +24,11 @@ import { buildImageDeck } from '../lib/pptx/imageDeckBuilder';
 import { expandDeckSegment, type DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Verse } from '../bible/types';
 import { buildWednesdayVerseSlide, groupVerses } from './bibleSlides';
-import { removeSongBackgrounds } from './songDeck';
+import { prepareSongDeck } from './songDeck';
 import { clearRemainingTokens, formatDateDot, formatDateKo, substituteTokens } from './fields';
 import { fitTitleFontSize, singleLineBody, withFontSize } from '../lib/pptx/textFit';
 import { WEDNESDAY_IMAGE_CARRIER, WEDNESDAY_SLIDES } from './template';
-import { isAttached, songSlideCount, type WednesdayService, type WednesdaySong } from './types';
+import { isAttached, type WednesdayService, type WednesdaySong } from './types';
 
 export interface WednesdayDeckInput {
   /** public/wednesday-template.pptx. */
@@ -255,11 +255,11 @@ export async function buildWednesdayDeck(input: WednesdayDeckInput): Promise<Wed
     const songDeck = await songSlides(song, input.template, templateSize, warnings);
     remainingMerges -= 1;
     // A 찬양 제목 slide sits at 3 + index; its song's slides follow it.
-    deck = await mergePptxDecks(deck, songDeck, {
+    deck = await mergePptxDecks(deck, songDeck.data, {
       insertAt: 4 + index,
       compression: remainingMerges === 0 ? 'DEFLATE' : 'STORE',
     });
-    songSlideCounts.set(song.id, songSlideCount(song));
+    songSlideCounts.set(song.id, songDeck.slideCount);
   }
 
   await assertPptxIntegrity(deck);
@@ -279,21 +279,23 @@ export async function buildWednesdayDeck(input: WednesdayDeckInput): Promise<Wed
 }
 
 /**
- * The slides one song contributes: its own 찬양 PPT with its background taken
- * off (plain white, like the church's own 악보 slides), or one slide per 악보
- * 사진 built on the service template so the pages sit on that same plain
- * background at the deck's own size.
+ * The slides one song contributes: its own 찬양 PPT cut down to the 악보
+ * alone on plain white (like the church's own 악보 slides — no background, no
+ * title, no jump buttons along the bottom), or one slide per 악보 사진 built
+ * on the service template so the pages sit on that same plain background at
+ * the deck's own size.
  */
 async function songSlides(
   song: WednesdaySong,
   template: ArrayBuffer | Uint8Array,
   templateSize: SlideSize,
   warnings: string[],
-): Promise<Uint8Array> {
+): Promise<{ data: Uint8Array; slideCount: number }> {
   if (!song.deck) {
-    return buildImageDeck(
+    const images = song.images ?? [];
+    const data = await buildImageDeck(
       template,
-      (song.images ?? []).map((image) => ({
+      images.map((image) => ({
         data: new Uint8Array(image.data.slice(0)),
         mimeType: image.mimeType,
         width: image.width,
@@ -301,14 +303,15 @@ async function songSlides(
       })),
       { slideNumber: WEDNESDAY_IMAGE_CARRIER, canvas: templateSize, compression: 'STORE' },
     );
+    return { data, slideCount: images.length };
   }
 
-  const plain = await removeSongBackgrounds(song.deck, 'STORE');
-  const { data, rescaled, from } = await rescaleDeckToSize(plain, templateSize, 'STORE');
+  const plain = await prepareSongDeck(song.deck, 'STORE');
+  const { data, rescaled, from } = await rescaleDeckToSize(plain.data, templateSize, 'STORE');
   if (rescaled) {
     warnings.push(
       `"${song.title || '제목 없음'}" 곡 PPT는 슬라이드 크기가 달라(${from.cx}×${from.cy}) 이 예배 PPT 크기에 맞게 자동으로 맞췄습니다. 위치를 한 번 확인해 주세요.`,
     );
   }
-  return data;
+  return { data, slideCount: plain.slideCount };
 }

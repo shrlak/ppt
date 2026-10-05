@@ -531,8 +531,8 @@ export default function WednesdayApp() {
               <p className="wizard-kicker">2 / 3</p>
               <h2>찬양</h2>
               <p>
-                곡 제목만 적으면 인터넷에서 찬양 PPT나 악보 사진을 찾아 자동으로 넣어 드립니다. 직접
-                올리셔도 됩니다.
+                악보 사진을 올리면 사진마다 곡이 하나씩 들어가고, 제목을 읽어 인터넷에서 찬양 PPT를 바로
+                찾습니다. 곡 제목만 적어도 찬양 PPT나 악보 사진을 찾아 자동으로 넣어 드립니다.
               </p>
             </div>
 

@@ -508,6 +508,129 @@ test.describe('수요예배 generator', () => {
     expect(asked).toEqual(['dead-end', 'has-the-file']);
   });
 
+  test('puts songs in from their 악보 사진: titles read off the photos, and searched at once', async ({ page }) => {
+    const titles = ['주님의 선하심', '나의 반석이신 하나님', '은혜'];
+    // The recognition models read photo i as titles[i] (made-up pages, no real 악보).
+    const answer = (images: number) =>
+      JSON.stringify({
+        results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({
+          imageIndex,
+          pageType: 'score',
+          sermonTitle: '',
+          scripture: '',
+          title: titles[imageIndex] ?? '',
+          artist: '',
+          key: 'G',
+        })),
+      });
+    await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+      const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inline_data?: unknown }).inline_data).length;
+      await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images) }] } }] } });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+      const images = (payload.messages?.[0]?.content ?? []).filter((part) => (part as { type?: string }).type === 'image_url').length;
+      await route.fulfill({ json: { choices: [{ message: { content: answer(images) } }] } });
+    });
+
+    // Only the second song has a 찬양 PPT out there.
+    const songFile = await sheetMusicDeck();
+    const searched: string[] = [];
+    await page.route(`${PROXY}/wednesday/songs?*`, (route) => {
+      const title = new URL(route.request().url()).searchParams.get('title') ?? '';
+      searched.push(title);
+      const candidates =
+        title === '나의 반석이신 하나님'
+          ? [
+              {
+                token: 'ppt-token',
+                url: 'https://blogfiles.pstatic.net/song.pptx',
+                host: 'blogfiles.pstatic.net',
+                title: '나의 반석이신 하나님 악보 ppt',
+                direct: true,
+                score: 1,
+                decision: 'auto',
+              },
+            ]
+          : [];
+      return route.fulfill({ json: { title, candidates, links: [] } });
+    });
+    await page.route(`${PROXY}/wednesday/songs/file`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        body: songFile,
+      }),
+    );
+    const sheetsSearched: string[] = [];
+    await page.route(`${PROXY}/wednesday/songs/sheets?*`, (route) => {
+      sheetsSearched.push(route.request().url());
+      return route.fulfill({ json: { candidates: [] } });
+    });
+
+    await page.getByTestId('wednesday-tab-songs').click();
+    const sheet = await fs.readFile(SHEET_PNG);
+    // A messenger's names, which say nothing about the songs; their order is the songs' order.
+    await page.getByTestId('wednesday-photo-input').setInputFiles(
+      ['KakaoTalk_20261005_1.png', 'KakaoTalk_20261005_2.png', 'KakaoTalk_20261005_3.png'].map((name) => ({
+        name,
+        mimeType: 'image/png',
+        buffer: sheet,
+      })),
+    );
+
+    for (const [index, title] of titles.entries()) {
+      await expect(page.getByTestId(`wednesday-song-title-${index}`)).toHaveValue(title, { timeout: BUILD_TIMEOUT });
+    }
+    // The second song's 찬양 PPT takes the photo's place; the photo can come back.
+    await expect(page.getByTestId('wednesday-song-file-1')).toContainText('인터넷에서 받음', { timeout: BUILD_TIMEOUT });
+    await expect(page.getByTestId('wednesday-song-notice-1')).toContainText('올린 사진 대신 넣었습니다');
+    // The others keep their photo, and say why.
+    for (const index of [0, 2]) {
+      await expect(page.getByTestId(`wednesday-song-notice-${index}`)).toContainText('올린 악보 사진을 그대로 씁니다', {
+        timeout: BUILD_TIMEOUT,
+      });
+    }
+    await expect(page.getByTestId('wednesday-song-sheets-0')).toContainText('악보 사진 1장');
+    await expect(page.getByTestId('wednesday-song-sheets-2')).toContainText('악보 사진 1장');
+    expect([...searched].sort()).toEqual([...titles].sort());
+    // A photo of the page is never swapped for someone else's photo of it.
+    expect(sheetsSearched).toEqual([]);
+
+    await page.getByTestId('wednesday-song-restore-photos-1').click();
+    await expect(page.getByTestId('wednesday-song-sheets-1')).toContainText('악보 사진 1장');
+    await expect(page.getByTestId('wednesday-song-file-1')).toHaveCount(0);
+  });
+
+  test('reorders the songs by dragging a card by its handle', async ({ page }) => {
+    await page.getByTestId('wednesday-tab-songs').click();
+    for (const [index, title] of ['첫째 곡', '둘째 곡', '셋째 곡'].entries()) {
+      await page.getByTestId('wednesday-song-add').click();
+      await page.getByTestId(`wednesday-song-title-${index}`).fill(title);
+    }
+
+    // The third card, dragged above the first.
+    const grip = await page.getByTestId('wednesday-song-grip-2').boundingBox();
+    const first = await page.getByTestId('wednesday-song-0').boundingBox();
+    await page.mouse.move(grip!.x + grip!.width / 2, grip!.y + grip!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip!.x + grip!.width / 2, first!.y + 4, { steps: 12 });
+    await page.mouse.up();
+
+    await expect(page.getByTestId('wednesday-song-title-0')).toHaveValue('셋째 곡');
+    await expect(page.getByTestId('wednesday-song-title-1')).toHaveValue('첫째 곡');
+    await expect(page.getByTestId('wednesday-song-title-2')).toHaveValue('둘째 곡');
+
+    // The handle moves its card with the arrow keys too.
+    await page.getByTestId('wednesday-song-grip-0').focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByTestId('wednesday-song-title-0')).toHaveValue('첫째 곡');
+    await expect(page.getByTestId('wednesday-song-title-1')).toHaveValue('셋째 곡');
+  });
+
   test('links both generators to each other', async ({ page }) => {
     await page.getByTestId('nav-sunday').click();
     await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();

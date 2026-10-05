@@ -143,7 +143,10 @@ export async function saveWednesdayDraft(draft: WednesdayDraft): Promise<void> {
   }
 
   for (const song of draft.songs) {
+    // A song that went from its PPT back to 악보 사진 must not get the PPT
+    // back on the next load.
     if (song.deck) await putBlob(song.id, song.deck);
+    else await deleteBlob(song.id);
     for (const image of song.images ?? []) await putBlob(imageKey(song.id, image.id), image.data);
   }
 }
