@@ -1,6 +1,6 @@
 // Assembles the 찬양집회 deck out of public/praise-template.pptx.
 //
-// The template holds last year's four designs (see template.ts): every slide
+// The template holds last year's six designs (see template.ts): every slide
 // of the generated deck is one of them cloned and filled in, so the whole
 // deck keeps that night's background photos, master and embedded Nanum
 // Gothic fonts. 추가 자료 files (a sermon PPT, 말씀 slides, images, PDFs)
@@ -15,7 +15,7 @@ import { fitBodyFontSize, fitTitleFontSize, singleLineBody, withFontSize } from 
 import type { AdditionalFile } from '../lib/additionalFiles/types';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Song } from '../lib/utils/types';
-import { planPraiseDeck, type PlacedAdditional, type PraiseSlidePlan } from './planner';
+import { planPraiseDeck, topicsFontSize, type PlacedAdditional, type PraiseSlidePlan } from './planner';
 import {
   PRAISE_COVER_SHAPES,
   PRAISE_HEADER_BASE_SZ,
@@ -24,13 +24,25 @@ import {
   PRAISE_LYRICS_BASE_SZ,
   PRAISE_LYRICS_BODY,
   PRAISE_LYRICS_MIN_SZ,
+  PRAISE_PASSAGE_BASE_SZ,
+  PRAISE_PASSAGE_BOX,
+  PRAISE_PASSAGE_MIN_SZ,
+  PRAISE_PRAYER_TITLE_BASE_SZ,
+  PRAISE_PRAYER_TITLE_BOX,
+  PRAISE_PRAYER_TITLE_MIN_SZ,
   PRAISE_SLIDES,
   PRAISE_TITLE_BASE_SZ,
   PRAISE_TITLE_BOX,
   PRAISE_TITLE_MIN_SZ,
   PRAISE_TOKENS,
+  PRAISE_TOPICS_BODY,
+  PRAISE_VERSE_BASE_SZ,
+  PRAISE_VERSE_EN_BOX,
+  PRAISE_VERSE_KO_BOX,
+  PRAISE_VERSE_MIN_SZ,
+  verseTextBox,
 } from './template';
-import type { PraiseCoverImage, PraiseSongExtras } from './types';
+import type { PraiseCoverImage, PraisePrayer, PraiseSongExtras, PraiseVerse } from './types';
 
 const SLIDE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
 const SLIDE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
@@ -42,6 +54,8 @@ export interface PraiseDeckInput {
   template: ArrayBuffer | Uint8Array;
   songs: Song[];
   extras: Record<string, PraiseSongExtras>;
+  /** The night's 기도, put after the checked songs in order (see prayers.ts). */
+  prayers?: PraisePrayer[];
   /** Event date, `YYYY-MM-DD`; printed on the cover as MM/DD/YYYY. */
   date: string;
   /** A new cover picture replaces last year's (and its date box) entirely. */
@@ -228,6 +242,131 @@ export function buildLyricsSlide(xml: string, header: string, lines: string[], e
   return out;
 }
 
+/** A shape moved to `box` (its text keeps its own anchoring) and drawn at exactly that size. */
+function placedAt(shapeXml: string, box: { x: number; y: number; cx: number; cy: number }): string {
+  return shapeXml
+    .replace(
+      /<a:off x="\d+" y="\d+"\/><a:ext cx="\d+" cy="\d+"\/>/,
+      `<a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/>`,
+    )
+    .replace(/<a:spAutoFit\/>/g, '<a:noAutofit/>');
+}
+
+/** The paragraphs of a shape, in order. */
+function paragraphsOf(shapeXml: string): { start: number; end: number; xml: string }[] {
+  return [...shapeXml.matchAll(PARAGRAPH)].map((match) => ({
+    start: match.index!,
+    end: match.index! + match[0].length,
+    xml: match[0],
+  }));
+}
+
+/**
+ * Two lines that belong together (Korean over English) at ONE size: the
+ * largest at which each stays on a single line of the shape.
+ */
+function pairSize(shapeXml: string, lines: string[], baseSz: number, minSz: number): number {
+  return Math.min(baseSz, ...lines.filter(Boolean).map((line) => fitTitleFontSize(shapeXml, line, baseSz, minSz)));
+}
+
+/**
+ * 기도 / Prayer — or 통성기도 / Corporate Prayer, 축도 / Benediction… —
+ * Korean over English in last year's 기도 design, both lines on one line
+ * each at one size, in a box widened to the right so a longer title keeps
+ * its size, its text centred on the box's height. A title with only one of
+ * the two languages prints just that line.
+ */
+export function buildPrayerSlide(xml: string, ko: string, en: string): string {
+  const shape = shapeHolding(xml, PRAISE_TOKENS.prayerKo);
+  let box = singleLineBody(withHorizontalBox(shape.xml, PRAISE_PRAYER_TITLE_BOX))
+    .replace(/(<a:bodyPr\b[^>]*?)\s+anchor="[^"]*"/, '$1')
+    .replace(/<a:bodyPr\b/, '<a:bodyPr anchor="ctr"');
+  const sz = pairSize(box, [ko, en], PRAISE_PRAYER_TITLE_BASE_SZ, PRAISE_PRAYER_TITLE_MIN_SZ);
+  // Korean, the spacer between, English — from the bottom up, so each
+  // splice leaves the earlier positions where they were.
+  const [koPara, spacer, enPara] = paragraphsOf(box);
+  if (en) box = splice(box, enPara, withFontSize(replaceToken(enPara.xml, PRAISE_TOKENS.prayerEn, en), sz));
+  else box = splice(box, { start: spacer.start, end: enPara.end }, '');
+  if (ko) box = splice(box, koPara, withFontSize(replaceToken(koPara.xml, PRAISE_TOKENS.prayerKo, ko), sz));
+  else box = splice(box, { start: koPara.start, end: en ? spacer.end : koPara.end }, '');
+  return splice(xml, shape, box);
+}
+
+/** "1. …", "2) …", "① …": a topic that brings its own number needs no bullet in front of it. */
+function isNumbered(topic: string): boolean {
+  return /^(\d+[.)]|[①-⑳])\s*/.test(topic);
+}
+
+/**
+ * 기도제목: last year's heading ("기도제목 | Prayer Prompt", kept to one line)
+ * over the topics, one bulleted paragraph
+ * each, hung from the top of a box that runs down the slide; the topics
+ * shrink together from 26pt only as far as they must to fit (the planner has
+ * already moved the rest on to another slide).
+ */
+export function buildPrayerTopicsSlide(xml: string, heading: string, topics: string[]): string {
+  const headingShape = shapeHolding(xml, PRAISE_TOKENS.prayerHeading);
+  let headingXml = singleLineBody(
+    withHorizontalBox(headingShape.xml, { x: PRAISE_TOPICS_BODY.x, cx: PRAISE_TOPICS_BODY.cx }),
+  );
+  headingXml = fillTitleParagraph(headingXml, PRAISE_TOKENS.prayerHeading, heading, 4400, 2400);
+  let out = splice(xml, headingShape, headingXml);
+
+  const body = shapeHolding(out, PRAISE_TOKENS.prayerTopic);
+  const bodyXml = placedAt(body.xml, PRAISE_TOPICS_BODY);
+  const paragraph = paragraphHolding(bodyXml, PRAISE_TOKENS.prayerTopic);
+  const sz = topicsFontSize(topics);
+  const paragraphs = topics
+    .map((topic) => {
+      let topicXml = withFontSize(replaceToken(paragraph.xml, PRAISE_TOKENS.prayerTopic, topic), sz).replace(
+        /<a:buSzPts val="\d+"\/>/,
+        `<a:buSzPts val="${sz}"/>`,
+      );
+      if (isNumbered(topic)) topicXml = topicXml.replace(/<a:buChar\b[^>]*\/>/, '<a:buNone/>');
+      return topicXml;
+    })
+    .join('');
+  out = splice(out, body, splice(bodyXml, paragraph, paragraphs));
+  return out;
+}
+
+/** One verse half of the 말씀 slide: its reference, then its text, fitted to the half it has. */
+function fillVerse(
+  xml: string,
+  tokens: { ref: string; text: string },
+  box: { x: number; y: number; cx: number; cy: number },
+  ref: string,
+  text: string,
+): string {
+  const shape = shapeHolding(xml, tokens.text);
+  let shapeXml = placedAt(shape.xml, box);
+  const paragraph = paragraphHolding(shapeXml, tokens.text);
+  const sz = fitBodyFontSize(verseTextBox(box), [text], PRAISE_VERSE_BASE_SZ, PRAISE_VERSE_MIN_SZ);
+  shapeXml = splice(shapeXml, paragraph, withFontSize(replaceToken(paragraph.xml, tokens.text, text), sz));
+  shapeXml = replaceToken(shapeXml, tokens.ref, ref);
+  return splice(xml, shape, shapeXml);
+}
+
+/**
+ * 말씀: last year's design — the passage in the corner ("사도행전 1장 3-5, 8절"
+ * over "Acts 1:3-5, 8", one line each), then the verse in 개역개정 under its
+ * reference and the same verse in English under its own. A long verse
+ * shrinks within its half of the slide, so the two never run into each other.
+ */
+export function buildScriptureSlide(xml: string, passageKo: string, passageEn: string, verse: PraiseVerse): string {
+  const header = shapeHolding(xml, PRAISE_TOKENS.passageKo);
+  let headerXml = singleLineBody(withHorizontalBox(header.xml, PRAISE_PASSAGE_BOX));
+  const sz = pairSize(headerXml, [passageKo, passageEn], PRAISE_PASSAGE_BASE_SZ, PRAISE_PASSAGE_MIN_SZ);
+  headerXml = withFontSize(
+    replaceToken(replaceToken(headerXml, PRAISE_TOKENS.passageKo, passageKo), PRAISE_TOKENS.passageEn, passageEn),
+    sz,
+  );
+  let out = splice(xml, header, headerXml);
+  out = fillVerse(out, { ref: PRAISE_TOKENS.verseRefKo, text: PRAISE_TOKENS.verseKo }, PRAISE_VERSE_KO_BOX, verse.refKo, verse.ko);
+  out = fillVerse(out, { ref: PRAISE_TOKENS.verseRefEn, text: PRAISE_TOKENS.verseEn }, PRAISE_VERSE_EN_BOX, verse.refEn, verse.en);
+  return out;
+}
+
 // ---- package ---------------------------------------------------------------
 
 interface TemplateSlide {
@@ -249,11 +388,13 @@ async function buildBaseDeck(
   compression: 'STORE' | 'DEFLATE',
 ): Promise<Uint8Array> {
   const zip = await JSZip.loadAsync(input.template);
-  const [cover, title, lyrics, prayer] = await Promise.all([
+  const [cover, title, lyrics, prayer, topics, scripture] = await Promise.all([
     readTemplateSlide(zip, PRAISE_SLIDES.cover),
     readTemplateSlide(zip, PRAISE_SLIDES.songTitle),
     readTemplateSlide(zip, PRAISE_SLIDES.lyrics),
     readTemplateSlide(zip, PRAISE_SLIDES.prayer),
+    readTemplateSlide(zip, PRAISE_SLIDES.prayerTopics),
+    readTemplateSlide(zip, PRAISE_SLIDES.scripture),
   ]);
   let presentation = await zip.file('ppt/presentation.xml')!.async('string');
   let presRels = await zip.file('ppt/_rels/presentation.xml.rels')!.async('string');
@@ -294,9 +435,17 @@ async function buildBaseDeck(
         xml = buildLyricsSlide(lyrics.xml, plan.header, plan.lines, plan.english);
         rels = lyrics.rels;
         break;
+      case 'prayer-topics':
+        xml = buildPrayerTopicsSlide(topics.xml, plan.heading, plan.topics);
+        rels = topics.rels;
+        break;
+      case 'scripture':
+        xml = buildScriptureSlide(scripture.xml, plan.passageKo, plan.passageEn, plan.verse);
+        rels = scripture.rels;
+        break;
       case 'prayer':
       default:
-        xml = prayer.xml;
+        xml = buildPrayerSlide(prayer.xml, plan.ko, plan.en);
         rels = prayer.rels;
         break;
     }
@@ -349,7 +498,26 @@ function overviewRow(plan: PraiseSlidePlan, index: number, songs: Song[]): DeckO
         songId: plan.songId,
       };
     case 'prayer':
-      return { id, kind: 'prayer', label: '기도 / Prayer' };
+      return {
+        id,
+        kind: 'prayer',
+        label: [plan.ko, plan.en].filter(Boolean).join(' / '),
+        subtitle: `기도 ${plan.prayerNumber}`,
+      };
+    case 'prayer-topics':
+      return {
+        id,
+        kind: 'prayer',
+        label: plan.heading || '기도제목',
+        subtitle: [`기도 ${plan.prayerNumber}`, plan.topics[0]].join(' · '),
+      };
+    case 'scripture':
+      return {
+        id,
+        kind: 'bible',
+        label: plan.verse.refKo,
+        subtitle: `기도 ${plan.prayerNumber} · ${plan.verse.refEn}`,
+      };
     default:
       return { id, kind: 'additional', label: '추가 자료' };
   }
@@ -362,7 +530,7 @@ export async function buildPraiseDeck(input: PraiseDeckInput): Promise<PraiseDec
   for (const file of files) {
     if (!placements.some((item) => item.fileId === file.id)) placements.push({ fileId: file.id, placement: 'end' });
   }
-  const plans = planPraiseDeck(input.songs, input.extras, placements);
+  const plans = planPraiseDeck(input.songs, input.extras, placements, input.prayers ?? []);
   const base = plans.filter((plan): plan is Exclude<PraiseSlidePlan, { kind: 'additional' }> => plan.kind !== 'additional');
   const inserts = plans.flatMap((plan, index) =>
     plan.kind === 'additional'

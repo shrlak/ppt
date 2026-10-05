@@ -12,7 +12,8 @@ import { decodeAdditionalFiles, encodeAdditionalFiles } from '../lib/storage/add
 import type { AdditionalFile } from '../lib/additionalFiles/types';
 import type { Song } from '../lib/utils/types';
 import type { AdditionalPlacement, PlacedAdditional } from './planner';
-import type { PraiseCoverImage, PraiseEnglish, PraiseSongExtras } from './types';
+import { DEFAULT_TOPICS_HEADING_EN, withPrayerPerCheckedSong } from './prayers';
+import type { PraiseCoverImage, PraiseEnglish, PraisePassage, PraisePrayer, PraisePrayerSlide, PraiseSongExtras } from './types';
 
 export const PRAISE_SOURCE_KIND = 'praise';
 export const PRAISE_SOURCE_VERSION = 1;
@@ -23,6 +24,8 @@ export interface PraiseSource {
   date: string;
   songs: Song[];
   extras: Record<string, PraiseSongExtras>;
+  /** The night's 기도, in order. Absent from nights saved before 기도 were kept. */
+  prayers?: PraisePrayer[];
   /** One per archived 추가 자료 file, in archive order. */
   additional: { name: string; placement: AdditionalPlacement }[];
   /** The replaced cover photo is the archive's last entry. */
@@ -44,6 +47,7 @@ export interface PraiseState {
   date: string;
   songs: Song[];
   extras: Record<string, PraiseSongExtras>;
+  prayers: PraisePrayer[];
   additionalFiles: AdditionalFile[];
   placements: PlacedAdditional[];
   coverImage: PraiseCoverImage | null;
@@ -61,6 +65,7 @@ export function encodePraiseSource(state: PraiseState): DeckSourceFile {
     date: state.date,
     songs: state.songs,
     extras: state.extras,
+    prayers: state.prayers,
     additional: state.additionalFiles.map((file) => ({ name: file.name, placement: placementFor(state, file.id) })),
     ...(state.coverImage ? { cover: { name: state.coverImage.name, mimeType: state.coverImage.mimeType } } : {}),
     ...(state.fileNameOverride ? { fileNameOverride: state.fileNameOverride } : {}),
@@ -119,6 +124,54 @@ function extrasOf(value: unknown): Record<string, PraiseSongExtras> {
   return result;
 }
 
+function text(value: unknown, max = 5000): string {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+function passageOf(value: unknown): PraisePassage | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const verses = (Array.isArray(raw.verses) ? raw.verses : []).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const verse = item as Record<string, unknown>;
+    return [{ refKo: text(verse.refKo, 200), refEn: text(verse.refEn, 200), ko: text(verse.ko), en: text(verse.en) }];
+  });
+  return verses.length > 0 ? { rangeKo: text(raw.rangeKo, 300), rangeEn: text(raw.rangeEn, 300), verses } : null;
+}
+
+function prayerSlideOf(value: unknown): PraisePrayerSlide | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = text(raw.id, 100) || crypto.randomUUID();
+  switch (raw.kind) {
+    case 'title':
+      return { id, kind: 'title', ko: text(raw.ko, 200), en: text(raw.en, 200) };
+    case 'topics':
+      return {
+        id,
+        kind: 'topics',
+        heading: text(raw.heading, 200),
+        headingEn: typeof raw.headingEn === 'string' ? text(raw.headingEn, 200) : DEFAULT_TOPICS_HEADING_EN,
+        text: text(raw.text, 20000),
+      };
+    case 'scripture':
+      return { id, kind: 'scripture', reference: text(raw.reference, 300), passage: passageOf(raw.passage) };
+    default:
+      return null;
+  }
+}
+
+function prayersOf(value: unknown): PraisePrayer[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const slides = (Array.isArray(raw.slides) ? raw.slides : []).flatMap((slide) => prayerSlideOf(slide) ?? []);
+    const releasedFrom = text(raw.releasedFrom, 100);
+    return [{ id: text(raw.id, 100) || crypto.randomUUID(), slides, ...(releasedFrom ? { releasedFrom } : {}) }];
+  });
+}
+
 function placementOf(value: unknown): AdditionalPlacement {
   if (value === 'start' || value === 'end') return value;
   if (value && typeof value === 'object' && typeof (value as { afterSongId?: unknown }).afterSongId === 'string') {
@@ -145,6 +198,7 @@ export function decodePraiseSource(file: DeckSourceFile | null | undefined): Pra
     date: typeof raw.date === 'string' ? raw.date : '',
     songs: Array.isArray(raw.songs) ? raw.songs.flatMap((song) => songOf(song) ?? []) : [],
     extras: extrasOf(raw.extras),
+    ...(prayersOf(raw.prayers) ? { prayers: prayersOf(raw.prayers) } : {}),
     additional: (Array.isArray(raw.additional) ? raw.additional : []).map((item) => {
       const entry = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
       return { name: typeof entry.name === 'string' ? entry.name : '', placement: placementOf(entry.placement) };
@@ -171,6 +225,9 @@ export async function restorePraiseState(
     date: source.date,
     songs: source.songs,
     extras: source.extras,
+    // A night saved before 기도 were kept had a plain 기도 / Prayer after each
+    // checked song: it comes back as one 기도 per checked song, the same deck.
+    prayers: withPrayerPerCheckedSong(source.songs, source.extras, source.prayers ?? []),
     additionalFiles: files,
     placements,
     coverImage:
@@ -194,6 +251,7 @@ export function praiseFingerprint(state: PraiseState & { name: string }): string
       linesPerSlide: song.linesPerSlide,
     })),
     extras: state.extras,
+    prayers: state.prayers,
     files: state.additionalFiles.map((file) => `${file.name}:${file.data.byteLength}`),
     placements: state.placements,
     cover: state.coverImage ? `${state.coverImage.name}:${state.coverImage.data.byteLength}` : null,

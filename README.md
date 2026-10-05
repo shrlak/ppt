@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | 주소 | <https://shrlak.github.io/ppt/?service=sunday> | <https://shrlak.github.io/ppt/praise.html> | <https://shrlak.github.io/ppt/retreat.html> | <https://shrlak.github.io/ppt/wednesday.html> |
 | 찬양 | 콘티 PDF를 올리면 가사를 읽어 슬라이드를 **만듭니다** | 주일예배와 같이 콘티로 읽고, **영어 가사를 한글 아래에** 넣습니다 (CCLI 코드 악보는 한글·영어 가사를 PDF에서 바로) | 수련회 콘티의 **칸마다** 해당 집회에 넣고, 작년 수련회 곡은 가사까지 | 곡 PPT나 **악보 사진**을 받아 그대로 넣습니다 |
-| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) | 집회마다 포스터·예배 순서(본문·설교 제목·광고 등) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
+| 입력 | 콘티에서 날짜·본문·설교 제목을 자동 인식 | 콘티 + 곡마다 영어 제목·가사 (작년에 부른 곡은 자동) + 기도마다 기도제목·말씀(개역개정+NASB) | 집회마다 포스터·예배 순서(본문·설교 제목·광고 등) | 날짜·설교 제목·설교자·본문 범위를 **직접 입력** |
 | 설교 | 설교 PPT를 올리면 본문 뒤에 삽입 | 설교 PPT·말씀 자료를 **원하는 곡 뒤에** 삽입 | 설교말씀(개역개정+ESV)·설교 제목 장, 설교용 빈 화면 | 앱은 '설교' 구분 장까지만 — 설교 PPT는 **나중에 직접** |
 | 파일명 | 그 주 **일요일** `MMDD.pptx` | 집회 날짜 `MMDD_PraiseNight.pptx` | 집회 날짜 `MMDD_Retreat_Evening.pptx` 등 | 그 주 **수요일** `MMDD.pptx` |
 | 라이브러리 | 매주 일요일 오후 5시 자동 삭제 | **자동 삭제 안 함** — 직접 삭제할 때까지 보관 | **자동 삭제 안 함** | 매주 일요일 오후 5시 자동 삭제 |
@@ -489,10 +489,11 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 
 ```
 표지(올해 날짜)  →  [곡 제목(한글 / English)  →  가사(한글 위, 영어 아래) × N  →  그 곡 뒤에 넣은 자료
-                    →  기도 / Prayer(고른 곡만)] × 곡 수  →  맨 뒤에 넣은 자료
+                    →  기도(체크한 곡만: 기도제목 → 말씀 → 기도 / Prayer…)] × 곡 수
+                 →  체크한 곡이 모자라 남은 기도  →  맨 뒤에 넣은 자료
 ```
 
-표지·곡 제목·가사·기도 네 가지 디자인은 모두 작년 PPT의 슬라이드를 그대로 씁니다
+표지·곡 제목·가사·기도·기도제목·말씀 여섯 가지 디자인은 모두 작년 PPT의 슬라이드를 그대로 씁니다
 (`public/praise-template.pptx` — 배경 사진, 나눔고딕 글꼴 포함). 가사 슬라이드 모서리에는 작년처럼
 `한글 제목 | English Title`이 들어갑니다.
 
@@ -592,7 +593,8 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
   다 되었을 때만 그렇게 알려 줍니다.
   `AI 초안 · 확인 필요`로 표시되니 띄우기 전에 확인하세요.
 - 영어로만 된 곡은 가사가 한 번만 나오고, 영어 가사를 비워 둔 장은 한글만 나옵니다.
-- **이 곡 뒤에 기도 / Prayer 슬라이드**를 곡마다 켤 수 있습니다.
+- **이 곡 뒤에 기도**를 곡마다 켤 수 있습니다 — 기도 단계의 기도 목록과 같은 체크로, 켜면 그 곡 뒤에 들어갈
+  기도 번호(`기도 2`)가 함께 표시됩니다.
 - **한글·영어 가사는 자동으로 저장됩니다** — 찬양집회 페이지에 콘티를 올리면 곡마다 한글과 영어
   가사가 (버튼을 누르지 않아도) 고치는 즉시 **찬양집회 영어 가사 라이브러리**에 함께 저장되고(카드에
   `자동 저장됨 · HH:MM`), 탭을 닫기 직전의 수정도 남으며,
@@ -605,14 +607,43 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
   들어갑니다. 찬양집회에서 저장된 곡은 파트가 1, 2, 3…으로 나뉘어 있어 콘티의 진행(V-C-B)과 맞지
   않으면 저장된 순서를 그대로 씁니다.
 
-### 3단계 · 추가 자료
+### 3단계 · 기도
 
-설교 PPT, 말씀·기도제목 슬라이드, 이미지, PDF를 올리고 파일마다 **넣을 위치**(표지 바로 뒤 /
+찬양집회의 기도 시간마다 띄울 슬라이드를 만듭니다.
+
+- **기도 횟수** — `−` / `+`로 기도를 빼고 더합니다. 기도 카드마다 **기도 N 빼기** 버튼도 있습니다.
+- **기도를 넣을 곡** — 곡 목록에서 기도할 곡을 체크하면 기도가 **체크한 곡 뒤에 순서대로** 들어갑니다:
+  첫 번째로 체크한 곡 뒤에 기도 1, 두 번째 곡 뒤에 기도 2… 곡을 어떤 순서로 체크해도 기도 1이 가장 앞
+  곡 뒤에 갑니다. 기다리는 기도가 없을 때 곡을 체크하면 그 자리에 새 기도(기도 / Prayer)가 생기고, 체크를
+  풀면 그 곡의 기도만 빠집니다(다른 곡의 기도는 그대로, 다시 체크하면 적어 둔 기도가 돌아옵니다). 아무것도
+  적지 않은 기도는 체크를 풀 때 함께 없어집니다. 체크한 곡보다 기도가 많으면 남는 기도는 **맨 뒤**(마지막
+  곡 다음)에 들어가고 그렇게 알려 줍니다. 곡 뒤에 넣은 추가 자료(설교 등)는 그 곡의 기도보다 앞에 들어갑니다.
+- **기도마다 슬라이드** — 새 기도는 `기도제목 → 기도 / Prayer`(작년 순서)로 시작하고, 카드 아래 버튼으로
+  슬라이드를 더하며, 화살표로 순서를 바꾸고 ✕로 뺍니다.
+  - **기도제목** — 작년 기도제목 슬라이드에 한글·영어 제목(기본 `기도제목 | Prayer Prompt`, 한 줄로 쓰고
+    둘 다 고칠 수 있음)과 **한 줄에 하나씩** 적은 기도제목이
+    글머리표(-)와 함께 들어갑니다. 줄 앞에 적은 `-`·`•`는 글머리표로 바뀌고, `1.`처럼 번호를 붙인 줄은
+    글머리표 없이 번호 그대로 씁니다. 26pt에서 넘치면 조금씩 줄이고, 20pt보다 작아져야 하면 기도제목을
+    나누지 않고 **다음 장으로 넘깁니다**. 비워 두면 넣지 않습니다.
+  - **말씀** — `사도행전 1장 3-5, 8절`, `행1:3-5,8`, `Acts 1:3-5, 8`처럼 구절을 적으면 **개역개정과 NASB**
+    본문을 찾아 작년 말씀 슬라이드처럼 **한 절에 한 장씩** 넣습니다 — 모서리에 `사도행전 1장 3-5, 8절` /
+    `Acts 1:3-5, 8`, 위에 `사도행전 1장 3절`과 개역개정, 아래에 `Acts 1:3`과 NASB. 개역개정이 두 절을 한 절로
+    묶은 곳(신6:18-19)은 한 장에 두 절의 NASB를 함께 넣고, 긴 절은 제 칸 안에서 글자를 줄입니다. `본문 보기`로
+    들어갈 본문을 미리 볼 수 있고, 50절이 넘는 구절은 오타로 보고 넣지 않습니다.
+  - **기도 슬라이드** — 작년 `기도 / Prayer` 슬라이드에 한글·영어 제목을 넣습니다. `자주 쓰는 제목`에서
+    통성기도 / Corporate Prayer, 합심기도 / United Prayer, 중보기도 / Intercessory Prayer, 개인기도,
+    묵상기도, 결단기도, 마무리 기도, 축도 / Benediction을 고르거나 직접 적습니다. 두 줄은 같은 크기로 각각
+    한 줄에 들어가게 맞추고, 한쪽만 적으면 그 줄만 나옵니다.
+- 예전에 저장한 찬양집회를 열면 체크해 둔 곡마다 기도 / Prayer 한 장짜리 기도로 열려 PPT가 그대로입니다.
+
+### 4단계 · 추가 자료
+
+설교 PPT, 이미지, PDF 등을 올리고 파일마다 **넣을 위치**(표지 바로 뒤 /
 N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡의 기도 슬라이드보다 앞에 들어가므로,
 작년처럼 `찬양 → 설교 → 기도 → 다음 찬양` 순서를 만들 수 있습니다. 4:3이 아닌 PPT는 찬양집회 PPT
 크기(4:3)에 맞춰 줄입니다.
 
-### 4단계 · 표지 및 다운로드
+### 5단계 · 표지 및 다운로드
 
 - **날짜** — 콘티 날짜로 채워지고, 작년 표지 그림 속 날짜(09/27/2025)를 가리고 그 자리에
   `MM/DD/YYYY`로 올해 날짜를 씁니다. 올해 새 표지 이미지를 올리면 그 그림을 그대로 씁니다.
@@ -866,7 +897,7 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   템플릿 장을 옵션으로 받아 수요예배 캔버스에 맞추고, 만든 덱은
   `pptxPackage.ts`의 `pruneToSlides()`로 **자기 슬라이드가 쓰지 않는 파트를 모두 덜어낸 뒤** 합쳐집니다
   (그러지 않으면 곡마다 템플릿 배경 2MB가 한 벌씩 복사됩니다).
-- 찬양집회 슬라이드: `public/praise-template.pptx` (표지·곡 제목·가사·기도 4장)와 작년 영어 가사
+- 찬양집회 슬라이드: `public/praise-template.pptx` (표지·곡 제목·가사·기도·기도제목·말씀 6장)와 작년 영어 가사
   `public/praise-english.json`. 둘 다 작년 찬양집회 PPT에서
   `node scripts/prepare-praise-template.mjs <찬양집회.pptx>`로 뽑아낸 파일입니다 (원본은 저장소에 두지
   않습니다). 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
@@ -945,8 +976,14 @@ Korean. Every
 song's Korean and English are saved the moment they change (`useSaveSoon` in
 `src/lib/storage/saveSoon.ts`: a 0.3 s pause, or at once when the tab is hidden); other services only ever load the Korean (it is also
 saved to the lyrics library as a draft). A bilingual slide that would have to shrink below 28pt is split
-into two. Files such as a sermon deck can be placed after any song, a 기도/Prayer slide can follow any
-song, and the cover photo gets this year's date over last year's. 찬양집회 decks are saved with `keep`, so
+into two. Files such as a sermon deck can be placed after any song, and the cover photo gets this year's
+date over last year's. A 기도 step keeps the night's prayers (add or remove any number): each is an ordered
+list of slides — 기도제목 (headed "기도제목 | Prayer Prompt", one topic a line, moved on to another slide
+rather than shrunk past 20pt), 말씀
+(a typed passage read in 개역개정 and NASB from `public/bible-text`, one verse a slide in last year's 말씀
+design; `src/praise/scripture.ts`) and prayer titles (기도 / Prayer, 통성기도, 축도…). They follow the
+checked songs in order (`src/praise/prayers.ts`): 기도 1 after the first checked song, and so on; a prayer
+with no checked song left goes at the end. 찬양집회 decks are saved with `keep`, so
 the weekly Sunday purge never deletes them — only a manual delete does. A 찬양 목록 on the left of every
 step (`src/praise/PraiseSongList.tsx`) lists the songs in order; pressing a title scrolls to that song's
 card (its 영어 가사 card on that step, its 찬양 card from any other) and marks the song at the top of the

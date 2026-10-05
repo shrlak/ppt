@@ -2,9 +2,10 @@
 // real 찬양집회 deck (the 2025 EM & KM Praise Night file).
 //
 // The 찬양집회 generator draws nothing of its own: the cover, the song title
-// slide, the bilingual lyrics slide and the 기도 slide are that deck's own
-// slides, kept with their master, layouts, embedded Nanum Gothic fonts and
-// background photos. This script keeps those four designs, replaces that
+// slide, the bilingual lyrics slide, the 기도 slide, the 기도제목 slide and
+// the 말씀 slide (개역개정 over English, one verse a slide) are that deck's
+// own slides, kept with their master, layouts, embedded Nanum Gothic fonts and
+// background photos. This script keeps those six designs, replaces that
 // night's wording with {{TOKEN}} placeholders, and drops everything else
 // (every other slide, the speaker notes, and the media only they used).
 //
@@ -32,6 +33,8 @@ const KEPT_SLIDES = [
   { source: 2, role: '곡 제목' },
   { source: 3, role: '가사' },
   { source: 31, role: '기도' },
+  { source: 61, role: '기도제목' },
+  { source: 53, role: '말씀' },
 ];
 
 const TOKEN_RULES = {
@@ -44,6 +47,35 @@ const TOKEN_RULES = {
     // One lyric paragraph is the pattern every line (and the spacer between
     // the Korean and the English) is cloned from; the rest are dropped.
     { text: '주 자비 춤추게 하네', token: '{{LINE}}', keepFollowing: 0 },
+  ],
+  // The same design carries 기도 / Prayer and every other prayer title
+  // (통성기도, 중보기도, 축도…), so both lines become placeholders.
+  31: [
+    { text: '기도', token: '{{PRAYER_KO}}' },
+    { text: 'Prayer', token: '{{PRAYER_EN}}' },
+  ],
+  61: [
+    { text: '기도제목', token: '{{PRAYER_HEADING}}' },
+    // One bulleted topic is the pattern every topic is cloned from.
+    {
+      text: '- 찬양집회를 통해 성령님께서 모든 지체들의 마음을 만지시고 하나님의 강한 임재를 경험할 수 있도록.',
+      token: '{{PRAYER_TOPIC}}',
+      keepFollowing: 0,
+    },
+  ],
+  53: [
+    { text: '사도행전 1장 3-5, 8절', token: '{{PASSAGE_KO}}' },
+    { text: 'Acts 1:3-5, 8', token: '{{PASSAGE_EN}}' },
+    { text: '사도행전 1장 3절', token: '{{VERSE_REF_KO}}' },
+    {
+      text: '그가 고난 받으신 후에 또한 그들에게 확실한 많은 증거로 친히 살아 계심을 나타내사 사십 일 동안 그들에게 보이시며 하나님 나라의 일을 말씀하시니라',
+      token: '{{VERSE_KO}}',
+    },
+    { text: 'Acts 1:3', token: '{{VERSE_REF_EN}}' },
+    {
+      text: 'After his suffering, he showed himself to these men and gave many convincing proofs that he was alive. He appeared to them over a period of forty days and spoke about the kingdom of God.',
+      token: '{{VERSE_EN}}',
+    },
   ],
 };
 
@@ -156,6 +188,15 @@ function coverDateShapes() {
     `<a:latin typeface="Georgia"/><a:ea typeface="Georgia"/><a:cs typeface="Georgia"/></a:rPr>` +
     `<a:t>{{COVER_DATE}}</a:t></a:r></a:p></p:txBody></p:sp>`;
   return mask + date;
+}
+
+/** A text box with no text in it (the 말씀 slide has one left over), dropped. */
+function dropEmptyShapes(slideXml) {
+  return slideXml.replace(SHAPE, (shape) =>
+    /<p:cNvSpPr txBox="1"\/>/.test(shape) && ![...shape.matchAll(PARAGRAPH)].some((p) => paragraphText(p[0]).trim())
+      ? ''
+      : shape,
+  );
 }
 
 function escapeRegExp(value) {
@@ -403,6 +444,7 @@ async function main() {
     if (!name) throw new Error(`원본에 ${position}번 슬라이드가 없습니다.`);
     const slide = await readTokenizedSlide(zip, name, TOKEN_RULES[position] ?? [], `${position}번 슬라이드(${role})`);
     if (position === 1) slide.xml = slide.xml.replace('</p:spTree>', `${coverDateShapes()}</p:spTree>`);
+    if (position === 53) slide.xml = dropEmptyShapes(slide.xml);
     slides.push(slide);
     console.log(`  ${String(position).padStart(3)}번 → ${role}`);
   }

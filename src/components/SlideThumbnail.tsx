@@ -79,7 +79,13 @@ function ShapeView({ shape, pxPerEmu }: { shape: RenderedShape; pxPerEmu: number
         <p
           key={pi}
           className={`slide-thumb-paragraph${shape.noWrap ? ' is-single-line' : ''}`}
-          style={{ textAlign: p.align === 'ctr' ? 'center' : p.align === 'r' ? 'right' : 'left' }}
+          style={{
+            textAlign: p.align === 'ctr' ? 'center' : p.align === 'r' ? 'right' : 'left',
+            // Its lines are spaced by its own largest run, as on the slide —
+            // not by the page's font, which would push small text apart and
+            // out of its box.
+            fontSize: ptToPx(Math.max(0, ...p.runs.map((r) => r.sizePt ?? DEFAULT_FONT_PT)) || DEFAULT_FONT_PT, pxPerEmu),
+          }}
         >
           {p.runs.map((r, ri) => (
             <span

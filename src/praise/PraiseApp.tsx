@@ -1,8 +1,10 @@
 // 찬양집회 PPT 생성기 — the praise-night deck, bilingual from end to end.
 //
-// Four steps: 찬양 (the same 콘티 upload and 악보 recognition as the Sunday
-// page) → 영어 가사 (English under every Korean slide) → 추가 자료 (a sermon
-// PPT, 말씀 slides… placed anywhere between songs) → 다운로드.
+// Five steps: 찬양 (the same 콘티 upload and 악보 recognition as the Sunday
+// page) → 영어 가사 (English under every Korean slide) → 기도 (how many times
+// the night prays, each with its 기도제목, 말씀 and 기도 slides, after the
+// checked songs in order) → 추가 자료 (a sermon PPT… placed anywhere between
+// songs) → 다운로드.
 //
 // Every deck made here is saved to the shared PPT 라이브러리 with `keep`, so
 // the weekly Sunday purge never removes it: a 찬양집회 deck goes only when
@@ -25,6 +27,7 @@ import type { AdditionalFile } from '../lib/additionalFiles/types';
 import { convertAdditionalFile } from '../lib/additionalFiles/convert';
 import { renderPptxSlides, revokeRenderedSlides, type RenderedSlide } from '../lib/pptx/pptxRenderer';
 import { getSavedDeck, saveDeckToLibrary, type SavedDeck } from '../lib/storage/pptLibrary';
+import { loadTranslation } from '../bible/bibleData';
 import { isWednesdaySource } from '../wednesday/source';
 import { isRetreatSource } from '../retreat/source';
 import {
@@ -35,6 +38,7 @@ import {
 } from '../lib/storage/deckAutoSave';
 import { useSaveSoon } from '../lib/storage/saveSoon';
 import PraiseEnglishStep from './PraiseEnglishStep';
+import PraisePrayerStep from './PraisePrayerStep';
 import PraiseSongList from './PraiseSongList';
 import { englishFromWeb, fetchWebEnglish, hasWebEnglishLookup, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
 import { buildPraiseDeck, formatCoverDate, isoDateFromConti, suggestPraiseFileName } from './deckBuilder';
@@ -52,7 +56,18 @@ import {
   synchronizeEnglishLibrary,
   type EnglishSongEntry,
 } from './englishLibrary';
-import { missingEnglishCount, planPraiseDeck, type AdditionalPlacement, type PlacedAdditional } from './planner';
+import { isPrayerPlan, missingEnglishCount, planPraiseDeck, type AdditionalPlacement, type PlacedAdditional } from './planner';
+import {
+  addPrayer,
+  applyPrayerFlags,
+  placePrayers,
+  prayerHasContent,
+  releaseRemovedSongs,
+  removePrayer,
+  setPrayerAfter,
+  withPrayerPerCheckedSong,
+  type PrayerState,
+} from './prayers';
 import {
   decodePraiseSource,
   encodePraiseFiles,
@@ -62,7 +77,7 @@ import {
   restorePraiseState,
   type PraiseState,
 } from './source';
-import { extrasFor, type PraiseCoverImage, type PraiseSongExtras } from './types';
+import { extrasFor, type PraiseCoverImage, type PraisePrayer, type PraiseSongExtras } from './types';
 
 const BASE = import.meta.env.BASE_URL || '/';
 /** How long the song list must sit still before its songs are looked up on the web. */
@@ -85,6 +100,7 @@ function sameEntry(a: EnglishSongEntry, b: EnglishSongEntry): boolean {
 const STEPS = [
   { id: 'songs', label: '찬양' },
   { id: 'english', label: '영어 가사' },
+  { id: 'prayer', label: '기도' },
   { id: 'additional', label: '추가 자료' },
   { id: 'download', label: '다운로드' },
 ] as const;
@@ -101,6 +117,8 @@ function slideIcon(kind: DeckOverviewItem['kind']): IconName {
       return 'music';
     case 'prayer':
       return 'prayer';
+    case 'bible':
+      return 'bible';
     case 'additional':
       return 'file';
     default:
@@ -158,6 +176,7 @@ export default function PraiseApp() {
   const [step, setStep] = useState(0);
   const [songs, setSongs] = useState<Song[]>([]);
   const [extras, setExtras] = useState<Record<string, PraiseSongExtras>>({});
+  const [prayers, setPrayers] = useState<PraisePrayer[]>([]);
   const [date, setDate] = useState('');
   const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
   const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
@@ -206,6 +225,7 @@ export default function PraiseApp() {
     date,
     songs,
     extras,
+    prayers,
     additionalFiles,
     placements,
     coverImage,
@@ -385,6 +405,9 @@ export default function PraiseApp() {
       }
       setSheetLibrary(entries);
       setExtras(english);
+      // A new conti is a new list of songs: no 기도 keeps its old song. One
+      // with something typed into it waits for a song to be checked again.
+      setPrayers((previous) => previous.filter(prayerHasContent));
       const unnamed = imported.filter(({ song }) => !/[가-힣]/.test(song.title) && slidesHaveKorean(song));
       if (unnamed.length > 0) {
         showToast(
@@ -465,6 +488,37 @@ export default function PraiseApp() {
     [],
   );
 
+  // ---- 기도: the count, each one's slides, and the songs they follow ----
+  const songsRef = useRef(songs);
+  songsRef.current = songs;
+  const prayersRef = useRef(prayers);
+  prayersRef.current = prayers;
+  // Checking a song and the 기도 it brings in change together. Only the
+  // check marks are taken from the result, so English arriving meanwhile is
+  // never overwritten, and the 기도 change from the newest list, so neither
+  // is a passage read a moment ago.
+  const changePrayers = useCallback((change: (state: PrayerState) => PrayerState) => {
+    const flags = extrasRef.current;
+    const { extras: next } = change({ extras: flags, prayers: prayersRef.current });
+    extrasRef.current = applyPrayerFlags(flags, next);
+    setExtras((previous) => applyPrayerFlags(previous, next));
+    setPrayers((previous) => change({ extras: flags, prayers: previous }).prayers);
+    setOverview(null);
+  }, []);
+  const togglePrayerAfter = useCallback(
+    (songId: string, on: boolean) => changePrayers((current) => setPrayerAfter(songsRef.current, current, songId, on)),
+    [changePrayers],
+  );
+  const updatePrayer = useCallback((prayerId: string, update: (prayer: PraisePrayer) => PraisePrayer) => {
+    setPrayers((previous) => previous.map((prayer) => (prayer.id === prayerId ? update(prayer) : prayer)));
+    setOverview(null);
+  }, []);
+  const loadBible = useCallback((translation: string) => loadTranslation(BASE, translation), []);
+  // Every checked song has its 기도, whatever checked it.
+  useEffect(() => {
+    setPrayers((previous) => withPrayerPerCheckedSong(songs, extras, previous));
+  }, [songs, extras]);
+
   const loadSongFromLibrary = useCallback((song: Song, entry: EnglishSongEntry) => {
     const restored = songFromEnglishEntry(entry, song.id);
     setReplaceSong((previous) => ({ version: (previous?.version ?? 0) + 1, song: { ...restored.song, pageIndex: song.pageIndex } }));
@@ -529,13 +583,14 @@ export default function PraiseApp() {
       template,
       songs,
       extras,
+      prayers,
       date,
       coverImage,
       additionalFiles,
       placements,
       convertAdditional: (file) => convertAdditionalFile(file, imageTemplate ?? new Uint8Array()),
     });
-  }, [additionalFiles, coverImage, date, extras, placements, songs]);
+  }, [additionalFiles, coverImage, date, extras, placements, prayers, songs]);
 
   // ---- 라이브러리: restore an entry, then keep it current ----
   const restoreSavedDeck = useCallback(async (deck: SavedDeck, quiet = false) => {
@@ -547,6 +602,7 @@ export default function PraiseApp() {
     const restored = await restorePraiseState(source, deck.additionalFiles ?? null);
     setDate(restored.date);
     setExtras(restored.extras);
+    setPrayers(restored.prayers);
     setAdditionalFiles(restored.additionalFiles);
     setPlacements(restored.placements);
     setCoverImage(restored.coverImage);
@@ -643,7 +699,7 @@ export default function PraiseApp() {
     },
     // `state` is rebuilt from these every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [build, contiFile, savedName, songs, date, extras, additionalFiles, placements, coverImage, fileNameOverride],
+    [build, contiFile, savedName, songs, date, extras, prayers, additionalFiles, placements, coverImage, fileNameOverride],
   );
 
   const fingerprint = praiseFingerprint({ ...state, name: savedName });
@@ -675,6 +731,11 @@ export default function PraiseApp() {
 
   // ---- 찬양 step callbacks ----
   const handleSongsChange = useCallback((next: Song[]) => {
+    // A song taken off the list lets go of its 기도 as unchecking it would.
+    const previous = songsRef.current;
+    const flags = extrasRef.current;
+    setPrayers((current) => releaseRemovedSongs(previous, next, flags, current));
+    songsRef.current = next;
     setSongs(next);
     setOverview(null);
   }, []);
@@ -785,6 +846,7 @@ export default function PraiseApp() {
     savedFingerprintRef.current = null;
     setDate('');
     setExtras({});
+    setPrayers([]);
     setAdditionalFiles([]);
     setPlacements([]);
     setCoverImage(null);
@@ -813,11 +875,19 @@ export default function PraiseApp() {
     songs,
     extras,
     placements.filter((item) => additionalFiles.some((file) => file.id === item.fileId)),
+    prayers,
   );
   const additionalSlides = additionalFiles.reduce((sum, file) => sum + file.slideCount, 0);
   const slideCount = plans.filter((plan) => plan.kind !== 'additional').length + additionalSlides;
   const missingEnglish = songs.reduce((sum, song) => sum + missingEnglishCount(song, extrasFor(extras, song.id)), 0);
-  const prayerCount = plans.filter((plan) => plan.kind === 'prayer').length;
+  const prayerSlideCount = plans.filter(isPrayerPlan).length;
+  const prayerNumbers = useMemo(
+    () =>
+      Object.fromEntries(
+        placePrayers(songs, extras, prayers).flatMap((item) => (item.afterSongId ? [[item.afterSongId, item.number]] : [])),
+      ) as Record<string, number>,
+    [songs, extras, prayers],
+  );
 
   const placementFor = (fileId: string): AdditionalPlacement =>
     placements.find((item) => item.fileId === fileId)?.placement ?? 'end';
@@ -860,7 +930,7 @@ export default function PraiseApp() {
             data-testid="praise-panel-songs"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">1 / 4</p>
+              <p className="wizard-kicker">1 / 5</p>
               <h2>찬양</h2>
               <p>찬양집회 콘티를 올리고 각 곡의 한글 가사와 순서를 확인하세요. 주일예배와 같은 방법으로 읽습니다.</p>
             </div>
@@ -887,7 +957,7 @@ export default function PraiseApp() {
             data-testid="praise-panel-english"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">2 / 4</p>
+              <p className="wizard-kicker">2 / 5</p>
               <h2>영어 가사</h2>
               <p>
                 한글 슬라이드마다 아래에 들어갈 영어 가사입니다. 작년 찬양집회에서 부른 곡과 저장한 곡은 자동으로
@@ -930,6 +1000,8 @@ export default function PraiseApp() {
               webLookups={webEnglish}
               webOutcomes={webOutcome}
               onWebSearch={hasWebEnglishLookup() ? searchWebAgain : undefined}
+              onPrayerAfter={togglePrayerAfter}
+              prayerNumbers={prayerNumbers}
             />
             <StepNav steps={STEPS} index={1} onMove={setStep} testIdPrefix="praise" />
           </section>
@@ -937,12 +1009,41 @@ export default function PraiseApp() {
           <section
             className={`wizard-panel${step === 2 ? ' active' : ''}`}
             aria-hidden={step !== 2}
+            data-testid="praise-panel-prayer"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">3 / 5</p>
+              <h2>기도</h2>
+              <p>
+                기도 횟수를 정하고 기도마다 기도제목·말씀(개역개정·NASB)·기도 슬라이드를 만드세요. 기도는 체크한 곡
+                뒤에 순서대로 들어갑니다.
+              </p>
+            </div>
+            <PraisePrayerStep
+              songs={songs}
+              extras={extras}
+              prayers={prayers}
+              onPrayerAfter={togglePrayerAfter}
+              onAddPrayer={() => changePrayers(addPrayer)}
+              onRemovePrayer={(index) => changePrayers((current) => removePrayer(songsRef.current, current, index))}
+              onPrayerChange={updatePrayer}
+              loadBible={loadBible}
+            />
+            <StepNav steps={STEPS} index={2} onMove={setStep} testIdPrefix="praise" />
+          </section>
+
+          <section
+            className={`wizard-panel${step === 3 ? ' active' : ''}`}
+            aria-hidden={step !== 3}
             data-testid="praise-panel-additional"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">3 / 4</p>
+              <p className="wizard-kicker">4 / 5</p>
               <h2>추가 자료</h2>
-              <p>설교 PPT, 말씀·기도제목 슬라이드 등을 올리고 어느 곡 뒤에 넣을지 고르세요. 없으면 건너뛰어도 됩니다.</p>
+              <p>
+                설교 PPT, 이미지, PDF 등을 올리고 어느 곡 뒤에 넣을지 고르세요. 기도제목·말씀은 기도 단계에서 바로
+                만들 수 있습니다. 없으면 건너뛰어도 됩니다.
+              </p>
             </div>
             <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
             {additionalFiles.length > 0 && (
@@ -974,16 +1075,16 @@ export default function PraiseApp() {
                 </p>
               </section>
             )}
-            <StepNav steps={STEPS} index={2} onMove={setStep} testIdPrefix="praise" />
+            <StepNav steps={STEPS} index={3} onMove={setStep} testIdPrefix="praise" />
           </section>
 
           <section
-            className={`wizard-panel${step === 3 ? ' active' : ''}`}
-            aria-hidden={step !== 3}
+            className={`wizard-panel${step === 4 ? ' active' : ''}`}
+            aria-hidden={step !== 4}
             data-testid="praise-panel-download"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">4 / 4</p>
+              <p className="wizard-kicker">5 / 5</p>
               <h2>표지 및 다운로드</h2>
               <p>찬양집회 PPT는 라이브러리에 자동 저장되고, 매주 자동 삭제에서 빠져 직접 지울 때까지 남습니다.</p>
             </div>
@@ -1057,7 +1158,7 @@ export default function PraiseApp() {
                 <div>
                   <dt>기도 · 추가 자료</dt>
                   <dd>
-                    기도 {prayerCount}장 · 자료 {additionalFiles.length}개
+                    기도 {prayers.length}번 ({prayerSlideCount}장) · 자료 {additionalFiles.length}개
                   </dd>
                 </div>
                 <div>
@@ -1143,7 +1244,7 @@ export default function PraiseApp() {
                 </ol>
               </section>
             )}
-            <StepNav steps={STEPS} index={3} onMove={setStep} testIdPrefix="praise" />
+            <StepNav steps={STEPS} index={4} onMove={setStep} testIdPrefix="praise" />
           </section>
         </main>
       </div>

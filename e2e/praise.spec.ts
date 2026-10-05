@@ -144,6 +144,102 @@ test.describe('찬양집회 generator', () => {
     await page.screenshot({ path: testInfo.outputPath('praise-preview.png'), fullPage: true });
   });
 
+  test('puts each 기도 — its 기도제목, 말씀 and prayer title — after the checked songs, in order', async ({ page }, testInfo) => {
+    // No English on the web for these songs, answered at once.
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('praise.html');
+    for (const title of ['주님의 선하심', '감사함으로', '광야를 지나며']) await addLibrarySong(page, title);
+
+    await page.getByTestId('praise-tab-prayer').click();
+    const plan = page.getByTestId('praise-prayer-plan');
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('0번');
+    // Two 기도 written ahead of time wait at the end until songs are checked.
+    await plan.getByTestId('praise-prayer-count-up').click();
+    await plan.getByTestId('praise-prayer-count-up').click();
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('2번');
+    await expect(page.getByTestId('praise-prayer-waiting')).toContainText('기도 1, 기도 2');
+
+    const cards = page.getByTestId('praise-prayer');
+    const first = cards.nth(0);
+    await first.getByTestId('praise-topics-input').fill('- 찬양집회를 통해 성령님께서 마음을 만지시도록\n- 복음의 열정이 회복되도록');
+    await expect(first.getByTestId('praise-topics-hint')).toContainText('기도제목 2개');
+    await expect(first.getByTestId('praise-topics-heading-en')).toHaveValue('Prayer Prompt');
+    await first.getByTestId('praise-prayer-add-scripture').click();
+    await first.getByTestId('praise-scripture-input').fill('행 1:8');
+    await expect(first.getByTestId('praise-scripture-status')).toContainText('사도행전 1장 8절 · Acts 1:8 — 1절', {
+      timeout: 30_000,
+    });
+    // 말씀 goes before 기도 / Prayer: 기도제목 → 말씀 → 기도.
+    await first.getByRole('button', { name: '말씀 위로' }).click();
+    await expect(first.getByTestId('praise-prayer-slide')).toHaveCount(3);
+    await expect(first.getByTestId('praise-prayer-slide').nth(1)).toHaveAttribute('data-kind', 'scripture');
+    await expect(first.getByTestId('praise-prayer-slide-count')).toHaveText('슬라이드 3장');
+    // The second: 축도 alone, picked from the usual titles.
+    const second = cards.nth(1);
+    await second.getByTestId('praise-prayer-slide-remove').first().click();
+    await second.getByTestId('praise-prayer-title-preset').selectOption({ label: '축도 / Benediction' });
+    await expect(second.getByTestId('praise-prayer-title-ko')).toHaveValue('축도');
+    await expect(second.getByTestId('praise-prayer-title-en')).toHaveValue('Benediction');
+
+    // Checked out of order, the 기도 still follow the songs in order.
+    const songRows = plan.getByTestId('praise-prayer-song');
+    await songRows.nth(2).getByTestId('praise-prayer-song-toggle').check();
+    await songRows.nth(0).getByTestId('praise-prayer-song-toggle').check();
+    await expect(songRows.nth(0)).toContainText('기도 1');
+    await expect(songRows.nth(2)).toContainText('기도 2');
+    await expect(first.getByTestId('praise-prayer-where')).toHaveText('1. 주님의 선하심 뒤');
+    await expect(second.getByTestId('praise-prayer-where')).toHaveText('3. 광야를 지나며 뒤');
+    await expect(page.getByTestId('praise-prayer-waiting')).toHaveCount(0);
+    await plan.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('praise-prayer-step.png'), fullPage: true });
+
+    // Checking the middle song on the 영어 가사 step brings in a 기도 of its
+    // own there; unchecking it takes that empty 기도 back out.
+    await page.getByTestId('praise-tab-english').click();
+    const middle = page.getByTestId('praise-english-song').nth(1);
+    await middle.getByTestId('praise-prayer-after').check();
+    await expect(middle.locator('.praise-prayer-toggle')).toContainText('기도 2');
+    await page.getByTestId('praise-tab-prayer').click();
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('3번');
+    await expect(songRows.nth(2)).toContainText('기도 3');
+    await songRows.nth(1).getByTestId('praise-prayer-song-toggle').uncheck();
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('2번');
+    await expect(second.getByTestId('praise-prayer-title-ko')).toHaveValue('축도');
+
+    await page.getByTestId('praise-tab-download').click();
+    await expect(page.getByTestId('praise-summary')).toContainText('기도 2번 (4장)');
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
+      page.getByTestId('praise-download').click(),
+    ]);
+    const saveTo = testInfo.outputPath('praise-prayer.pptx');
+    await download.saveAs(saveTo);
+    const texts = await slideTexts(await JSZip.loadAsync(await fs.readFile(saveTo)));
+
+    const topics = texts.indexOf(
+      '기도제목 | Prayer Prompt | 찬양집회를 통해 성령님께서 마음을 만지시도록 | 복음의 열정이 회복되도록',
+    );
+    expect(topics).toBeGreaterThan(0);
+    expect(texts[topics - 1]).toMatch(/^주님의 선하심 \| Goodness of God \| /);
+    expect(texts[topics + 1]).toBe(
+      '사도행전 1장 8절 | Acts 1:8 | 사도행전 1장 8절 | 오직 성령이 너희에게 임하시면 너희가 권능을 받고 예루살렘과 온 유대와 사마리아와 땅 끝까지 이르러 내 증인이 되리라 하시니라 | Acts 1:8 | but you will receive power when the Holy Spirit has come upon you; and you shall be My witnesses both in Jerusalem and in all Judea, and Samaria, and as far as the remotest part of the earth.”',
+    );
+    expect(texts[topics + 2]).toBe('기도 |  | Prayer');
+    expect(texts[topics + 3]).toMatch(/^감사함으로/);
+    expect(texts.at(-1)).toBe('축도 |  | Benediction');
+    expect(texts.at(-2)).toMatch(/^광야를 지나며/);
+    // One 기도 / Prayer: the middle song's empty 기도 left with its check.
+    expect(texts.filter((text) => text === '기도 |  | Prayer')).toHaveLength(1);
+
+    // The preview draws the 기도 slides in last year's designs.
+    await page.getByTestId('praise-preview').click();
+    const grid = page.getByTestId('praise-preview-grid');
+    await expect(grid.locator('.slide-thumb')).toHaveCount(texts.length, { timeout: BUILD_TIMEOUT });
+    await grid.locator('li').nth(topics).scrollIntoViewIfNeeded();
+    await grid.screenshot({ path: testInfo.outputPath('praise-prayer-preview.png') });
+  });
+
   test('fills English the conti lacks from the web by itself, with no button pressed', async ({ page }) => {
     // Made-up lyrics, served the way a 영어 가사 post comes back from the proxy.
     const asked: string[] = [];
