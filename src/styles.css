@@ -4434,6 +4434,133 @@ main[data-direction='back'] .wizard-panel.active {
   gap: var(--s-2);
 }
 
+/* The poster: the deck's first slide, edited beside a preview drawn from
+   the same layout the slide is built from. */
+.praise-poster-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.praise-poster-head h3 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--text-base);
+}
+.praise-poster-head .field-hint {
+  margin: 0;
+}
+.praise-poster-toggle {
+  margin-left: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+.praise-poster-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-5);
+  margin-top: var(--s-4);
+}
+.praise-poster-preview {
+  container-type: inline-size;
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+}
+.praise-poster-preview-picture {
+  position: absolute;
+  max-width: none;
+}
+.praise-poster-preview-text {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-family: 'NanumGothic', 'Nanum Gothic', var(--font-sans);
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+.praise-poster-preview-text.has-shadow {
+  text-shadow: 0 0.2cqw 0.6cqw rgb(0 0 0 / 65%);
+}
+.praise-poster-preview-text p {
+  margin-bottom: 0;
+}
+.praise-poster-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--s-4);
+  color: rgb(255 255 255 / 70%);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.praise-poster-fields {
+  display: grid;
+  gap: var(--s-4);
+}
+.praise-poster-fields .field {
+  margin: 0;
+}
+.praise-poster-fields textarea {
+  width: 100%;
+  padding: var(--s-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--text-base);
+  line-height: var(--lh-snug);
+  resize: vertical;
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+.praise-poster-fields textarea:hover {
+  border-color: var(--field-border-strong);
+}
+.praise-poster-fields textarea:focus-visible {
+  border-color: var(--accent);
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+.praise-poster-fit {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.praise-poster-fit legend {
+  margin-bottom: var(--s-2);
+  padding: 0;
+}
+.praise-poster-fit label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--text-sm);
+}
+.praise-poster-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+}
+.praise-poster-colors .field input[type='color'] {
+  width: 4rem;
+  min-height: var(--control-h);
+  padding: var(--s-1);
+  cursor: pointer;
+}
+.praise-poster-note {
+  margin: var(--s-4) 0 0;
+}
+
 .praise-preview ol {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -4829,6 +4956,7 @@ main[data-direction='back'] .wizard-panel.active {
   }
   .praise-placements li,
   .praise-cover-row,
+  .praise-poster-body,
   .praise-prayer-title-fields,
   .praise-prayer-heading-fields {
     grid-template-columns: 1fr;

@@ -488,11 +488,12 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 ### 생성되는 슬라이드 순서
 
 ```
-표지(올해 날짜)  →  [곡 제목(한글 / English)  →  가사(한글 위, 영어 아래) × N  →  그 곡 뒤에 넣은 자료
-                    →  기도(체크한 곡만: 기도제목 → 말씀 → 기도 / Prayer…)] × 곡 수
-                 →  체크한 곡이 모자라 남은 기도  →  맨 뒤에 넣은 자료
+(포스터)  →  표지(올해 날짜)  →  [곡 제목(한글 / English)  →  가사(한글 위, 영어 아래) × N  →  그 곡 뒤에 넣은 자료
+                                →  기도(체크한 곡만: 기도제목 → 말씀 → 기도 / Prayer…)] × 곡 수
+                             →  체크한 곡이 모자라 남은 기도  →  맨 뒤에 넣은 자료
 ```
 
+포스터는 5단계에서 넣기로 했을 때만, 언제나 **맨 첫 장**으로 들어갑니다.
 표지·곡 제목·가사·기도·기도제목·말씀 여섯 가지 디자인은 모두 작년 PPT의 슬라이드를 그대로 씁니다
 (`public/praise-template.pptx` — 배경 사진, 나눔고딕 글꼴 포함). 가사 슬라이드 모서리에는 작년처럼
 `한글 제목 | English Title`이 들어갑니다.
@@ -643,8 +644,24 @@ N번째 곡 뒤 / 맨 뒤)를 고릅니다. 곡 뒤에 넣은 자료는 그 곡�
 작년처럼 `찬양 → 설교 → 기도 → 다음 찬양` 순서를 만들 수 있습니다. 4:3이 아닌 PPT는 찬양집회 PPT
 크기(4:3)에 맞춰 줄입니다.
 
-### 5단계 · 표지 및 다운로드
+### 5단계 · 포스터·표지 및 다운로드
 
+- **포스터 슬라이드 (맨 첫 장)** — `맨 첫 장에 포스터 넣기`를 켜면 PPT의 **첫 슬라이드(표지 앞)** 에 포스터가
+  들어갑니다. 예배 전 화면에 띄워 둘 올해 포스터를 넣는 자리입니다. 모두 고칠 수 있고, 고치는 대로 미리보기에
+  실제 슬라이드와 같은 배치로 바로 보입니다.
+  - **포스터 이미지**(PNG/JPG) — 완성된 포스터 그림을 올리면 그대로 씁니다. **전체 보이기**는 그림 전체를
+    잘리지 않게 넣고 남는 곳을 배경색으로 채우며(세로 포스터도 4:3 화면에 맞게), **화면 채우기**는 그림이 화면을
+    가득 채우고 가장자리가 잘립니다. 이미지를 올리면 배경색이 그림 가장자리 색으로 맞춰집니다. 바꾸거나 뺄 수
+    있습니다.
+  - **제목·부제·안내** — 이미지 없이 글자만으로, 또는 배경 사진 위에 글자를 얹어 포스터를 만듭니다. 제목(60pt)·
+    부제(32pt)·안내(24pt, 한 줄에 하나씩: 일시, 장소…)는 각각 **한 줄에** 들어가는 크기로 맞추고, 줄이 많으면
+    전체를 함께 줄여 화면 안에 둡니다. 비워 둔 줄은 넣지 않습니다. 사진 위의 글자에는 옅은 그림자가 들어갑니다.
+  - **배경색·글자색**을 고를 수 있습니다.
+  - **PowerPoint에서도 편집할 수 있습니다** — 포스터 그림은 배경에 박아 넣지 않고 **보통 그림 개체**로, 글자는
+    **보통 텍스트 상자**로 들어가므로 PPT를 받은 뒤에도 그림을 옮기거나 크기를 바꾸고(그림 바꾸기도 가능) 글자를
+    고칠 수 있습니다. 글꼴은 PPT에 이미 들어 있는 나눔고딕이라 어느 컴퓨터에서 띄워도 같게 보입니다.
+  - 끄면 PPT에서만 빠지고 적어 둔 내용은 남아 있어 다시 켜면 그대로 돌아옵니다. 켜 두었어도 이미지도 글자도
+    없으면 넣지 않습니다. 포스터는 찬양집회와 함께 저장되어 라이브러리의 **편집**으로 다시 열어도 그대로입니다.
 - **날짜** — 콘티 날짜로 채워지고, 작년 표지 그림 속 날짜(09/27/2025)를 가리고 그 자리에
   `MM/DD/YYYY`로 올해 날짜를 씁니다. 올해 새 표지 이미지를 올리면 그 그림을 그대로 씁니다.
 - **미리보기**로 실제 슬라이드(배경 사진 포함)를 확인한 뒤 **찬양집회 PPT 다운로드**를 누릅니다.
@@ -918,7 +935,9 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   템플릿 장을 옵션으로 받아 수요예배 캔버스에 맞추고, 만든 덱은
   `pptxPackage.ts`의 `pruneToSlides()`로 **자기 슬라이드가 쓰지 않는 파트를 모두 덜어낸 뒤** 합쳐집니다
   (그러지 않으면 곡마다 템플릿 배경 2MB가 한 벌씩 복사됩니다).
-- 찬양집회 슬라이드: `public/praise-template.pptx` (표지·곡 제목·가사·기도·기도제목·말씀 6장)와 작년 영어 가사
+- 찬양집회 슬라이드: `public/praise-template.pptx` (표지·곡 제목·가사·기도·기도제목·말씀 6장 — 맨 첫 장의
+  포스터만은 작년 PPT에 없어 `src/praise/poster.ts`가 이 템플릿의 빈(BLANK) 레이아웃 위에 그림 개체와 텍스트
+  상자로 직접 그립니다)와 작년 영어 가사
   `public/praise-english.json`. 둘 다 작년 찬양집회 PPT에서
   `node scripts/prepare-praise-template.mjs <찬양집회.pptx>`로 뽑아낸 파일입니다 (원본은 저장소에 두지
   않습니다). 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
@@ -998,7 +1017,13 @@ song's Korean and English are saved the moment they change (`useSaveSoon` in
 `src/lib/storage/saveSoon.ts`: a 0.3 s pause, or at once when the tab is hidden); other services only ever load the Korean (it is also
 saved to the lyrics library as a draft). A bilingual slide that would have to shrink below 28pt is split
 into two. Files such as a sermon deck can be placed after any song, and the cover photo gets this year's
-date over last year's. A 기도 step keeps the night's prayers (add or remove any number): each is an ordered
+date over last year's. An optional poster can open the deck as its very first slide, ahead of the cover:
+edited on the download step (a PNG/JPG picture shown whole or filling the slide, a title, subtitle and
+detail lines each fitted to one line, background and text colours) beside a live preview drawn from the
+same layout the slide is built from (`posterLayout` in `src/praise/poster.ts`). Last year's deck had no
+poster, so it is drawn on the template's blank layout as an ordinary picture and text box rather than a
+background image — it stays editable in PowerPoint — and saved with the night, its picture in the
+entry's archive between the 추가 자료 and the cover. A 기도 step keeps the night's prayers (add or remove any number): each is an ordered
 list of slides — 기도제목 (headed "기도제목 | Prayer Prompt", one topic a line, moved on to another slide
 rather than shrunk past 20pt), 말씀
 (a typed passage read in 개역개정 and NASB from `public/bible-text`, one verse a slide in last year's 말씀

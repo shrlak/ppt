@@ -4,6 +4,7 @@
 //
 // The deck follows last year's bilingual layout:
 //
+//   (포스터, when the night has one — always the very first slide)
 //   표지
 //   (표지 뒤에 두기로 한 추가 자료)
 //   곡마다: [한글 제목 / English Title] + 가사 슬라이드 (한글 위, 영어 아래)
@@ -22,6 +23,7 @@
 import type { Song } from '../lib/utils/types';
 import { planSlides } from '../lib/utils/slidePlanner';
 import { fitBodyFontSize } from '../lib/pptx/textFit';
+import { posterInDeck } from './poster';
 import { placePrayers, topicLines } from './prayers';
 import {
   PRAISE_LYRICS_BASE_SZ,
@@ -33,7 +35,7 @@ import {
   PRAISE_TOPICS_MIN_SZ,
   PRAISE_TOPICS_SPLIT_SZ,
 } from './template';
-import { extrasFor, type PraisePrayer, type PraiseSongExtras, type PraiseVerse } from './types';
+import { extrasFor, type PraisePoster, type PraisePrayer, type PraiseSongExtras, type PraiseVerse } from './types';
 
 const HANGUL = /[가-힣ㄱ-ㆎ]/;
 
@@ -140,6 +142,8 @@ interface PrayerSlideAt {
 }
 
 export type PraiseSlidePlan =
+  /** The night's poster, ahead of everything else. */
+  | { kind: 'poster' }
   | { kind: 'cover' }
   | { kind: 'title'; songId: string; titleKo: string; titleEn: string }
   | { kind: 'lyrics'; songId: string; header: string; lines: string[]; english: string[] }
@@ -250,13 +254,15 @@ export function isPrayerPlan(
 /**
  * Every slide of the deck, in order. A file placed after a song that is no
  * longer on the list falls back to the end rather than disappearing, and so
- * does a 기도 with no checked song left for it.
+ * does a 기도 with no checked song left for it. A poster that is switched on
+ * and has something on it is always the first slide.
  */
 export function planPraiseDeck(
   songs: Song[],
   extras: Record<string, PraiseSongExtras>,
   additional: PlacedAdditional[] = [],
   prayers: PraisePrayer[] = [],
+  poster: PraisePoster | null = null,
 ): PraiseSlidePlan[] {
   const songIds = new Set(songs.map((song) => song.id));
   const placedAfter = (songId: string) =>
@@ -277,7 +283,7 @@ export function planPraiseDeck(
         planPrayerSlides(placed.prayer, { prayerId: placed.prayer.id, prayerNumber: placed.number, afterSongId }),
       );
 
-  const plans: PraiseSlidePlan[] = [{ kind: 'cover' }];
+  const plans: PraiseSlidePlan[] = posterInDeck(poster) ? [{ kind: 'poster' }, { kind: 'cover' }] : [{ kind: 'cover' }];
   for (const item of additional) {
     if (item.placement === 'start') plans.push({ kind: 'additional', fileId: item.fileId });
   }

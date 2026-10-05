@@ -4,16 +4,30 @@
 //
 // Like the 수요예배 snapshot it reuses the library's `source` file kind,
 // tagged `kind: 'praise'`; the Sunday decoder refuses any kind but its own,
-// so a 찬양집회 entry can never open as an empty 주일 week. 추가 자료 and a
-// replaced cover photo travel in the entry's additional-files archive, the
-// cover last.
+// so a 찬양집회 entry can never open as an empty 주일 week. 추가 자료, the
+// poster's picture and a replaced cover photo travel in the entry's
+// additional-files archive, in that order: 추가 자료, then the poster, then
+// the cover last.
 import { DECK_SOURCE_FILE_NAME, songOf, type DeckSourceFile } from '../lib/storage/deckSource';
 import { decodeAdditionalFiles, encodeAdditionalFiles } from '../lib/storage/additionalFilesArchive';
 import type { AdditionalFile } from '../lib/additionalFiles/types';
 import type { Song } from '../lib/utils/types';
 import type { AdditionalPlacement, PlacedAdditional } from './planner';
+import { posterColor } from './poster';
 import { DEFAULT_TOPICS_HEADING_EN, withPrayerPerCheckedSong } from './prayers';
-import type { PraiseCoverImage, PraiseEnglish, PraisePassage, PraisePrayer, PraisePrayerSlide, PraiseSongExtras } from './types';
+import {
+  DEFAULT_POSTER_BACKGROUND,
+  DEFAULT_POSTER_TEXT_COLOR,
+  emptyPoster,
+  type PraiseCoverImage,
+  type PraiseEnglish,
+  type PraisePassage,
+  type PraisePoster,
+  type PraisePosterImage,
+  type PraisePrayer,
+  type PraisePrayerSlide,
+  type PraiseSongExtras,
+} from './types';
 
 export const PRAISE_SOURCE_KIND = 'praise';
 export const PRAISE_SOURCE_VERSION = 1;
@@ -30,8 +44,15 @@ export interface PraiseSource {
   additional: { name: string; placement: AdditionalPlacement }[];
   /** The replaced cover photo is the archive's last entry. */
   cover?: { name: string; mimeType: PraiseCoverImage['mimeType'] };
+  /**
+   * The poster, its picture's bytes left out: they are the archive entry
+   * just before the cover (the last entry when there is no cover).
+   */
+  poster?: StoredPoster;
   fileNameOverride?: string;
 }
+
+type StoredPoster = Omit<PraisePoster, 'image'> & { image: Omit<PraisePosterImage, 'data'> | null };
 
 /** True when a saved deck's snapshot belongs to the 찬양집회 generator. */
 export function isPraiseSource(file: DeckSourceFile | null | undefined): boolean {
@@ -51,7 +72,22 @@ export interface PraiseState {
   additionalFiles: AdditionalFile[];
   placements: PlacedAdditional[];
   coverImage: PraiseCoverImage | null;
+  /** Absent means no poster has been set up (the same as emptyPoster()). */
+  poster?: PraisePoster;
   fileNameOverride?: string;
+}
+
+/** True when the poster holds anything worth keeping: switched on, a picture, words, or colours of its own. */
+function posterWorthKeeping(poster: PraisePoster | undefined): poster is PraisePoster {
+  return Boolean(poster) && JSON.stringify(storedPoster(poster!)) !== JSON.stringify(storedPoster(emptyPoster()));
+}
+
+function storedPoster(poster: PraisePoster): StoredPoster {
+  const { image, ...rest } = poster;
+  return {
+    ...rest,
+    image: image ? { name: image.name, mimeType: image.mimeType, width: image.width, height: image.height } : null,
+  };
 }
 
 function placementFor(state: PraiseState, fileId: string): AdditionalPlacement {
@@ -68,6 +104,7 @@ export function encodePraiseSource(state: PraiseState): DeckSourceFile {
     prayers: state.prayers,
     additional: state.additionalFiles.map((file) => ({ name: file.name, placement: placementFor(state, file.id) })),
     ...(state.coverImage ? { cover: { name: state.coverImage.name, mimeType: state.coverImage.mimeType } } : {}),
+    ...(posterWorthKeeping(state.poster) ? { poster: storedPoster(state.poster) } : {}),
     ...(state.fileNameOverride ? { fileNameOverride: state.fileNameOverride } : {}),
   };
   return {
@@ -76,9 +113,19 @@ export function encodePraiseSource(state: PraiseState): DeckSourceFile {
   };
 }
 
-/** 추가 자료 then the cover photo, as one archive (null when there is neither). */
+/** 추가 자료, the poster's picture, then the cover photo, as one archive (null when there is none of them). */
 export async function encodePraiseFiles(state: PraiseState) {
   const files = [...state.additionalFiles];
+  const posterImage = posterWorthKeeping(state.poster) ? state.poster.image : null;
+  if (posterImage) {
+    files.push({
+      id: 'praise-poster',
+      name: posterImage.name,
+      kind: posterImage.mimeType === 'image/png' ? 'png' : 'jpeg',
+      data: posterImage.data,
+      slideCount: 1,
+    });
+  }
   if (state.coverImage) {
     files.push({
       id: 'praise-cover',
@@ -172,6 +219,32 @@ function prayersOf(value: unknown): PraisePrayer[] | undefined {
   });
 }
 
+function posterOf(value: unknown): StoredPoster | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const image = raw.image && typeof raw.image === 'object' ? (raw.image as Record<string, unknown>) : null;
+  const width = Number(image?.width);
+  const height = Number(image?.height);
+  return {
+    enabled: raw.enabled === true,
+    image:
+      image && width > 0 && height > 0
+        ? {
+            name: text(image.name, 300) || 'poster',
+            mimeType: image.mimeType === 'image/png' ? 'image/png' : 'image/jpeg',
+            width,
+            height,
+          }
+        : null,
+    fit: raw.fit === 'cover' ? 'cover' : 'contain',
+    background: posterColor(text(raw.background, 20), DEFAULT_POSTER_BACKGROUND),
+    title: text(raw.title, 300),
+    subtitle: text(raw.subtitle, 300),
+    details: text(raw.details, 2000),
+    textColor: posterColor(text(raw.textColor, 20), DEFAULT_POSTER_TEXT_COLOR),
+  };
+}
+
 function placementOf(value: unknown): AdditionalPlacement {
   if (value === 'start' || value === 'end') return value;
   if (value && typeof value === 'object' && typeof (value as { afterSongId?: unknown }).afterSongId === 'string') {
@@ -206,6 +279,7 @@ export function decodePraiseSource(file: DeckSourceFile | null | undefined): Pra
     ...(cover && typeof cover.name === 'string'
       ? { cover: { name: cover.name, mimeType: cover.mimeType === 'image/png' ? 'image/png' : 'image/jpeg' } }
       : {}),
+    ...(posterOf(raw.poster) ? { poster: posterOf(raw.poster) } : {}),
     ...(typeof raw.fileNameOverride === 'string' ? { fileNameOverride: raw.fileNameOverride } : {}),
   } as PraiseSource;
 }
@@ -217,6 +291,15 @@ export async function restorePraiseState(
 ): Promise<PraiseState> {
   const files = archive ? await decodeAdditionalFiles(archive) : [];
   const coverFile = source.cover && files.length > source.additional.length ? files.pop() : undefined;
+  const posterFile = source.poster?.image && files.length > source.additional.length ? files.pop() : undefined;
+  const storedPosterImage = source.poster?.image;
+  const poster: PraisePoster = source.poster
+    ? {
+        ...source.poster,
+        // A picture whose bytes did not come back is dropped, words and colours kept.
+        image: storedPosterImage && posterFile ? { ...storedPosterImage, data: posterFile.data } : null,
+      }
+    : emptyPoster();
   const placements = files.map((file, index) => ({
     fileId: file.id,
     placement: source.additional[index]?.placement ?? 'end',
@@ -234,6 +317,7 @@ export async function restorePraiseState(
       coverFile && source.cover
         ? { name: source.cover.name, mimeType: source.cover.mimeType, data: coverFile.data }
         : null,
+    poster,
     fileNameOverride: source.fileNameOverride,
   };
 }
@@ -255,5 +339,9 @@ export function praiseFingerprint(state: PraiseState & { name: string }): string
     files: state.additionalFiles.map((file) => `${file.name}:${file.data.byteLength}`),
     placements: state.placements,
     cover: state.coverImage ? `${state.coverImage.name}:${state.coverImage.data.byteLength}` : null,
+    poster: {
+      ...storedPoster(state.poster ?? emptyPoster()),
+      bytes: state.poster?.image?.data.byteLength ?? 0,
+    },
   });
 }
