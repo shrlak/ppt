@@ -8,11 +8,13 @@
 //   (표지 뒤에 두기로 한 추가 자료)
 //   곡마다: [한글 제목 / English Title] + 가사 슬라이드 (한글 위, 영어 아래)
 //           + 그 곡 뒤에 두기로 한 추가 자료 (설교 PPT, 말씀 등)
-//           + 기도 / Prayer, when the song asks for one after it
+//           + 기도 (기도제목 · 말씀 · 기도 / Prayer…), when the song is checked
+//             for one — the night's 기도 go after the checked songs in order
+//   (곡이 모자라 맨 뒤로 간 기도)
 //   (맨 뒤에 두기로 한 추가 자료)
 //
 // That is last year's running order in general form: a set of songs, the
-// sermon, 기도, the next set, and so on.
+// sermon, 기도제목, 기도, the next set, and so on.
 //
 // Korean slides are split exactly as the Sunday deck splits them
 // (planSlides: every part once, blank lines force a break, 슬라이드당 줄 수),
@@ -20,8 +22,18 @@
 import type { Song } from '../lib/utils/types';
 import { planSlides } from '../lib/utils/slidePlanner';
 import { fitBodyFontSize } from '../lib/pptx/textFit';
-import { PRAISE_LYRICS_BASE_SZ, PRAISE_LYRICS_BODY_BOX, PRAISE_LYRICS_MIN_SZ, PRAISE_LYRICS_SPLIT_SZ } from './template';
-import { extrasFor, type PraiseSongExtras } from './types';
+import { placePrayers, topicLines } from './prayers';
+import {
+  PRAISE_LYRICS_BASE_SZ,
+  PRAISE_LYRICS_BODY_BOX,
+  PRAISE_LYRICS_MIN_SZ,
+  PRAISE_LYRICS_SPLIT_SZ,
+  PRAISE_TOPICS_BASE_SZ,
+  PRAISE_TOPICS_BODY_BOX,
+  PRAISE_TOPICS_MIN_SZ,
+  PRAISE_TOPICS_SPLIT_SZ,
+} from './template';
+import { extrasFor, type PraisePrayer, type PraiseSongExtras, type PraiseVerse } from './types';
 
 const HANGUL = /[가-힣ㄱ-ㆎ]/;
 
@@ -120,11 +132,23 @@ export interface PraiseSongPlan {
   prayerAfter: boolean;
 }
 
+/** Where a 기도's slides are: which 기도 (1-based) and the song it follows (null: at the end). */
+interface PrayerSlideAt {
+  prayerId: string;
+  prayerNumber: number;
+  afterSongId: string | null;
+}
+
 export type PraiseSlidePlan =
   | { kind: 'cover' }
   | { kind: 'title'; songId: string; titleKo: string; titleEn: string }
   | { kind: 'lyrics'; songId: string; header: string; lines: string[]; english: string[] }
-  | { kind: 'prayer'; afterSongId: string }
+  /** 기도 / Prayer, or another prayer title. */
+  | ({ kind: 'prayer'; ko: string; en: string } & PrayerSlideAt)
+  /** One page of a 기도제목 slide; `heading` as printed: "기도제목 | Prayer Prompt". */
+  | ({ kind: 'prayer-topics'; heading: string; topics: string[] } & PrayerSlideAt)
+  /** One verse of a 말씀 slide. */
+  | ({ kind: 'scripture'; passageKo: string; passageEn: string; verse: PraiseVerse } & PrayerSlideAt)
   /** Stands for every slide of one 추가 자료 file, spliced in at this point. */
   | { kind: 'additional'; fileId: string };
 
@@ -164,14 +188,75 @@ export function planPraiseSong(song: Song, extras: PraiseSongExtras | undefined)
   };
 }
 
+/** Font size (1/100 pt) a page of topics would be drawn at on the 기도제목 slide. */
+export function topicsFontSize(topics: string[]): number {
+  return fitBodyFontSize(PRAISE_TOPICS_BODY_BOX, topics, PRAISE_TOPICS_BASE_SZ, PRAISE_TOPICS_MIN_SZ);
+}
+
+/**
+ * Topics shared out over as many 기도제목 slides as it takes to keep each one
+ * readable, in order, never splitting a topic: a page takes topics while they
+ * still fit at the split size.
+ */
+export function paginateTopics(topics: string[]): string[][] {
+  const pages: string[][] = [];
+  let page: string[] = [];
+  for (const topic of topics) {
+    if (page.length > 0 && topicsFontSize([...page, topic]) < PRAISE_TOPICS_SPLIT_SZ) {
+      pages.push(page);
+      page = [];
+    }
+    page.push(topic);
+  }
+  if (page.length > 0) pages.push(page);
+  return pages;
+}
+
+/** The slides one 기도 projects, in its own order; slides with nothing on them yet are left out. */
+export function planPrayerSlides(prayer: PraisePrayer, at: PrayerSlideAt): PraiseSlidePlan[] {
+  return prayer.slides.flatMap((slide): PraiseSlidePlan[] => {
+    switch (slide.kind) {
+      case 'topics':
+        return paginateTopics(topicLines(slide.text)).map((topics) => ({
+          kind: 'prayer-topics',
+          // Korean and English on one line, the deck's "한글 | English".
+          heading: [slide.heading.trim(), slide.headingEn.trim()].filter(Boolean).join(' | '),
+          topics,
+          ...at,
+        }));
+      case 'scripture':
+        return (slide.passage?.verses ?? []).map((verse) => ({
+          kind: 'scripture',
+          passageKo: slide.passage!.rangeKo,
+          passageEn: slide.passage!.rangeEn,
+          verse,
+          ...at,
+        }));
+      default:
+        return slide.ko.trim() || slide.en.trim()
+          ? [{ kind: 'prayer', ko: slide.ko.trim(), en: slide.en.trim(), ...at }]
+          : [];
+    }
+  });
+}
+
+/** True for every slide a 기도 put in the deck. */
+export function isPrayerPlan(
+  plan: PraiseSlidePlan,
+): plan is Extract<PraiseSlidePlan, { kind: 'prayer' | 'prayer-topics' | 'scripture' }> {
+  return plan.kind === 'prayer' || plan.kind === 'prayer-topics' || plan.kind === 'scripture';
+}
+
 /**
  * Every slide of the deck, in order. A file placed after a song that is no
- * longer on the list falls back to the end rather than disappearing.
+ * longer on the list falls back to the end rather than disappearing, and so
+ * does a 기도 with no checked song left for it.
  */
 export function planPraiseDeck(
   songs: Song[],
   extras: Record<string, PraiseSongExtras>,
   additional: PlacedAdditional[] = [],
+  prayers: PraisePrayer[] = [],
 ): PraiseSlidePlan[] {
   const songIds = new Set(songs.map((song) => song.id));
   const placedAfter = (songId: string) =>
@@ -183,6 +268,14 @@ export function planPraiseDeck(
       item.placement === 'end' ||
       (typeof item.placement === 'object' && !songIds.has(item.placement.afterSongId)),
   );
+
+  const placedPrayers = placePrayers(songs, extras, prayers);
+  const prayerSlides = (afterSongId: string | null) =>
+    placedPrayers
+      .filter((placed) => placed.afterSongId === afterSongId)
+      .flatMap((placed) =>
+        planPrayerSlides(placed.prayer, { prayerId: placed.prayer.id, prayerNumber: placed.number, afterSongId }),
+      );
 
   const plans: PraiseSlidePlan[] = [{ kind: 'cover' }];
   for (const item of additional) {
@@ -197,8 +290,9 @@ export function planPraiseDeck(
       }
     }
     plans.push(...placedAfter(song.id));
-    if (plan.prayerAfter) plans.push({ kind: 'prayer', afterSongId: song.id });
+    plans.push(...prayerSlides(song.id));
   }
+  plans.push(...prayerSlides(null));
   for (const item of atEnd) plans.push({ kind: 'additional', fileId: item.fileId });
   return plans;
 }

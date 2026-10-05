@@ -4398,6 +4398,210 @@ main[data-direction='back'] .wizard-panel.active {
   white-space: nowrap;
 }
 
+/* 기도 step: the count and the songs to check on top, then one card per
+   기도 listing its slides in the order they are projected. */
+.praise-prayers {
+  display: grid;
+  gap: var(--s-4);
+}
+.praise-prayer-plan h3 {
+  margin: var(--s-4) 0 var(--s-1);
+  font-size: var(--text-base);
+}
+.praise-prayer-count {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+.praise-prayer-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.praise-prayer-count-value {
+  min-width: 3.5em;
+  font-family: var(--font-serif);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+.praise-prayer-songs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--s-1) var(--s-4);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.praise-prayer-song {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--control-h);
+  padding: 0 var(--s-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.praise-prayer-song:hover {
+  background: var(--surface-hover);
+}
+.praise-prayer-song-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.praise-prayer-badge {
+  flex: none;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--notice-border);
+  border-radius: 999px;
+  background: var(--leaf-bg);
+  color: var(--leaf-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 22px;
+}
+.praise-prayer-plan .banner {
+  margin: var(--s-3) 0 0;
+}
+.praise-prayer {
+  display: grid;
+  gap: var(--s-3);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.praise-prayer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--s-1) var(--accent-soft), var(--shadow-sm);
+}
+.praise-prayer-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+.praise-prayer-titles {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 2px;
+  min-width: 0;
+}
+.praise-prayer-where {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.praise-prayer-where.is-waiting {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.praise-prayer-slides {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.praise-prayer-slide {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+.praise-prayer-slide.is-empty {
+  border-style: dashed;
+}
+.praise-prayer-slide-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.praise-prayer-slide-tools {
+  display: inline-flex;
+  gap: var(--s-1);
+  margin-left: auto;
+}
+.praise-prayer-fields {
+  display: grid;
+  gap: var(--s-3);
+}
+.praise-prayer-title-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.praise-prayer-heading-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.praise-prayer-fields .field {
+  margin: 0;
+}
+.praise-prayer textarea,
+.praise-prayer select {
+  width: 100%;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--text-base);
+  line-height: var(--lh-snug);
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+.praise-prayer textarea {
+  padding: var(--s-3);
+  resize: vertical;
+  field-sizing: content;
+  min-height: calc(3lh + 2 * var(--s-3));
+}
+.praise-prayer select {
+  min-height: var(--control-h);
+  padding: var(--s-2) var(--s-3);
+  padding-inline-end: calc(var(--field-icon-inset) * 2 + var(--field-icon-size));
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right var(--field-icon-inset) center;
+  background-size: var(--field-icon-size) var(--field-icon-size);
+}
+.praise-prayer textarea:hover,
+.praise-prayer select:hover {
+  border-color: var(--field-border-strong);
+}
+.praise-prayer textarea:focus-visible,
+.praise-prayer select:focus-visible {
+  border-color: var(--accent);
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+.praise-prayer .field-hint.is-warn {
+  color: var(--warn-ink);
+}
+.praise-scripture-verses summary {
+  color: var(--accent);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.praise-scripture-verses ol {
+  display: grid;
+  gap: var(--s-2);
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: var(--lh-snug);
+}
+.praise-prayer-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
 /* 찬양 목록 — every song of the night, on the left of every step. It stands
    beside the page, and stays in view as the page scrolls, only while the
    page keeps a full reading column next to it (≥1280px, the open rail
@@ -4566,7 +4770,9 @@ main[data-direction='back'] .wizard-panel.active {
     grid-column: 2;
   }
   .praise-placements li,
-  .praise-cover-row {
+  .praise-cover-row,
+  .praise-prayer-title-fields,
+  .praise-prayer-heading-fields {
     grid-template-columns: 1fr;
   }
   .praise-prayer-toggle {

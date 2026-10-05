@@ -35,6 +35,10 @@ interface Props {
   webOutcomes?: Record<string, WebEnglishOutcome>;
   /** Search the web for a song's English again; absent when no search server is set up. */
   onWebSearch?: (song: Song) => void;
+  /** Check or uncheck a 기도 after the song (the 기도 move with it; see prayers.ts). */
+  onPrayerAfter: (songId: string, on: boolean) => void;
+  /** Which 기도 follows each checked song, by song id. */
+  prayerNumbers: Record<string, number>;
 }
 
 function clock(at: string): string {
@@ -68,10 +72,14 @@ function SongEnglishCard({
   webLookup,
   webOutcome,
   onWebSearch,
+  onPrayerAfter,
+  prayerNumber,
 }: {
   song: Song;
   index: number;
   extras: PraiseSongExtras;
+  onPrayerAfter: Props['onPrayerAfter'];
+  prayerNumber: number | undefined;
   entry: EnglishSongEntry | undefined;
   savedAt: string | undefined;
   webLookup: WebEnglishLookup | undefined;
@@ -290,9 +298,9 @@ function SongEnglishCard({
             type="checkbox"
             checked={Boolean(extras.prayerAfter)}
             data-testid="praise-prayer-after"
-            onChange={(event) => update((current) => ({ ...current, prayerAfter: event.target.checked || undefined }))}
+            onChange={(event) => onPrayerAfter(song.id, event.target.checked)}
           />
-          이 곡 뒤에 기도 / Prayer 슬라이드
+          이 곡 뒤에 기도{prayerNumber ? ` (기도 ${prayerNumber})` : ''}
         </label>
       </div>
 
@@ -380,6 +388,8 @@ export default function PraiseEnglishStep({
   webLookups = {},
   webOutcomes = {},
   onWebSearch,
+  onPrayerAfter,
+  prayerNumbers,
 }: Props) {
   if (songs.length === 0) {
     return (
@@ -406,6 +416,8 @@ export default function PraiseEnglishStep({
           webLookup={webLookups[normalizeTitle(song.title)]}
           webOutcome={webOutcomes[song.id]}
           onWebSearch={onWebSearch}
+          onPrayerAfter={onPrayerAfter}
+          prayerNumber={prayerNumbers[song.id]}
         />
       ))}
     </div>

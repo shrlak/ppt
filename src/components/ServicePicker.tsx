@@ -19,7 +19,7 @@ const DETAILS: Record<ServiceId, { description: string; steps: string }> = {
   },
   praise: {
     description: '한글·영어 제목과 가사가 함께 들어간 찬양집회 PPT를 만듭니다. 자동 삭제되지 않습니다.',
-    steps: '4단계',
+    steps: '5단계',
   },
   retreat: {
     description: '수련회 콘티와 집회 순서로 집회마다 수련회 디자인의 PPT를 만듭니다. 자동 삭제되지 않습니다.',

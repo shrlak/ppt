@@ -14,7 +14,7 @@ import { findBrokenRelationships } from '../../src/lib/pptx/pptxPackage';
 import { slideOrderOf } from '../../src/lib/pptx/pptxSlices';
 import type { AdditionalFile } from '../../src/lib/additionalFiles/types';
 import type { Song } from '../../src/lib/utils/types';
-import type { PraiseSongExtras } from '../../src/praise/types';
+import type { PraisePrayer, PraiseSongExtras } from '../../src/praise/types';
 
 const publicDir = join(__dirname, '..', '..', 'public');
 const template = readFileSync(join(publicDir, 'praise-template.pptx'));
@@ -146,6 +146,121 @@ describe('buildPraiseDeck', () => {
     expect(await findBrokenRelationships(await JSZip.loadAsync(deck))).toEqual([]);
   });
 
+  it('puts each 기도 after its checked song — 기도제목, 말씀 in 개역개정 and NASB, then its prayer title — and a waiting one at the end', async () => {
+    const prayers: PraisePrayer[] = [
+      {
+        id: 'first',
+        slides: [
+          {
+            id: 'topics',
+            kind: 'topics',
+            heading: '기도제목',
+            headingEn: 'Prayer Prompt',
+            text: '- 찬양집회를 통해 성령님께서 모든 지체들의 마음을 만지시도록\n1. 복음의 열정이 회복되고 지속될 수 있도록',
+          },
+          {
+            id: 'verse',
+            kind: 'scripture',
+            reference: '행1:8',
+            passage: {
+              rangeKo: '사도행전 1장 8절',
+              rangeEn: 'Acts 1:8',
+              verses: [
+                {
+                  refKo: '사도행전 1장 8절',
+                  refEn: 'Acts 1:8',
+                  ko: '오직 성령이 너희에게 임하시면 너희가 권능을 받고',
+                  en: 'but you will receive power when the Holy Spirit has come upon you',
+                },
+              ],
+            },
+          },
+          { id: 'title', kind: 'title', ko: '중보기도', en: 'Intercessory Prayer' },
+        ],
+      },
+      { id: 'closing', slides: [{ id: 'bless', kind: 'title', ko: '축도', en: '' }] },
+    ];
+    const { deck, overview } = await buildPraiseDeck({ template, songs, extras, prayers, date: '2026-09-26' });
+    const texts = await slideTexts(deck);
+    expect(overview.map((row) => row.kind)).toEqual([
+      'front', 'lyrics-title', 'lyrics', 'lyrics', 'prayer', 'bible', 'prayer', 'lyrics-title', 'lyrics', 'prayer',
+    ]);
+    expect(texts[4]).toBe(
+      '기도제목 | Prayer Prompt | 찬양집회를 통해 성령님께서 모든 지체들의 마음을 만지시도록 | 1. 복음의 열정이 회복되고 지속될 수 있도록',
+    );
+    expect(texts[5]).toBe(
+      '사도행전 1장 8절 | Acts 1:8 | 사도행전 1장 8절 | 오직 성령이 너희에게 임하시면 너희가 권능을 받고 | Acts 1:8 | but you will receive power when the Holy Spirit has come upon you',
+    );
+    expect(texts[6]).toBe('중보기도 |  | Intercessory Prayer');
+    // The waiting 기도 goes after the last song; a title with no English prints the Korean alone.
+    expect(texts[9]).toBe('축도');
+    expect(overview[4]).toMatchObject({ label: '기도제목 | Prayer Prompt', subtitle: expect.stringContaining('기도 1') });
+    expect(overview[9]).toMatchObject({ label: '축도', subtitle: '기도 2' });
+
+    const zip = await JSZip.loadAsync(deck);
+    expect(await findBrokenRelationships(zip)).toEqual([]);
+    const names = await slideOrderOf(zip);
+    const topicsXml = await zip.file(`ppt/slides/${names[4]}`)!.async('string');
+    // A topic that brings its own number gets no dash in front of it.
+    const topicParagraph = (needle: string) =>
+      [...topicsXml.matchAll(/<a:p>[\s\S]*?<\/a:p>/g)].map((m) => m[0]).find((p) => p.includes(needle))!;
+    expect(topicParagraph('만지시도록')).toContain('<a:buChar char="-"/>');
+    expect(topicParagraph('복음의 열정')).toContain('<a:buNone/>');
+    const allXml = await Promise.all(names.map((name) => zip.file(`ppt/slides/${name}`)!.async('string')));
+    expect(allXml.join('')).not.toContain('{{');
+  });
+
+  it('moves topics that would shrink past readable on to another 기도제목 slide, never splitting one', async () => {
+    const topics = Array.from({ length: 14 }, (_, i) => `${i + 1}번째 기도제목: 하나님의 약속을 믿고 순종하는 믿음의 공동체가 될 수 있도록`);
+    const many: PraisePrayer = {
+      id: 'many',
+      slides: [{ id: 't', kind: 'topics', heading: '기도제목', headingEn: '', text: topics.join('\n') }],
+    };
+    const { paginateTopics, topicsFontSize } = await import('../../src/praise/planner');
+    const pages = paginateTopics(topics);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.flat()).toEqual(topics);
+    for (const page of pages) expect(topicsFontSize(page)).toBeGreaterThanOrEqual(2000);
+
+    const { deck } = await buildPraiseDeck({ template, songs: [], extras: {}, prayers: [many], date: '' });
+    const texts = await slideTexts(deck);
+    expect(texts).toHaveLength(1 + pages.length);
+    expect(texts.slice(1).every((text) => text.startsWith('기도제목 | '))).toBe(true);
+  });
+
+  it('keeps a long prayer title on one line, Korean and English at one size', async () => {
+    const { buildPrayerSlide } = await import('../../src/praise/deckBuilder');
+    const { titleWidthEm } = await import('../../src/lib/pptx/textFit');
+    const slide = buildPrayerSlide(await templateSlide(4), '중보기도', 'Intercessory Prayer for the Nations');
+    const title = shapes(slide).find((shape) => shape.includes('중보기도'))!;
+    expect(title).toContain('wrap="none"');
+    const lines = paragraphs(title).filter((p) => p.text);
+    expect(lines.map((p) => p.text)).toEqual(['중보기도', 'Intercessory Prayer for the Nations']);
+    expect(lines[0].sz).toBe(lines[1].sz);
+    expect(lines[1].sz).toBeLessThan(5400);
+    expect((titleWidthEm(lines[1].text) * lines[1].sz) / 100).toBeLessThanOrEqual((box(title).cx - 2 * 91425) / 12700);
+    // 기도 / Prayer itself keeps last year's size.
+    const plain = buildPrayerSlide(await templateSlide(4), '기도', 'Prayer');
+    expect(paragraphs(shapes(plain).find((shape) => shape.includes('Prayer'))!).filter((p) => p.text).map((p) => p.sz)).toEqual([5400, 5400]);
+  });
+
+  it('shrinks a long verse within its half of the 말씀 slide', async () => {
+    const { buildScriptureSlide } = await import('../../src/praise/deckBuilder');
+    const long = 'And He said to them, “It is not for you to know periods of time or appointed times which the Father has set by His own authority; '.repeat(3);
+    const slide = buildScriptureSlide(await templateSlide(6), '사도행전 1장 7절', 'Acts 1:7', {
+      refKo: '사도행전 1장 7절',
+      refEn: 'Acts 1:7',
+      ko: '이르시되 때와 시기는 아버지께서 자기의 권한에 두셨으니 너희가 알 바 아니요',
+      en: long.trim(),
+    });
+    const english = shapes(slide).find((shape) => shape.includes('It is not for you'))!;
+    const korean = shapes(slide).find((shape) => shape.includes('때와 시기는'))!;
+    expect(paragraphs(english).find((p) => p.text.startsWith('And He'))!.sz).toBeLessThan(2400);
+    expect(paragraphs(korean).find((p) => p.text.startsWith('이르시되'))!.sz).toBe(2400);
+    // The Korean half ends above where the English half starts.
+    expect(box(korean).y + box(korean).cy).toBeLessThanOrEqual(box(english).y);
+  });
+
   it('replaces the cover photo and drops last year’s date box when a new cover is given', async () => {
     // Any real PNG will do; the cover is only re-pointed at it.
     const png = readFileSync(join(publicDir, '..', 'tests', 'fixtures', 'sheet-page.png'));
@@ -187,10 +302,30 @@ describe('praise snapshot', () => {
       data: sermonDeck.buffer.slice(sermonDeck.byteOffset, sermonDeck.byteOffset + sermonDeck.byteLength) as ArrayBuffer,
       slideCount: 3,
     };
+    const prayers: PraisePrayer[] = [
+      {
+        id: 'first',
+        slides: [
+          { id: 't', kind: 'topics', heading: '기도제목', headingEn: 'Prayer Prompt', text: '하나\n둘' },
+          {
+            id: 's',
+            kind: 'scripture',
+            reference: '행1:8',
+            passage: {
+              rangeKo: '사도행전 1장 8절',
+              rangeEn: 'Acts 1:8',
+              verses: [{ refKo: '사도행전 1장 8절', refEn: 'Acts 1:8', ko: '오직 성령이', en: 'but you will receive power' }],
+            },
+          },
+          { id: 'p', kind: 'title', ko: '통성기도', en: 'Corporate Prayer' },
+        ],
+      },
+    ];
     const state = {
       date: '2026-09-26',
       songs,
       extras,
+      prayers,
       additionalFiles: [sermon],
       placements: [{ fileId: 'old-id', placement: { afterSongId: 'goodness' } as const }],
       coverImage: null,
@@ -211,6 +346,28 @@ describe('praise snapshot', () => {
       { fileId: restored.additionalFiles[0].id, placement: { afterSongId: 'goodness' } },
     ]);
     expect(restored.fileNameOverride).toBe('찬양집회.pptx');
+    expect(restored.prayers).toEqual(prayers);
+  });
+
+  it('reopens a night saved before 기도 were kept with a plain 기도 / Prayer for each checked song', async () => {
+    const legacy = encodePraiseSource({
+      date: '2026-09-26',
+      songs,
+      extras,
+      prayers: [],
+      additionalFiles: [],
+      placements: [],
+      coverImage: null,
+    });
+    const raw = JSON.parse(new TextDecoder().decode(legacy.data));
+    delete raw.prayers;
+    const source = decodePraiseSource({ ...legacy, data: new TextEncoder().encode(JSON.stringify(raw)).buffer as ArrayBuffer })!;
+    expect(source.prayers).toBeUndefined();
+    const restored = await restorePraiseState(source, null);
+    expect(restored.prayers).toHaveLength(1);
+    const { deck } = await buildPraiseDeck({ template, songs, extras: restored.extras, prayers: restored.prayers, date: '' });
+    const texts = await slideTexts(deck);
+    expect(texts[4]).toBe('기도 |  | Prayer');
   });
 });
 

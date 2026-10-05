@@ -19,7 +19,11 @@ export interface PraiseEnglish {
 
 export interface PraiseSongExtras {
   english: PraiseEnglish;
-  /** Put a 기도 / Prayer slide right after this song. */
+  /**
+   * A 기도 comes right after this song: the night's 기도 go after the songs
+   * checked this way, in order — the first 기도 after the first checked song,
+   * the second after the second, and so on (see prayers.ts).
+   */
   prayerAfter?: boolean;
   /**
    * Where the English came from, so the card can say how far to trust it:
@@ -29,6 +33,50 @@ export interface PraiseSongExtras {
   englishSource?: 'memory' | 'sheet' | 'web' | 'ai' | 'manual';
   /** The post the web English came from, for the card to link to. */
   englishSourceUrl?: string;
+}
+
+/** One verse of a 말씀 slide: 개역개정 over NASB. */
+export interface PraiseVerse {
+  /** "사도행전 1장 3절" (a verse 개역개정 prints with the next: "신명기 6장 18-19절"). */
+  refKo: string;
+  /** "Acts 1:3". */
+  refEn: string;
+  ko: string;
+  en: string;
+}
+
+/** A typed passage as read from the Bible files, kept with the night so the deck never has to look it up again. */
+export interface PraisePassage {
+  /** "사도행전 1장 3-5, 8절". */
+  rangeKo: string;
+  /** "Acts 1:3-5, 8". */
+  rangeEn: string;
+  verses: PraiseVerse[];
+}
+
+/** One slide (or run of slides) of a 기도. */
+export type PraisePrayerSlide =
+  /** 기도 / Prayer, or any other prayer title (통성기도 / Corporate Prayer, 축도 / Benediction…). */
+  | { id: string; kind: 'title'; ko: string; en: string }
+  /**
+   * 기도제목: a heading — Korean and English, "기도제목 | Prayer Prompt" — over
+   * the topics typed one to a line; more than fit go on to another slide.
+   */
+  | { id: string; kind: 'topics'; heading: string; headingEn: string; text: string }
+  /** 말씀: the typed passage, one verse a slide, 개역개정 over NASB. */
+  | { id: string; kind: 'scripture'; reference: string; passage: PraisePassage | null };
+
+export type PraisePrayerSlideKind = PraisePrayerSlide['kind'];
+
+/** One time of prayer in the night, and the slides projected for it, in order. */
+export interface PraisePrayer {
+  id: string;
+  slides: PraisePrayerSlide[];
+  /**
+   * The song this 기도 followed until that song was unchecked: checking the
+   * song again brings this 기도 back to it.
+   */
+  releasedFrom?: string;
 }
 
 export interface PraiseCoverImage {
