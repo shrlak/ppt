@@ -3,8 +3,10 @@
 // The template holds last year's six designs (see template.ts): every slide
 // of the generated deck is one of them cloned and filled in, so the whole
 // deck keeps that night's background photos, master and embedded Nanum
-// Gothic fonts. 추가 자료 files (a sermon PPT, 말씀 slides, images, PDFs)
-// are spliced in afterwards at the positions the plan gives them.
+// Gothic fonts. The one exception is the poster, which last year's deck did
+// not have: it is drawn on the template's blank layout (see poster.ts).
+// 추가 자료 files (a sermon PPT, 말씀 slides, images, PDFs) are spliced in
+// afterwards at the positions the plan gives them.
 import JSZip from 'jszip';
 import { assertPptxIntegrity } from '../lib/pptx/pptxPackage';
 import { mergePptxDecks } from '../lib/pptx/pptxMerge';
@@ -16,6 +18,7 @@ import type { AdditionalFile } from '../lib/additionalFiles/types';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { Song } from '../lib/utils/types';
 import { planPraiseDeck, topicsFontSize, type PlacedAdditional, type PraiseSlidePlan } from './planner';
+import { buildPosterSlide } from './poster';
 import {
   PRAISE_COVER_SHAPES,
   PRAISE_HEADER_BASE_SZ,
@@ -42,11 +45,12 @@ import {
   PRAISE_VERSE_MIN_SZ,
   verseTextBox,
 } from './template';
-import type { PraiseCoverImage, PraisePrayer, PraiseSongExtras, PraiseVerse } from './types';
+import type { PraiseCoverImage, PraisePoster, PraisePrayer, PraiseSongExtras, PraiseVerse } from './types';
 
 const SLIDE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
 const SLIDE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
 const IMAGE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
+const LAYOUT_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout';
 
 
 export interface PraiseDeckInput {
@@ -60,6 +64,8 @@ export interface PraiseDeckInput {
   date: string;
   /** A new cover picture replaces last year's (and its date box) entirely. */
   coverImage?: PraiseCoverImage | null;
+  /** The night's poster: the first slide, ahead of the cover, when it is switched on and has something on it. */
+  poster?: PraisePoster | null;
   additionalFiles?: AdditionalFile[];
   placements?: PlacedAdditional[];
   /**
@@ -381,6 +387,35 @@ async function readTemplateSlide(zip: JSZip, position: number): Promise<Template
   return { xml, rels };
 }
 
+/**
+ * The layout the poster is drawn on: the template's blank one (no title or
+ * body placeholders to show through), else whatever layout the cover uses.
+ */
+async function posterLayoutTarget(zip: JSZip, coverRels: string): Promise<string> {
+  const layouts = Object.keys(zip.files)
+    .filter((path) => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(path))
+    .sort((a, b) => Number(a.match(/(\d+)\.xml$/)![1]) - Number(b.match(/(\d+)\.xml$/)![1]));
+  for (const path of layouts) {
+    const xml = await zip.file(path)!.async('string');
+    if (/<p:sldLayout\b[^>]*\btype="blank"/.test(xml)) return `../slideLayouts/${path.split('/').pop()}`;
+  }
+  const cover = coverRels.match(new RegExp(`<Relationship[^>]*Type="${LAYOUT_REL_TYPE}"[^>]*Target="([^"]*)"`));
+  const target = cover?.[1] ?? coverRels.match(/Target="(\.\.\/slideLayouts\/[^"]*)"/)?.[1];
+  if (!target) throw new Error('찬양집회 템플릿에서 포스터에 쓸 레이아웃을 찾지 못했습니다.');
+  return target;
+}
+
+/** The poster slide's relationships: its layout, and its picture when it has one. */
+function posterRels(layoutTarget: string, imageTarget: string | null): string {
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    `<Relationship Id="rId1" Type="${LAYOUT_REL_TYPE}" Target="${layoutTarget}"/>` +
+    (imageTarget ? `<Relationship Id="rId2" Type="${IMAGE_REL_TYPE}" Target="${imageTarget}"/>` : '') +
+    '</Relationships>'
+  );
+}
+
 /** Cover, songs and 기도 slides as one package — everything but 추가 자료. */
 async function buildBaseDeck(
   input: PraiseDeckInput,
@@ -418,11 +453,30 @@ async function buildBaseDeck(
     );
   }
 
+  let posterSlide: TemplateSlide | null = null;
+  if (input.poster && plans.some((plan) => plan.kind === 'poster')) {
+    let imageTarget: string | null = null;
+    if (input.poster.image) {
+      const extension = input.poster.image.mimeType === 'image/png' ? 'png' : 'jpeg';
+      zip.file(`ppt/media/praise-poster.${extension}`, new Uint8Array(input.poster.image.data.slice(0)));
+      contentTypes = ensureDefaultExtension(contentTypes, extension, input.poster.image.mimeType);
+      imageTarget = `../media/praise-poster.${extension}`;
+    }
+    posterSlide = {
+      xml: buildPosterSlide(input.poster, 'rId2'),
+      rels: posterRels(await posterLayoutTarget(zip, cover.rels), imageTarget),
+    };
+  }
+
   plans.forEach((plan, index) => {
     const n = index + 1;
     let xml: string;
     let rels: string;
     switch (plan.kind) {
+      case 'poster':
+        xml = posterSlide!.xml;
+        rels = posterSlide!.rels;
+        break;
       case 'cover':
         xml = buildCoverSlide(cover.xml, input.date, customCover);
         rels = coverRels;
@@ -479,6 +533,8 @@ async function buildBaseDeck(
 function overviewRow(plan: PraiseSlidePlan, index: number, songs: Song[]): DeckOverviewItem {
   const id = `praise-${plan.kind}-${index}`;
   switch (plan.kind) {
+    case 'poster':
+      return { id, kind: 'front', label: '포스터' };
     case 'cover':
       return { id, kind: 'front', label: '표지' };
     case 'title':
@@ -530,7 +586,7 @@ export async function buildPraiseDeck(input: PraiseDeckInput): Promise<PraiseDec
   for (const file of files) {
     if (!placements.some((item) => item.fileId === file.id)) placements.push({ fileId: file.id, placement: 'end' });
   }
-  const plans = planPraiseDeck(input.songs, input.extras, placements, input.prayers ?? []);
+  const plans = planPraiseDeck(input.songs, input.extras, placements, input.prayers ?? [], input.poster ?? null);
   const base = plans.filter((plan): plan is Exclude<PraiseSlidePlan, { kind: 'additional' }> => plan.kind !== 'additional');
   const inserts = plans.flatMap((plan, index) =>
     plan.kind === 'additional'

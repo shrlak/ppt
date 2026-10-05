@@ -4,7 +4,7 @@
 // page) → 영어 가사 (English under every Korean slide) → 기도 (how many times
 // the night prays, each with its 기도제목, 말씀 and 기도 slides, after the
 // checked songs in order) → 추가 자료 (a sermon PPT… placed anywhere between
-// songs) → 다운로드.
+// songs) → 다운로드 (the poster that opens the deck, the 표지, the file).
 //
 // Every deck made here is saved to the shared PPT 라이브러리 with `keep`, so
 // the weekly Sunday purge never removes it: a 찬양집회 deck goes only when
@@ -38,6 +38,7 @@ import {
 } from '../lib/storage/deckAutoSave';
 import { useSaveSoon } from '../lib/storage/saveSoon';
 import PraiseEnglishStep from './PraiseEnglishStep';
+import PraisePosterCard from './PraisePosterCard';
 import PraisePrayerStep from './PraisePrayerStep';
 import PraiseSongList from './PraiseSongList';
 import { englishFromWeb, fetchWebEnglish, hasWebEnglishLookup, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
@@ -57,6 +58,7 @@ import {
   type EnglishSongEntry,
 } from './englishLibrary';
 import { isPrayerPlan, missingEnglishCount, planPraiseDeck, type AdditionalPlacement, type PlacedAdditional } from './planner';
+import { posterInDeck } from './poster';
 import {
   addPrayer,
   applyPrayerFlags,
@@ -77,7 +79,7 @@ import {
   restorePraiseState,
   type PraiseState,
 } from './source';
-import { extrasFor, type PraiseCoverImage, type PraisePrayer, type PraiseSongExtras } from './types';
+import { emptyPoster, extrasFor, type PraiseCoverImage, type PraisePoster, type PraisePrayer, type PraiseSongExtras } from './types';
 
 const BASE = import.meta.env.BASE_URL || '/';
 /** How long the song list must sit still before its songs are looked up on the web. */
@@ -182,6 +184,7 @@ export default function PraiseApp() {
   const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
   const [placements, setPlacements] = useState<PlacedAdditional[]>([]);
   const [coverImage, setCoverImage] = useState<PraiseCoverImage | null>(null);
+  const [poster, setPoster] = useState<PraisePoster>(emptyPoster);
   const [fileNameOverride, setFileNameOverride] = useState<string | null>(null);
   const [englishLibrary, setEnglishLibrary] = useState<EnglishSongEntry[]>([]);
   const seedRef = useRef<EnglishSongEntry[]>([]);
@@ -229,6 +232,7 @@ export default function PraiseApp() {
     additionalFiles,
     placements,
     coverImage,
+    poster,
     fileNameOverride: fileNameOverride ?? undefined,
   };
 
@@ -586,11 +590,12 @@ export default function PraiseApp() {
       prayers,
       date,
       coverImage,
+      poster,
       additionalFiles,
       placements,
       convertAdditional: (file) => convertAdditionalFile(file, imageTemplate ?? new Uint8Array()),
     });
-  }, [additionalFiles, coverImage, date, extras, placements, prayers, songs]);
+  }, [additionalFiles, coverImage, date, extras, placements, poster, prayers, songs]);
 
   // ---- 라이브러리: restore an entry, then keep it current ----
   const restoreSavedDeck = useCallback(async (deck: SavedDeck, quiet = false) => {
@@ -606,6 +611,7 @@ export default function PraiseApp() {
     setAdditionalFiles(restored.additionalFiles);
     setPlacements(restored.placements);
     setCoverImage(restored.coverImage);
+    setPoster(restored.poster ?? emptyPoster());
     setFileNameOverride(restored.fileNameOverride ?? deck.name);
     setContiFile(deck.contiPdf);
     setSongs(restored.songs);
@@ -699,13 +705,13 @@ export default function PraiseApp() {
     },
     // `state` is rebuilt from these every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [build, contiFile, savedName, songs, date, extras, prayers, additionalFiles, placements, coverImage, fileNameOverride],
+    [build, contiFile, savedName, songs, date, extras, prayers, additionalFiles, placements, coverImage, poster, fileNameOverride],
   );
 
   const fingerprint = praiseFingerprint({ ...state, name: savedName });
   useEffect(() => {
     if (!ready) return;
-    if (songs.length === 0 && additionalFiles.length === 0) return;
+    if (songs.length === 0 && additionalFiles.length === 0 && !posterInDeck(poster)) return;
     if (adoptFingerprintRef.current) {
       adoptFingerprintRef.current = false;
       savedFingerprintRef.current = fingerprint;
@@ -802,7 +808,7 @@ export default function PraiseApp() {
 
   // ---- downloads ----
   const downloadDeck = async () => {
-    if (songs.length === 0 && additionalFiles.length === 0) {
+    if (songs.length === 0 && additionalFiles.length === 0 && !posterInDeck(poster)) {
       showToast('찬양이나 추가 자료를 먼저 넣어 주세요.', 'error');
       return;
     }
@@ -850,6 +856,7 @@ export default function PraiseApp() {
     setAdditionalFiles([]);
     setPlacements([]);
     setCoverImage(null);
+    setPoster(emptyPoster());
     setFileNameOverride(null);
     setContiFile(null);
     setSheetLibrary([]);
@@ -876,6 +883,7 @@ export default function PraiseApp() {
     extras,
     placements.filter((item) => additionalFiles.some((file) => file.id === item.fileId)),
     prayers,
+    poster,
   );
   const additionalSlides = additionalFiles.reduce((sum, file) => sum + file.slideCount, 0);
   const slideCount = plans.filter((plan) => plan.kind !== 'additional').length + additionalSlides;
@@ -1085,9 +1093,14 @@ export default function PraiseApp() {
           >
             <div className="wizard-page-header">
               <p className="wizard-kicker">5 / 5</p>
-              <h2>표지 및 다운로드</h2>
-              <p>찬양집회 PPT는 라이브러리에 자동 저장되고, 매주 자동 삭제에서 빠져 직접 지울 때까지 남습니다.</p>
+              <h2>포스터·표지 및 다운로드</h2>
+              <p>
+                맨 첫 장에 넣을 포스터와 표지를 정하고 PPT를 받으세요. 찬양집회 PPT는 라이브러리에 자동 저장되고, 매주
+                자동 삭제에서 빠져 직접 지울 때까지 남습니다.
+              </p>
             </div>
+
+            <PraisePosterCard poster={poster} onChange={setPoster} />
 
             <section className="card download-card">
               <div className="praise-cover-row">
@@ -1147,6 +1160,10 @@ export default function PraiseApp() {
               </label>
 
               <dl className="wednesday-summary" data-testid="praise-summary">
+                <div>
+                  <dt>포스터</dt>
+                  <dd data-testid="praise-summary-poster">{posterInDeck(poster) ? '맨 첫 장' : '없음'}</dd>
+                </div>
                 <div>
                   <dt>찬양</dt>
                   <dd>{songs.length}곡</dd>

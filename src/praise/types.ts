@@ -85,6 +85,40 @@ export interface PraiseCoverImage {
   data: ArrayBuffer;
 }
 
+/** A picture on the poster slide, with the size it was drawn at so the slide can place it. */
+export interface PraisePosterImage {
+  name: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  data: ArrayBuffer;
+  width: number;
+  height: number;
+}
+
+/**
+ * The poster: the night's very first slide, ahead of the 표지. A poster
+ * picture (this year's flyer, or a photo to write on), the words on it, and
+ * its colours, every one of them editable here — and the slide is built of
+ * an ordinary picture and an ordinary text box, so it stays editable in
+ * PowerPoint too.
+ */
+export interface PraisePoster {
+  /** On: the poster goes in as slide 1. Off keeps what was entered, out of the deck. */
+  enabled: boolean;
+  image: PraisePosterImage | null;
+  /** `contain`: the whole picture, the background colour around it. `cover`: the picture fills the slide, its edges cut off. */
+  fit: 'contain' | 'cover';
+  /** `RRGGBB` behind the picture — the whole slide when there is none. */
+  background: string;
+  /** One line, as large as it fits ("EM & KM Praise Night"). */
+  title: string;
+  /** One line under the title (a theme, a verse). */
+  subtitle: string;
+  /** One line each under that: the date and time, the place… */
+  details: string;
+  /** `RRGGBB` of every word on the poster. */
+  textColor: string;
+}
+
 export interface PraiseService {
   /** Event date, `YYYY-MM-DD` (the date input's own format). */
   date: string;
@@ -95,6 +129,23 @@ export interface PraiseDeckInputs {
   extras: Record<string, PraiseSongExtras>;
   coverImage: PraiseCoverImage | null;
   additionalFiles: AdditionalFile[];
+}
+
+/** The 표지's own dark green, so a poster with no picture sits in the deck's colours. */
+export const DEFAULT_POSTER_BACKGROUND = '010C05';
+export const DEFAULT_POSTER_TEXT_COLOR = 'FFFFFF';
+
+export function emptyPoster(): PraisePoster {
+  return {
+    enabled: false,
+    image: null,
+    fit: 'contain',
+    background: DEFAULT_POSTER_BACKGROUND,
+    title: '',
+    subtitle: '',
+    details: '',
+    textColor: DEFAULT_POSTER_TEXT_COLOR,
+  };
 }
 
 export function emptyEnglish(): PraiseEnglish {

@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
+// Any portrait picture stands in for this year's flyer.
+const FLYER = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
 const PARSE_TIMEOUT = 30_000;
 const BUILD_TIMEOUT = 60_000;
 
@@ -238,6 +240,63 @@ test.describe('찬양집회 generator', () => {
     await expect(grid.locator('.slide-thumb')).toHaveCount(texts.length, { timeout: BUILD_TIMEOUT });
     await grid.locator('li').nth(topics).scrollIntoViewIfNeeded();
     await grid.screenshot({ path: testInfo.outputPath('praise-prayer-preview.png') });
+  });
+
+  test('opens the deck with a poster edited on the page, ahead of the cover', async ({ page }, testInfo) => {
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+    await page.goto('praise.html');
+    await addLibrarySong(page, '주님의 선하심');
+    await page.getByTestId('praise-tab-download').click();
+    await page.getByTestId('praise-date').fill('2026-09-26');
+    await expect(page.getByTestId('praise-summary-poster')).toHaveText('없음');
+    const before = Number((await page.getByTestId('praise-slide-count').textContent())!.replace(/\D/g, ''));
+
+    // Switched on but empty, it waits for something to show.
+    await page.getByTestId('praise-poster-enabled').check();
+    await expect(page.getByTestId('praise-poster-empty')).toBeVisible();
+    await expect(page.getByTestId('praise-summary-poster')).toHaveText('없음');
+
+    // A picture and the words over it, drawn as they are typed.
+    await page.getByTestId('praise-poster-input').setInputFiles(FLYER);
+    await page.getByTestId('praise-poster-title').fill('EM & KM Praise Night');
+    await page.getByTestId('praise-poster-details').fill('09/26/2026 7PM\nKorean Central Church of Pittsburgh');
+    const preview = page.getByTestId('praise-poster-preview');
+    await expect(preview.locator('img')).toBeVisible();
+    await expect(preview).toContainText('EM & KM Praise Night');
+    await expect(preview).toContainText('Korean Central Church of Pittsburgh');
+    await expect(page.getByTestId('praise-poster-empty')).toHaveCount(0);
+    await expect(page.getByTestId('praise-summary-poster')).toHaveText('맨 첫 장');
+    await expect(page.getByTestId('praise-slide-count')).toHaveText(`${before + 1}장`);
+    await page.getByTestId('praise-poster').screenshot({ path: testInfo.outputPath('praise-poster-card.png') });
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: BUILD_TIMEOUT }),
+      page.getByTestId('praise-download').click(),
+    ]);
+    const saveTo = testInfo.outputPath('praise-poster.pptx');
+    await download.saveAs(saveTo);
+    const zip = await JSZip.loadAsync(await fs.readFile(saveTo));
+    const texts = await slideTexts(zip);
+    expect(texts[0]).toBe('EM &amp; KM Praise Night | 09/26/2026 7PM | Korean Central Church of Pittsburgh');
+    expect(texts[1]).toBe('09/26/2026');
+    expect(zip.file('ppt/media/praise-poster.png')).not.toBeNull();
+
+    // The real first slide: the picture with the words over it.
+    await page.getByTestId('praise-preview').click();
+    const grid = page.getByTestId('praise-preview-grid');
+    await expect(grid).toBeVisible({ timeout: BUILD_TIMEOUT });
+    await expect(grid.locator('.slide-thumb')).toHaveCount(texts.length);
+    const first = grid.locator('.slide-thumb').first();
+    await expect(first.locator('img')).toHaveCount(1);
+    await expect(first).toContainText('EM & KM Praise Night');
+    await expect(grid.locator('li').first()).toContainText('포스터');
+    await grid.screenshot({ path: testInfo.outputPath('praise-poster-preview.png') });
+
+    // Switched off, the poster leaves the deck but keeps what was entered.
+    await page.getByTestId('praise-poster-enabled').uncheck();
+    await expect(page.getByTestId('praise-slide-count')).toHaveText(`${before}장`);
+    await page.getByTestId('praise-poster-enabled').check();
+    await expect(page.getByTestId('praise-poster-title')).toHaveValue('EM & KM Praise Night');
   });
 
   test('fills English the conti lacks from the web by itself, with no button pressed', async ({ page }) => {
