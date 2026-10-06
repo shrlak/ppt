@@ -465,10 +465,15 @@ function partKey(label: string): string {
   return match ? `${match[1]}${match[2] || '1'}` : label.trim().toUpperCase();
 }
 
-/** A page's heading ("Verse 1", "Chorus", "후렴", "2절") as the same key; null when it names no part. */
+/**
+ * A page's heading ("Verse 1", "Chorus", "후렴", "2절") as the same key — or a
+ * part label as recognition writes it off a 악보 (V, V2, C, PC, B); null when
+ * it names no part.
+ */
 function headingKey(label: string): string | null {
   const heading = parsePartHeading(label.replace(/:.*$/, '').trim());
-  return heading ? `${heading.family}${heading.index ?? 1}` : null;
+  if (heading) return `${heading.family}${heading.index ?? 1}`;
+  return /^(?:V|PC|C|B|T|O)\d*$/i.test(label.trim()) ? partKey(label) : null;
 }
 
 /**

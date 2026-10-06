@@ -162,7 +162,12 @@ function extrasOf(value: unknown): Record<string, PraiseSongExtras> {
     result[id] = {
       english: englishOf(entry.english),
       ...(entry.prayerAfter === true ? { prayerAfter: true } : {}),
-      ...(source === 'memory' || source === 'sheet' || source === 'web' || source === 'ai' || source === 'manual'
+      ...(source === 'memory' ||
+      source === 'sheet' ||
+      source === 'score' ||
+      source === 'web' ||
+      source === 'ai' ||
+      source === 'manual'
         ? { englishSource: source }
         : {}),
       ...(typeof sourceUrl === 'string' && /^https:\/\//.test(sourceUrl) ? { englishSourceUrl: sourceUrl.slice(0, 500) } : {}),

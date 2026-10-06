@@ -2,7 +2,8 @@
 //
 // Each Korean slide the deck will print gets its own English box right next
 // to it, so what is typed here is exactly what appears under that slide.
-// English the conti prints (a chord sheet) goes in first, then English the
+// English the conti prints (a chord sheet, or a song's own English 악보 page)
+// goes in first, then English the
 // 영어 가사 library already knows (last year's deck, or a song saved since),
 // then — for what is still missing — English found on the web by searching
 // "<곡 제목> 영어 가사". The rest can be pasted in one go, asked of the AI,
@@ -14,6 +15,8 @@ import { showToast } from '../lib/utils/toast';
 import { fetchEnglishWithAi } from './englishAi';
 import { findEnglishEntry, type EnglishSongEntry } from './englishLibrary';
 import { webEnglishReference, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
+import { scoreEnglishText } from './englishScore';
+import type { ScoreEnglish } from '../lib/utils/scorePages';
 import { normalizeTitle } from '../lib/storage/library';
 import { distributeEnglish } from './englishText';
 import { planPraiseSong } from './planner';
@@ -33,6 +36,10 @@ interface Props {
   webLookups?: Record<string, WebEnglishLookup>;
   /** What each lookup did for its song, by song id. */
   webOutcomes?: Record<string, WebEnglishOutcome>;
+  /** English read off a song's own English 악보 in the conti, by song id. */
+  scoreEnglish?: Record<string, ScoreEnglish>;
+  /** Songs whose 악보 English could only be laid in order, by song id. */
+  scoreGuessed?: Record<string, boolean>;
   /** Search the web for a song's English again; absent when no search server is set up. */
   onWebSearch?: (song: Song) => void;
   /** Check or uncheck a 기도 after the song (the 기도 move with it; see prayers.ts). */
@@ -51,6 +58,7 @@ function clock(at: string): string {
 const SOURCE_LABEL: Record<NonNullable<PraiseSongExtras['englishSource']>, string> = {
   memory: '저장된 영어 가사',
   sheet: '코드 악보에서 읽음',
+  score: '콘티 영어 악보에서 읽음',
   web: '웹에서 가져옴 · 확인 필요',
   ai: 'AI 초안 · 확인 필요',
   manual: '직접 입력',
@@ -71,6 +79,8 @@ function SongEnglishCard({
   savedAt,
   webLookup,
   webOutcome,
+  scorePage,
+  scoreGuessed,
   onWebSearch,
   onPrayerAfter,
   prayerNumber,
@@ -84,6 +94,8 @@ function SongEnglishCard({
   savedAt: string | undefined;
   webLookup: WebEnglishLookup | undefined;
   webOutcome: WebEnglishOutcome | undefined;
+  scorePage: ScoreEnglish | undefined;
+  scoreGuessed: boolean;
   onWebSearch: Props['onWebSearch'];
   onExtrasChange: Props['onExtrasChange'];
   onLoadFromLibrary: Props['onLoadFromLibrary'];
@@ -191,6 +203,7 @@ function SongEnglishCard({
               ? '가사 없음'
               : `영어 ${done}/${plan.slides.length}장`}
           {!plan.englishOnly && extras.englishSource ? ` · ${SOURCE_LABEL[extras.englishSource]}` : ''}
+          {!plan.englishOnly && extras.englishSource === 'score' && scoreGuessed ? ' · 확인 필요' : ''}
         </span>
         {savedAt && (
           <span className="song-autosave is-saved" data-testid="praise-english-autosave" role="status">
@@ -199,6 +212,33 @@ function SongEnglishCard({
           </span>
         )}
       </header>
+
+      {!plan.englishOnly && scorePage && (
+        <details className="praise-score-english" data-testid="praise-score-english">
+          <summary>
+            <Icon name="lyrics" />
+            <span>
+              콘티의 영어 악보({scorePage.pages.map((page) => `p.${page}`).join(', ') || '악보'})에서 읽은 영어 가사
+              {scorePage.title && !/[가-힣]/.test(scorePage.title) ? ` · ${scorePage.title}` : ''}
+              {extras.englishSource !== 'score'
+                ? ''
+                : scoreGuessed
+                  ? ' — 파트를 맞추지 못해 순서대로 나눠 넣었습니다. 띄우기 전에 확인해 주세요.'
+                  : ' — 한글 슬라이드 아래에 나눠 넣었습니다.'}
+            </span>
+          </summary>
+          <div className="praise-score-english-parts">
+            {scorePage.sections.map((section, sectionIndex) => (
+              <div key={`${section.label}-${sectionIndex}`} className="praise-score-english-part" lang="en">
+                <strong>{section.label}</strong>
+                {section.lines.map((line, lineIndex) => (
+                  <span key={lineIndex}>{line}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {!plan.englishOnly && webLookup && (
         <p className="praise-web-status" data-testid="praise-web-status" role="status">
@@ -271,7 +311,10 @@ function SongEnglishCard({
               aria-expanded={pasteOpen}
               data-testid="praise-paste-toggle"
               onClick={() => {
-                if (!pasteOpen && !pasteText.trim() && webOutcome?.pasteText) setPasteText(webOutcome.pasteText);
+                if (!pasteOpen && !pasteText.trim()) {
+                  const found = scorePage ? scoreEnglishText(scorePage) : webOutcome?.pasteText;
+                  if (found) setPasteText(found);
+                }
                 setPasteOpen((open) => !open);
               }}
             >
@@ -387,6 +430,8 @@ export default function PraiseEnglishStep({
   savedAt = {},
   webLookups = {},
   webOutcomes = {},
+  scoreEnglish = {},
+  scoreGuessed = {},
   onWebSearch,
   onPrayerAfter,
   prayerNumbers,
@@ -415,6 +460,8 @@ export default function PraiseEnglishStep({
           savedAt={savedAt[song.id]}
           webLookup={webLookups[normalizeTitle(song.title)]}
           webOutcome={webOutcomes[song.id]}
+          scorePage={scoreEnglish[song.id]}
+          scoreGuessed={Boolean(scoreGuessed[song.id])}
           onWebSearch={onWebSearch}
           onPrayerAfter={onPrayerAfter}
           prayerNumber={prayerNumbers[song.id]}

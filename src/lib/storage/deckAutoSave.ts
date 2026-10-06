@@ -66,6 +66,7 @@ function songKey(song: Song) {
     order: song.order,
     linesPerSlide: song.linesPerSlide,
     pageIndex: song.pageIndex ?? null,
+    extraPages: song.extraPages ?? [],
     // 설교 후 찬양 moves the song's slides to a different point in the deck.
     postSermon: !!song.postSermon,
   };

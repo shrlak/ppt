@@ -4333,6 +4333,33 @@ main[data-direction='back'] .wizard-panel.active {
   color: var(--accent);
   overflow-wrap: anywhere;
 }
+.praise-score-english {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.praise-score-english summary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  cursor: pointer;
+}
+.praise-score-english-parts {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+.praise-score-english-part {
+  display: grid;
+}
+.praise-score-english-part strong {
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
 .praise-prayer-toggle {
   display: inline-flex;
   align-items: center;

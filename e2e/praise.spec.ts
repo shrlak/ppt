@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
+/** A Plan A table of four songs, their four 악보 on p.2–5, then p.6 and p.7 the table does not list. */
+const PLAN_A_B_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-plan-a-b.pdf');
 // Any portrait picture stands in for this year's flyer.
 const FLYER = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
 const PARSE_TIMEOUT = 30_000;
@@ -634,5 +636,99 @@ test.describe('찬양집회 songs saved slide by slide', () => {
     ]);
     await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
     await expect(page.getByText("'주님의 사랑'의 저장된 가사를 악보의 파트 2개에 나눠 넣었습니다.")).toBeVisible();
+  });
+});
+
+test.describe('찬양집회 conti printing a song in Korean and again in English', () => {
+  // Invented lyrics: p.5 is 임재 in Korean, p.6 the same song in English, p.7
+  // another song the table does not list.
+  const KOREAN = [
+    { label: 'V', lines: ['가상의 임재 첫 절 첫째 줄', '가상의 임재 첫 절 둘째 줄'] },
+    { label: 'C', lines: ['가상의 임재 후렴 첫째 줄', '가상의 임재 후렴 둘째 줄'] },
+  ];
+  const ENGLISH = [
+    { label: 'C', lines: ['Made up chorus line number one', 'Made up chorus line number two'] },
+    { label: 'V', lines: ['Made up verse line number one', 'Made up verse line number two'] },
+  ];
+  const READINGS = [
+    { title: '임재', sections: KOREAN },
+    { title: 'Presence', sections: ENGLISH },
+    { title: '다른 곡', sections: [{ label: 'V', lines: ['가상의 다른 곡 가사'] }] },
+  ];
+
+  async function stubPages(page: Page): Promise<void> {
+    await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [] }));
+    await page.route('**/ppt/praise-english.json', (route) => route.fulfill({ json: [] }));
+    await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+    // The title pass reads p.5–7, the lyrics pass p.5 and the p.6 it joined.
+    const answer = (images: number) =>
+      JSON.stringify({
+        results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({
+          imageIndex,
+          pageType: 'score',
+          sermonTitle: '',
+          scripture: '',
+          artist: '',
+          key: 'G',
+          order: ['I', 'V', 'C'],
+          lyricRowCount: 1,
+          ...READINGS[Math.min(imageIndex, READINGS.length - 1)],
+        })),
+      });
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+      const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData);
+      await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images.length) }] } }] } });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+      const images = (payload.messages?.[0]?.content ?? []).filter((part) => (part as { type?: string }).type === 'image_url');
+      await route.fulfill({ json: { choices: [{ message: { content: answer(images.length) } }] } });
+    });
+    await page.route(`${PROXY}/lyrics*`, (route) => route.fulfill({ json: { candidates: [], links: [] } }));
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+  }
+
+  test('reads the page the list does not name, keeps the English apart, and shows it in the English step', async ({ page }) => {
+    await stubPages(page);
+    await page.goto('praise.html');
+    await page.getByTestId('pdf-input').setInputFiles(PLAN_A_B_PDF);
+    await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+    await expect(page.locator('.toast-text', { hasText: '콘티 순서에 없는 악보 2장(p.6, p.7)도 모두 읽습니다' })).toBeVisible();
+
+    const card = page.getByTestId('song-card').nth(3);
+    await expect(card.getByTestId('song-title-input')).toHaveValue('임재', { timeout: PARSE_TIMEOUT });
+    // Automatic recognition is skipped under browser automation: press the button a user could.
+    await card.getByTestId('recognize-btn').click();
+    await expect(card.getByTestId('recog-running')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+    await expect(card.getByTestId('recog-done')).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+    // p.6 joined the song; p.7 is another song and stays out.
+    await expect(card.locator('.score-hint')).toContainText('p.5, p.6');
+    await expect(page.locator('.toast-text', { hasText: "'임재'(p.5, p.6)" })).toBeVisible();
+    await expect(page.locator('.toast-text', { hasText: 'p.7은(는) 콘티 순서에 없는 다른 곡의 악보라' })).toBeVisible();
+    await expect(page.getByTestId('song-card')).toHaveCount(4);
+
+    // The Korean is the song's lyrics, with no English among them.
+    const texts = await card
+      .getByTestId('section-textarea')
+      .evaluateAll((boxes) => boxes.map((box) => (box as HTMLTextAreaElement).value));
+    expect(texts.join('\n')).toContain('가상의 임재 첫 절 첫째 줄');
+    expect(texts.join('\n')).not.toContain('Made up');
+
+    // The English is the same song's, under the Korean part of the same name.
+    await page.getByTestId('praise-next-songs').click();
+    const english = page.getByTestId('praise-english-song').filter({ hasText: '임재' });
+    await expect(english.getByTestId('praise-english-title')).toHaveValue('Presence');
+    await expect(english.getByTestId('praise-english-status')).toContainText('콘티 영어 악보에서 읽음');
+    const boxes = english.getByTestId('praise-slide-english');
+    await expect(boxes).toHaveCount(2);
+    await expect(boxes.nth(0)).toHaveValue(ENGLISH[1].lines.join('\n'));
+    await expect(boxes.nth(1)).toHaveValue(ENGLISH[0].lines.join('\n'));
+    const read = english.getByTestId('praise-score-english');
+    await expect(read).toContainText('p.6');
+    await read.locator('summary').click();
+    await expect(read).toContainText('Made up chorus line number one');
   });
 });

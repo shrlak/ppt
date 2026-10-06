@@ -171,10 +171,21 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
     표에 없는 제목이라고 새 곡이 되지 않습니다. 설명의 제목이 한 글자 틀려도(`주 신실하신 놀라워` ↔
     표의 `주 신실하심 놀라워`) 같은 곡으로 봅니다. 단 `그 사랑`과 `그 사랑 얼마나`처럼 다른 곡은
     섞지 않습니다. 표가 없는 콘티는 지금처럼 설명(•)이 곡 목록입니다.
-  - **순서에 없는 악보는 인식하지 않음** — 표에 없는 곡의 악보(Plan B 곡, 순서에 없는 영접송·고백송,
-    두 장짜리 악보의 둘째 장 등)는 곡 카드를 만들지 않고 가사도 읽지 않으며, 어느 페이지를 뺐는지
-    알려 드립니다. 다만 AI가 **제목만** 읽어 두어, 표의 곡이 PDF 순서가 달라 그런 페이지에 있으면 그
-    페이지로 옮겨 짝지어 줍니다.
+  - **곡 목록이 있어도 콘티는 모든 페이지를 읽습니다** — 표(또는 카톡 공지)의 곡 수보다 악보 페이지가
+    많으면, 남는 페이지도 AI가 **모두 제목을 읽어** 어느 곡의 것인지 정합니다. 표의 곡이 PDF 순서가 달라
+    그런 페이지에 있으면 그 페이지로 옮겨 짝지어 주고, 남은 페이지는 곡에 **합칩니다**:
+    - **제목이 겹치는 페이지** — 표의 곡 제목(콘티가 함께 적은 영어 제목 포함)이 인쇄된 페이지는 그 곡의
+      악보입니다. 어디에 있든 그 곡에 붙습니다.
+    - **이어지는 페이지** — 제목이 없는 페이지가 어떤 곡의 페이지 바로 뒤에 있으면 그 악보의 둘째 장(셋째
+      장…)으로 보고 그 곡에 붙입니다. 제목을 하나도 읽지 못했을 때는 짐작으로 붙이지 않습니다.
+    - 합친 곡은 **모든 페이지의 가사를 함께 읽어** 한 곡으로 만듭니다 — 둘째 장에만 있는 파트(브릿지
+      등)는 더하고, 페이지를 넘어 이어진 파트는 그 파트 뒤에 잇고, 다시 인쇄된 후렴은 한 번만 둡니다.
+      진행 순서는 진행이 적힌 첫 페이지의 것을 씁니다. 곡 카드에는 `p.3, p.4`처럼 그 곡의 페이지가 모두
+      표시되고, 어느 곡을 합쳤는지 알려 드립니다.
+    - **다른 곡의 악보는 넣지 않음** — 표에 없는 자기 제목이 인쇄된 페이지(Plan B 곡, 순서에 없는
+      영접송·고백송 등)는 곡 카드를 만들지 않고, 어느 페이지인지 알려 드립니다.
+    - 표지가 없어 악보 한 장마다 곡 카드가 생긴 콘티도, 바로 앞 페이지와 **같은 제목**이 인쇄된 페이지는
+      카드를 따로 두지 않고 앞 곡에 합칩니다.
   - 태블릿으로 손글씨를 쓰면 함께 들어가는 손글씨 인식 글자(PDF 맨 뒤에 붙음)는 곡 설명에 섞지 않습니다.
 - **손글씨로 쓴 제목도 순서 그대로** — `2. 찬양 콘티 (Plan A)` 아래 `순서 | 찬양 | 키` 표에서 제목을
   손으로 써 넣은 칸(태블릿 펜·스캔 그림이라 PDF에 글자가 없는 칸)이나 글자로 바뀌지 않는 손글씨
@@ -192,7 +203,8 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 - **제목이 라이브러리에 있으면 바로 불러옵니다** — 콘티 표지에 적힌 제목이 찬양 라이브러리에
   **완전히 같은 제목으로**(띄어쓰기·대소문자·문장부호만 무시) 저장되어 있으면, 콘티를 여는 즉시
   저장된 가사를 불러오고 악보는 읽지 않습니다. 모든 곡이 라이브러리에 있으면 AI 인식을 아예
-  실행하지 않습니다.
+  실행하지 않습니다 (찬양집회는 곡 목록에 없는 페이지가 있으면 그 곡들의 **영어 악보**를 찾으려고 제목과
+  영어 페이지만 읽습니다).
   - 표지에 제목이 없는 곡은 악보에서 **제목만** 먼저 읽고, 그 제목이 라이브러리에 있으면 가사
     인식을 거기서 멈추고 저장된 가사를 불러옵니다. 가사 인식 중에 새로 알아낸 제목도 같은 방식으로
     라이브러리에서 불러옵니다. 라이브러리에 없는 찬양만 악보에서 가사를 읽습니다.
@@ -546,6 +558,16 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
   있으면 한글 제목을 곡 이름으로, 영어 제목은 영어 가사 단계의 영어 제목으로 넣습니다. `Above All + I Will
   Worship You` 같은 메들리는 곡마다 따로 카드가 생기고, 곡 사이의 `Prayer Topic` 줄은 곡으로 치지 않습니다.
   악보에 영어 제목만 있어도(`You Are Good`) 콘티의 그 곡(좋으신 하나님) 악보로 짝지어집니다.
+- **한 곡이 한글 악보·영어 악보 두 장이면 한 곡으로** — 찬양집회 콘티는 한 곡을 한글 악보 한 장, 영어
+  악보 한 장으로 싣기도 합니다 (예: 1페이지 한글 가사, 2페이지 영어 가사). 곡 목록에 없는 남는 페이지에
+  **영어 제목만** 인쇄되어 있고 바로 앞(앞 곡이 이미 영어 악보를 가졌으면 바로 뒤) 한글 곡의 페이지와
+  붙어 있으면, 또는 콘티가 적은 그 곡의 영어 제목이 인쇄되어 있으면, 그 곡의 **영어 악보**로 보고 같은
+  찬양 아래에 함께 둡니다 (영어 악보가 먼저 나와도 카드는 한글 악보를 보여 줍니다).
+  - 두 페이지를 함께 읽어 **한글 가사는 찬양 단계**의 그 곡 가사로, **영어 가사는 영어 가사 단계**의 그 곡
+    영어로 들어갑니다 — 영어가 한글 가사에 섞이지 않습니다. 한글 악보를 못 읽었으면 영어를 한글 자리에
+    넣지 않고, 한글 제목으로 웹 가사를 찾습니다.
+  - 라이브러리에서 한글 가사를 불러온 곡도 영어 악보는 읽어 영어 가사 단계에 넣습니다.
+  - 영어 악보 페이지만 있고 한글 악보가 없는 곡(Praise처럼 영어로만 부르는 곡)은 지금처럼 영어 곡입니다.
 - **악보 사진 사이에 SongSelect 악보가 몇 장 섞여 있어도** 모든 곡을 읽습니다. 예전에는 글자가 들어 있는
   SongSelect 페이지 때문에 PDF 전체를 코드 악보로 보고 그 두 곡(Praise, Call On Jesus)만 남겼는데, 이제
   글자가 전혀 없는 악보 사진이 한 장이라도 있으면 일반 콘티로 읽어 모든 곡의 악보를 인식합니다.
@@ -583,6 +605,14 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
 곡마다 **영어 제목**과, 한글 슬라이드 한 장마다 그 아래에 들어갈 **영어 가사 칸**이 나옵니다.
 영어는 **콘티 → 저장된 영어 가사 → 웹** 순서로, 버튼을 누르지 않아도 비어 있는 칸에만 채워집니다.
 
+- **콘티의 영어 악보에서 바로 채워집니다** — 찬양 단계에서 그 곡의 **영어 악보 페이지**를 함께 읽은 곡은
+  (위 [1단계](#1단계--찬양)의 한글 악보·영어 악보 두 장), 영어 악보의 가사가 한글 슬라이드 아래에 들어가고
+  `콘티 영어 악보에서 읽음`으로 표시됩니다. 두 페이지를 같은 파트 이름으로 읽으므로 **같은 이름의 파트**끼리
+  (V ← V, C ← C, B ← B) 맞추고, 이름이 맞지 않으면 웹 영어처럼 **길이(음절 수)**로 맞춥니다. 그래도 맞지
+  않으면 그 곡 자신의 영어이므로 빼 두지 않고 **순서대로 나눠** 넣되 `확인 필요`로 표시합니다. 비어 있는
+  칸에만 넣고, 웹 가사로 한글 글자가 바뀌어도 바뀐 한글 아래에 다시 들어갑니다. 곡 카드의 **콘티의 영어
+  악보(p.N)에서 읽은 영어 가사**를 펼치면 읽은 영어를 파트별로 볼 수 있고, **영어 가사 한 번에
+  붙여넣기**를 열면 그 영어가 미리 들어가 있습니다. 넣은 영어는 한글 가사와 함께 그 곡으로 자동 저장됩니다.
 - **코드 악보에서 바로 채워집니다** — 코드 악보 콘티로 올린 곡은 악보에 적힌 영어가 한글 슬라이드마다
   들어가고 `코드 악보에서 읽음`으로 표시됩니다. 한 파트의 한글과 영어는 같은 장에 남도록 나뉘며
   (영어를 고르게 나눈 뒤 한글을 **같은 분량**만큼 끊어서, 예: 한글 4줄·영어 8줄 → 2+4 두 장), 슬라이드당
@@ -1004,7 +1034,10 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    The song listed after the confession song is treated as the post-sermon praise and is placed
    after the sermon's prayer slide instead; any song can be moved there by hand from its card.
    Which song is the community confession song is an administrator setting, and the back deck's
-   "공동체 고백" slides are rewritten to it from the song library.
+   "공동체 고백" slides are rewritten to it from the song library. Every page of the conti is read
+   even when the cover or the KakaoTalk notice lists the songs: a page past the list joins the song
+   whose title it prints, or — untitled, right after a song's page — carries on that song's score,
+   and is read with it; a page printing another song's title is left out (`src/lib/utils/scorePages.ts`).
 2. **Scripture** (ported from
    [edcho1012/kccp-bible-slide](https://github.com/edcho1012/kccp-bible-slide)) — free-text verse
    references (`행1:8-10 요3:16`) become verse slides in up to two translations. The conti's
@@ -1023,7 +1056,10 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 
 **찬양집회 (praise night)** has its own page at `/ppt/praise.html`, reached from the service picker
 that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a conti
-exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
+exactly like the Sunday wizard — a song printed once in Korean and once in English (an English-only
+page beside its Korean one, or printing the English title the cover gives) is one song, its Korean
+pages its lyrics and its English page laid under them in the English step (`src/praise/englishScore.ts`)
+— then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
 and matched by text, so different line breaks still line up. A saved song with no parts — slide by slide
