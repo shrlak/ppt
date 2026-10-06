@@ -513,7 +513,20 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 ### 1단계 · 찬양
 
 주일예배와 똑같이 **콘티 PDF를 올리면** 곡 순서·제목·한글 가사를 읽습니다 (찬양 라이브러리에 있는
-곡은 바로 불러오고, 없는 곡은 악보를 인식합니다).
+곡은 바로 불러오고, 없는 곡은 악보를 인식합니다). 새 곡은 주일예배처럼 **콘티 → 악보(제목·파트·진행 순서)
+→ 웹 가사** 순서로 채워집니다 — 웹에서 찾은 가사를 한 덩어리로 넣지 않고, 악보의 파트(V·C·B…)마다 맞는
+줄만 나눠 넣고 콘티(없으면 악보)의 진행 순서를 따릅니다.
+
+- **슬라이드로만 저장된 곡도 파트로 다시 나눕니다** — 작년 찬양집회 PPT나 이전 찬양집회에서 저장된 곡은
+  파트가 아니라 **띄웠던 슬라이드 그대로**(1, 2, 3…) 저장되어 있어서, 그대로 불러오면 콘티의 진행 순서를
+  쓸 수 없었습니다. 이제 이런 곡도 콘티에 악보가 있으면 새 곡처럼 **악보를 읽어 파트와 진행 순서를 정하고,
+  웹 가사를 파트별로 나눠 넣습니다.** 웹에 확실한 가사가 없으면 **저장된 가사(작년에 띄운 그대로의 글자)를
+  악보의 파트마다 나눠** 넣고(`'곡 제목'의 저장된 가사를 악보의 파트 N개에 나눠 넣었습니다`), 악보에서도 맞는
+  파트를 찾지 못하면 저장된 슬라이드를 그대로 둡니다. 악보를 읽는 동안에는 저장된 슬라이드가 카드에 먼저
+  보이고, 그 사이에 카드를 직접 고치면 고친 그대로 둡니다. 영어 가사는 한글 글자로 맞춰 넣으므로 파트로
+  다시 나뉘어도 작년 영어가 제자리에 따라갑니다.
+- 웹 후보가 여럿이라 고르게 된 곡은, 고른 웹 가사도 **콘티에 적힌 진행 순서**를 그대로 따릅니다 (주일예배도
+  같습니다). 고르지 않으면(사용하지 않음) 악보가 가사를 못 읽은 곡은 카드가 그대로 남습니다.
 
 **코드 악보 콘티(CCLI SongSelect의 `Chord Sheets` PDF)** 는 악보 인식 없이 PDF에 적힌 글자를 그대로
 읽습니다. 작년 찬양집회처럼 곡마다 제목·`Key - D | Time - 4/4` 머리말과 CCLI 꼬리말이 있고, 두 단으로
@@ -991,7 +1004,11 @@ that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a co
 exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
-and matched by text, so different line breaks still line up — then, for a song neither the conti nor
+and matched by text, so different line breaks still line up. A song that store (or a 찬양 라이브러리 copy
+saved from it) holds only slide by slide — parts `1, 2, 3…` — is read off its 악보 like a new song when the
+conti has its page: the score's parts and 진행, then the web's words part by part, or, with no confirmed web
+page, its own saved words laid over the score's parts (`src/lib/lyrics/savedSlides.ts`); the saved slides
+stand in on the card meanwhile and stay if the score gives nothing better. Then, for a song neither the conti nor
 that store gives English for, from the web with no button pressed: the Worker's `/praise/english`
 searches `"<제목> 영어 가사"` (Google through SerpApi when keyed, 다음·네이버 blogs, DuckDuckGo) — and, where
 `BUGS_SCRAPING_ALLOWED`, Bugs's track search for the same Korean title, whose English-named track

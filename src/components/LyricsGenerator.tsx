@@ -81,8 +81,9 @@ import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyricsForTitles, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
+import { hasSlideNumberParts, savedWordsInParts } from '../lib/lyrics/savedSlides';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
-import { findSection } from '../lib/utils/slidePlanner';
+import { findSection, sortSectionsByOrder } from '../lib/utils/slidePlanner';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
@@ -233,6 +234,18 @@ function recognitionBaseline(score: ParsedScore): NonNullable<Song['provenance']
     sections: structuredClone(score.sections),
     order: [...score.order],
   };
+}
+
+/**
+ * A 찬양집회 song whose saved lyrics are only the slides a deck projected
+ * (parts 1, 2, 3…): its words, but not its parts. With its 악보 in the conti
+ * it is read like a new song, and the saved slides stand in until then.
+ */
+interface StandIn {
+  /** The saved song: its words, slide by slide. */
+  entry: LibraryEntry;
+  /** The 진행 the conti wrote for the song, which its parts will follow. */
+  contiOrder?: string[];
 }
 
 /** Vision engines may identify a non-score page explicitly or by returning
@@ -425,6 +438,14 @@ export default function LyricsGenerator({
   // Songs the user changed by hand in this session: their auto-saves carry
   // the user's trust level instead of the machine's.
   const userEditedRef = useRef<Set<string>>(new Set());
+  /**
+   * 찬양집회 songs whose saved lyrics are only the slides a deck projected
+   * (parts 1, 2, 3…). The 악보 is read for their parts and 진행 like a new
+   * song's, then the web's words go in part by part; the saved slides stay
+   * on the card until then, and stay for good if nothing better comes back.
+   * An edit by hand ends the stand-in: the card is then the user's.
+   */
+  const standInRef = useRef<Map<string, StandIn>>(new Map());
   // What each song last wrote to 찬양 라이브러리, so an unchanged song is
   // never written twice.
   const librarySavedRef = useRef<Map<string, string>>(new Map());
@@ -693,6 +714,13 @@ export default function LyricsGenerator({
   const fillFromLibrary = useCallback((song: Song, entry: LibraryEntry, message?: string) => {
     scanCancelledRef.current.add(song.id);
     autoAttemptedRef.current.add(song.id);
+    // A song saved by its parts replaces saved slides standing in for it,
+    // in the 진행 the conti wrote when that names its parts.
+    const standIn = standInRef.current.get(song.id);
+    standInRef.current.delete(song.id);
+    const standInOrder = standIn?.contiOrder?.some((token) => token !== 'I' && findSection(entry.sections, token))
+      ? standIn.contiOrder
+      : undefined;
     setSongs((list) =>
       list.map((s) =>
         s.id === song.id
@@ -702,7 +730,8 @@ export default function LyricsGenerator({
               key: s.key ?? entry.key,
               // The saved order is last time's arrangement; one the conti
               // wrote is this week's, and the saved parts follow it.
-              ...libraryLyrics(entry, s.orderFromConti ? s.order : undefined),
+              ...libraryLyrics(entry, s.orderFromConti ? s.order : standInOrder),
+              ...(standIn ? { linesPerSlide, orderFromConti: s.orderFromConti || !!standInOrder || undefined } : {}),
             }
           : s,
       ),
@@ -711,7 +740,7 @@ export default function LyricsGenerator({
       r[song.id] ? { ...r, [song.id]: { status: 'done', engine: 'library' } } : r,
     );
     showToast(message ?? `라이브러리에서 '${entry.title}' 가사를 불러왔습니다.`);
-  }, []);
+  }, [linesPerSlide]);
 
   /** Remove an AI-classified non-score page from the song editor and forward
    * any sermon metadata found there to the Bible step. */
@@ -794,9 +823,66 @@ export default function LyricsGenerator({
         });
       };
 
+      /**
+       * Settle a stand-in on its saved slides: the 악보 gave nothing better.
+       * A card still empty — its saved slides were found only by the title
+       * read off the 악보 — takes them now, split exactly as saved.
+       */
+      const keepStandIn = (id: string) => {
+        const held = standInRef.current.get(id);
+        standInRef.current.delete(id);
+        if (!held) return;
+        setSongs((current) =>
+          current.map((song) =>
+            song.id === id && !isCancelled(id) && !songHasLyrics(song)
+              ? {
+                  ...song,
+                  ...libraryLyrics(held.entry),
+                  linesPerSlide: Math.max(song.linesPerSlide ?? 1, ...held.entry.sections.map((section) => section.lines.length)),
+                }
+              : song,
+          ),
+        );
+        markDone([id], 'library');
+      };
+
+      /**
+       * Take a song the library holds by the title read off its 악보. A
+       * 찬양집회 song saved only slide by slide is not taken: the page goes on
+       * to be read for its parts, and the saved slides wait in case it gives
+       * none. Returns true when the song is settled.
+       */
+      const takeLibraryMatch = (song: Song, entry: LibraryEntry, message?: string): boolean => {
+        if (service === 'praise' && hasSlideNumberParts(entry.sections)) {
+          if (!standInRef.current.has(song.id)) {
+            standInRef.current.set(song.id, { entry, contiOrder: song.orderFromConti ? [...song.order] : undefined });
+          }
+          return false;
+        }
+        resolvedIds.add(song.id);
+        fillFromLibrary(song, entry, message);
+        return true;
+      };
+
+      /**
+       * A stand-in's page read as no score at all, or as a song left out of
+       * the service: the reading is not this song's, and its card keeps the
+       * saved slides rather than being dropped. Returns true when it did.
+       */
+      const holdStandIn = (song: Song, score: ParsedScore, excludedTitles: string[]): boolean => {
+        if (!standInRef.current.has(song.id)) return false;
+        const title = score.title?.trim();
+        if (!isNonScoreRecognition(score) && !(title && isExcludedTitle(title, excludedTitles))) return false;
+        keepStandIn(song.id);
+        return true;
+      };
+
       // Songs already filled from 찬양 라이브러리 (or by the user) are done
-      // from the start: their cards never show a scan in progress.
-      const prefilled = active.filter(songHasLyrics).map((song) => song.id);
+      // from the start: their cards never show a scan in progress. Saved
+      // slides standing in for a song's parts are not its lyrics yet.
+      const prefilled = active
+        .filter((song) => songHasLyrics(song) && !standInRef.current.has(song.id))
+        .map((song) => song.id);
       if (prefilled.length > 0) markDone(prefilled, 'library');
       // Every song already has its lyrics: nothing is left to read.
       if (prefilled.length === active.length) {
@@ -815,6 +901,12 @@ export default function LyricsGenerator({
       /** Songs neither the models nor the web could fill, with the reason. */
       const failures = new Map<string, string>();
       const reportFailures = () => {
+        // A stand-in has not failed: it keeps the slides it was saved with.
+        for (const id of [...failures.keys()]) {
+          if (!standInRef.current.has(id)) continue;
+          failures.delete(id);
+          keepStandIn(id);
+        }
         if (failures.size === 0) return;
         for (const id of failures.keys()) resolvedIds.add(id);
         setRecog((current) => {
@@ -840,10 +932,23 @@ export default function LyricsGenerator({
         provenance?: Partial<NonNullable<Song['provenance']>>,
       ) => {
         const found = evidence.get(id);
+        // Saved slides standing in for the song give way to its parts, laid
+        // out in the 진행 the conti wrote for it (or else the 악보's own).
+        const standIn = standInRef.current.get(id);
+        standInRef.current.delete(id);
         setSongs((current) =>
           current.map((song) => {
             if (song.id !== id || isCancelled(id)) return song;
-            const next = applyScoreToSong(song, score);
+            const base: Song = standIn
+              ? {
+                  ...song,
+                  sections: [],
+                  order: standIn.contiOrder ? [...standIn.contiOrder] : ['I'],
+                  orderFromConti: standIn.contiOrder ? true : undefined,
+                  linesPerSlide,
+                }
+              : song;
+            const next = applyScoreToSong(base, score);
             return {
               ...next,
               // A machine answer is a draft until somebody stands behind it.
@@ -863,6 +968,31 @@ export default function LyricsGenerator({
       };
 
       /**
+       * Commit a song no web page was confirmed for: what the 악보 said,
+       * normalized. A stand-in takes its saved words instead, laid over the
+       * parts the 악보 shows — words the deck already projected beat a
+       * reading of small type — and keeps its saved slides when the 악보
+       * showed no part they read like.
+       */
+      const settleWithoutWeb = (id: string, score: ParsedScore, engine: string, failure: string) => {
+        const normalized = mergeWebLyrics(score, null).score;
+        const standIn = standInRef.current.get(id);
+        if (standIn) {
+          const laid = savedWordsInParts(normalized.sections, standIn.entry.sections);
+          if (laid.matched === 0) {
+            keepStandIn(id);
+            return;
+          }
+          applyRecognizedScore(id, { ...normalized, sections: laid.sections }, engine, { source: 'library' });
+          const title = standIn.entry.title;
+          showToast(`'${title}'의 저장된 가사를 악보의 파트 ${laid.matched}개에 나눠 넣었습니다.`);
+          return;
+        }
+        if (normalized.sections.length === 0) failures.set(id, failure);
+        else applyRecognizedScore(id, normalized, engine);
+      };
+
+      /**
        * Last stage: look each new song up on the web by the title read off
        * the conti, and put its published lyrics into the song part by part
        * (see mergeWebLyrics — the score keeps the part labels and 진행 순서,
@@ -877,10 +1007,7 @@ export default function LyricsGenerator({
         if (pending.length === 0) return;
 
         if (!hasWebLyricsLookup()) {
-          for (const [id, { score, engine }] of pending) {
-            if (score.sections.length === 0) failures.set(id, '가사를 읽지 못했습니다.');
-            else applyRecognizedScore(id, mergeWebLyrics(score, null).score, engine);
-          }
+          for (const [id, { score, engine }] of pending) settleWithoutWeb(id, score, engine, '가사를 읽지 못했습니다.');
           return;
         }
 
@@ -891,8 +1018,13 @@ export default function LyricsGenerator({
             // that merely shares this title cannot be mistaken for this song.
             // The title read off the 악보 is searched as well as the conti's
             // (or the notice's): a site such as 벅스 may list it under either.
+            // A stand-in's saved words are this song's own, and better
+            // evidence than a reading of small type.
+            const standIn = standInRef.current.get(id);
             const lookup = title
-              ? await fetchWebLyricsForTitles([score.title, title], { sample: lyricSample(score.sections) })
+              ? await fetchWebLyricsForTitles([score.title, title], {
+                  sample: lyricSample(standIn ? standIn.entry.sections : score.sections),
+                })
               : { candidates: [], links: [] };
             if (isCancelled(id)) return;
             const auto = lookup.candidates.find((candidate) => candidate.decision === 'auto') ?? null;
@@ -901,11 +1033,18 @@ export default function LyricsGenerator({
             // Several plausible pages: the song stays exactly as the models
             // read it, editable, and out of auto-save until the user chooses.
             if (!auto && review.length > 0) {
-              webBaselineRef.current[id] = score;
+              // A page chosen later still follows the 진행 the conti wrote.
+              webBaselineRef.current[id] = standIn?.contiOrder ? { ...score, order: [...standIn.contiOrder] } : score;
               setWebReview((current) => ({
                 ...current,
                 [id]: { candidates: review, decision: 'review', links: lookup.links },
               }));
+              // A stand-in waits with its saved words, in the 악보's parts
+              // where they fit.
+              if (standIn) {
+                settleWithoutWeb(id, score, engine, '');
+                return;
+              }
               const normalized = mergeWebLyrics(score, null);
               setSongs((current) =>
                 current.map((song) =>
@@ -928,16 +1067,20 @@ export default function LyricsGenerator({
               return;
             }
 
+            if (!auto) {
+              settleWithoutWeb(id, score, engine, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
+              return;
+            }
             const merged = mergeRankedWebLyrics(score, auto);
             if (merged.score.sections.length === 0) {
               failures.set(id, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
               return;
             }
             applyRecognizedScore(id, merged.score, engine, {
-              source: auto ? 'web' : 'models',
-              webSourceUrl: auto?.sourceUrl,
+              source: 'web',
+              webSourceUrl: auto.sourceUrl,
             });
-            if (auto && merged.outcome !== 'unused') {
+            if (merged.outcome !== 'unused') {
               showToast(
                 merged.outcome === 'filled'
                   ? `'${title}' 가사를 ${auto.sourceHost}에서 가져왔습니다.`
@@ -1106,11 +1249,13 @@ export default function LyricsGenerator({
           // A song that already has lyrics has them from the library, the
           // user or a restored deck — all authoritative, so the page is never
           // read again, and its card is never dropped on a page classification.
-          if (songHasLyrics(song)) {
+          // Saved slides standing in for its parts are the one exception.
+          if (songHasLyrics(song) && !standInRef.current.has(song.id)) {
             markDone([song.id], 'library');
             return;
           }
           const identity = aliasedTitles[index] ?? { order: [], sections: [] };
+          if (holdStandIn(song, identity, settings.excludedTitles)) return;
           if (discardNonScorePage(song, identity)) {
             resolvedIds.add(song.id);
             return;
@@ -1124,13 +1269,10 @@ export default function LyricsGenerator({
           // saved lyrics. Reading the 악보 would spend time and a request to
           // learn what is already saved.
           const match = titlePlan.libraryMatches[index];
-          if (match) {
-            resolvedIds.add(song.id);
-            fillFromLibrary(
-              song,
-              match,
-              `'${match.title}'은(는) 라이브러리에 있어 가사 인식을 건너뛰고 불러왔습니다.`,
-            );
+          if (
+            match &&
+            takeLibraryMatch(song, match, `'${match.title}'은(는) 라이브러리에 있어 가사 인식을 건너뛰고 불러왔습니다.`)
+          ) {
             return;
           }
           identityById.set(song.id, identity);
@@ -1255,6 +1397,10 @@ export default function LyricsGenerator({
         for (const { song } of remaining) {
           const score = scoreById.get(song.id);
           if (!score || isCancelled(song.id)) continue;
+          if (holdStandIn(song, score, settings.excludedTitles)) {
+            scoreById.delete(song.id);
+            continue;
+          }
           if (discardNonScorePage(song, score)) {
             scoreById.delete(song.id);
             resolvedIds.add(song.id);
@@ -1272,11 +1418,7 @@ export default function LyricsGenerator({
             : undefined;
           // The lyrics pass read a title the title pass missed, and 찬양
           // 라이브러리 holds it: the saved lyrics are used.
-          if (saved) {
-            scoreById.delete(song.id);
-            resolvedIds.add(song.id);
-            fillFromLibrary(song, saved);
-          }
+          if (saved && takeLibraryMatch(song, saved)) scoreById.delete(song.id);
         }
 
         // Apply the pages the batch pass actually read; pages that came back
@@ -1351,6 +1493,7 @@ export default function LyricsGenerator({
                 title: single.score.title ?? known.title,
                 key: single.score.key ?? known.key,
               };
+              if (holdStandIn(song, merged, settings.excludedTitles)) return;
               if (discardNonScorePage(song, merged)) {
                 resolvedIds.add(song.id);
                 return;
@@ -1365,11 +1508,7 @@ export default function LyricsGenerator({
                 ? findLibrarySong(libraryRef.current, { title: aliasedTitle, artist: merged.artist })
                 : undefined;
               // Same rule as the batch path: a title in the library loads it.
-              if (saved) {
-                resolvedIds.add(song.id);
-                fillFromLibrary(song, saved);
-                return;
-              }
+              if (saved && takeLibraryMatch(song, saved)) return;
               if (merged.sections.length === 0) {
                 // The web pass fills it or reports the failure.
                 toWebOrFail(merged, single.engine, '가사를 읽지 못했습니다.');
@@ -1395,6 +1534,12 @@ export default function LyricsGenerator({
         reportFailures();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        // A stand-in keeps the slides it was saved with.
+        for (const song of active) {
+          if (!isCancelled(song.id) && !resolvedIds.has(song.id) && standInRef.current.has(song.id)) {
+            keepStandIn(song.id);
+          }
+        }
         setRecog((current) => {
           const next = { ...current };
           for (const song of active) {
@@ -1414,7 +1559,7 @@ export default function LyricsGenerator({
         }
       }
     },
-    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage],
+    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, service, linesPerSlide],
   );
 
   const handleRecognizeClick = useCallback(
@@ -1481,6 +1626,7 @@ export default function LyricsGenerator({
       // that would roll newer saved lyrics back to the old deck's.
       librarySavedRef.current.clear();
       userEditedRef.current.clear();
+      standInRef.current.clear();
       for (const song of restoreSongs) librarySavedRef.current.set(song.id, libraryContentKey(song));
       setPageImages({});
       setRecog({});
@@ -1499,6 +1645,8 @@ export default function LyricsGenerator({
   useEffect(() => {
     if (!replaceSong) return;
     const next = structuredClone(replaceSong.song);
+    // Chosen on purpose: it stands for nothing else.
+    standInRef.current.delete(next.id);
     setSongs((list) => list.map((song) => (song.id === next.id ? next : song)));
     setEdited(true);
     // Only a version bump replaces; the song object changing identity must not.
@@ -1523,12 +1671,20 @@ export default function LyricsGenerator({
     setSongs((current) =>
       current.map((song) => {
         if (song.id !== songId) return song;
+        // Declining when the 악보 gave no lyrics leaves the card as it is —
+        // saved slides kept for the song, or whatever was typed since.
+        if (!chosen && merged.score.sections.length === 0) return song;
+        // The 진행 the conti wrote stays, as everywhere else it is filled.
+        const order = song.orderFromConti ? [...song.order] : [...merged.score.order];
+        const sections = merged.score.sections.map((section) => ({ label: section.label, lines: [...section.lines] }));
         return {
           ...song,
           // The merge already decided the shape; applyScoreToSong would refuse
           // to touch a song that has lyrics, which by now it does.
-          sections: merged.score.sections.map((section) => ({ label: section.label, lines: [...section.lines] })),
-          order: [...merged.score.order],
+          sections: sortSectionsByOrder(sections, order),
+          order,
+          // Saved slides (1, 2, 3…) were split as saved; parts start over.
+          ...(hasSlideNumberParts(song.sections) ? { linesPerSlide } : {}),
           verification: 'draft',
           provenance: {
             ...song.provenance,
@@ -1546,7 +1702,7 @@ export default function LyricsGenerator({
     if (chosen) {
       showToast(`'${chosen.title || '선택한 곡'}' 가사를 ${chosen.sourceHost}에서 적용했습니다.`);
     }
-  }, []);
+  }, [linesPerSlide]);
 
   /**
    * Pair one verified correction with a shrunken copy of the page it came
@@ -1787,6 +1943,7 @@ export default function LyricsGenerator({
       const doc = await loadConti(data);
       docRef.current = doc;
       sparePagesRef.current = [];
+      standInRef.current.clear();
       const parsed = doc.parsed;
 
       // The 악보 previews start now, while the library and settings lookups
@@ -1939,6 +2096,16 @@ export default function LyricsGenerator({
         if (preferred) {
           // Split as it was saved: one saved slide per part, never re-chunked.
           song.linesPerSlide = Math.max(linesPerSlide, ...preferred.sections.map((section) => section.lines.length));
+        }
+        // 찬양집회: saved only slide by slide (1, 2, 3…), the song has its
+        // words but not its parts. With its 악보 in the conti it is read like
+        // a new song — the 악보's parts and 진행, then the web's words part by
+        // part — and the saved slides stand in on the card until then.
+        if (service === 'praise' && hit && entry.pageIndex != null && hasSlideNumberParts(hit.sections)) {
+          standInRef.current.set(song.id, {
+            entry: hit,
+            contiOrder: entry.order && entry.order.length > 0 ? [...entry.order] : undefined,
+          });
         }
         song.title = entry.title;
         song.key = entry.key ?? song.key;
@@ -2115,6 +2282,8 @@ export default function LyricsGenerator({
   function updateSong(next: Song) {
     setEdited(true);
     userEditedRef.current.add(next.id);
+    // Edited by hand, the card is the user's: no reading replaces it.
+    standInRef.current.delete(next.id);
     setSongs((list) => list.map((s) => (s.id === next.id ? next : s)));
   }
 
@@ -2187,7 +2356,15 @@ export default function LyricsGenerator({
     const fromLibrary = (title: string, pageIndex: number | undefined, base?: Song): Song | null => {
       const hit = findLibrarySong(lib, { title });
       if (!hit) return null;
-      const song = songFromLibrary(hit, pageIndex, base?.orderFromConti ? base.order : undefined, linesPerSlide);
+      const contiOrder = base?.orderFromConti ? base.order : undefined;
+      // 찬양집회: saved only slide by slide, it stands in until its 악보
+      // gives it parts, as on upload.
+      const standIn = service === 'praise' && pageIndex != null && hasSlideNumberParts(hit.sections);
+      const song = songFromLibrary(hit, pageIndex, standIn ? undefined : contiOrder, linesPerSlide);
+      if (standIn) {
+        const id = base?.id ?? song.id;
+        standInRef.current.set(id, { entry: hit, contiOrder: contiOrder ?? standInRef.current.get(id)?.contiOrder });
+      }
       return base ? { ...song, id: base.id, description: base.description, postSermon: base.postSermon } : song;
     };
     const held = new Set(pairs.map((pair) => pair.item?.pageIndex).filter((page): page is number => page != null));
