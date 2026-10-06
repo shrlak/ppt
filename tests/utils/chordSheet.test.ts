@@ -5,6 +5,7 @@ import {
   isChordRow,
   joinShortKoreanLines,
   joinSplitWords,
+  isChordSheetConti,
   looksLikeChordSheetText,
   parseChordSheet,
   slidesOfPart,
@@ -220,6 +221,25 @@ describe('parseChordSheet', () => {
     expect(parseChordSheet([page([piece('2026.10.03 찬양 콘티', 26, 750), piece('1 주님의 사랑 E', 26, 700)])])).toBeNull();
     expect(looksLikeChordSheetText('1. 주님의 사랑 (E): 설명')).toBe(false);
     expect(looksLikeChordSheetText('Goodness Of God\nKey - Ab | Tempo - 63 | Time - 4/4\nCCLI Song # 7117726')).toBe(true);
+  });
+});
+
+describe('isChordSheetConti', () => {
+  const sheetPage = 'Praise\nKey - A | Tempo - 127 | Time - 4/4\nINTRO\nPraise the Lord\nCCLI Song # 7203424';
+
+  it('reads a PDF of SongSelect sheets as a chord sheet', () => {
+    expect(isChordSheetConti([sheetPage, 'VERSE 2\nI’ll praise when I feel it', sheetPage], [1, 2, 3])).toBe(true);
+  });
+
+  it('reads a conti with scanned 악보 among the sheets as an ordinary conti', () => {
+    // The 2026 joint praise night: a typed cover, scanned scores with no
+    // text at all, and two SongSelect sheets among them.
+    const pages = ['Songlist (12):', '', '', sheetPage, 'BRIDGE 1A\nI’ll praise', '', sheetPage, ''];
+    expect(isChordSheetConti(pages, [2, 3, 4, 5, 6, 7, 8])).toBe(false);
+  });
+
+  it('is never a chord sheet without one', () => {
+    expect(isChordSheetConti(['1. 주님의 사랑 (E): 설명', '악보'], [2])).toBe(false);
   });
 });
 

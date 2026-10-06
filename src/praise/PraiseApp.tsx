@@ -19,7 +19,7 @@ import AdditionalFilesSection from '../components/AdditionalFilesSection';
 import PptLibraryPanel from '../components/PptLibraryPanel';
 import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
-import type { LibraryEntry, Song } from '../lib/utils/types';
+import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
 import type { ChordSheetSong, SheetSlide } from '../lib/utils/chordSheet';
 import { normalizeTitle } from '../lib/storage/library';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
@@ -191,6 +191,9 @@ export default function PraiseApp() {
   // The songs of the chord sheet this night was read from, both languages:
   // English goes back under the Korean from here however a song is re-split.
   const [sheetLibrary, setSheetLibrary] = useState<EnglishSongEntry[]>([]);
+  // The English titles the conti's cover printed beside the Korean ones
+  // ("God is the Strength of my Heart 하늘 위에 주님밖에"), by Korean title.
+  const [contiEnglishTitles, setContiEnglishTitles] = useState<Record<string, string>>({});
   // When each song's two languages were last written to the 영어 가사 library.
   const [englishSavedAt, setEnglishSavedAt] = useState<Record<string, string>>({});
   const [libraryLoaded, setLibraryLoaded] = useState(false);
@@ -253,6 +256,24 @@ export default function PraiseApp() {
       cancelled = true;
     };
   }, []);
+
+  // The cover's own English title goes under the Korean one first — only
+  // where the title is still empty, never over anything typed.
+  useEffect(() => {
+    if (songs.length === 0 || Object.keys(contiEnglishTitles).length === 0) return;
+    setExtras((previous) => {
+      let changed = false;
+      const next = { ...previous };
+      for (const song of songs) {
+        const title = contiEnglishTitles[normalizeTitle(song.title)];
+        const current = extrasFor(previous, song.id);
+        if (!title || current.english.title.trim()) continue;
+        next[song.id] = { ...current, english: { ...current.english, title } };
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [songs, contiEnglishTitles]);
 
   // English the library already knows goes in by itself — only into empty
   // slides, never over anything typed, pasted or asked of the AI. This year's
@@ -408,6 +429,7 @@ export default function PraiseApp() {
         entries.push(entryFromSheet(song.title, englishTitle, slides));
       }
       setSheetLibrary(entries);
+      setContiEnglishTitles({});
       setExtras(english);
       // A new conti is a new list of songs: no 기도 keeps its old song. One
       // with something typed into it waits for a song to be checked again.
@@ -616,6 +638,7 @@ export default function PraiseApp() {
     setContiFile(deck.contiPdf);
     setSongs(restored.songs);
     setRestore((previous) => ({ version: previous.version + 1, songs: restored.songs, conti: null }));
+    setContiEnglishTitles({});
     setOverview(null);
     autoSaveTargetRef.current = deck.id;
     savedFingerprintRef.current = null;
@@ -745,6 +768,13 @@ export default function PraiseApp() {
     setSongs(next);
     setOverview(null);
   }, []);
+  const handleContiInfo = useCallback((info: ContiInfo) => {
+    setContiEnglishTitles(
+      Object.fromEntries(
+        info.songs.flatMap((entry) => (entry.englishTitle ? [[normalizeTitle(entry.title), entry.englishTitle]] : [])),
+      ),
+    );
+  }, []);
   const handleDateDetected = useCallback((detected: string | undefined) => {
     const iso = isoDateFromConti(detected);
     if (iso) setDate((current) => current || iso);
@@ -860,6 +890,7 @@ export default function PraiseApp() {
     setFileNameOverride(null);
     setContiFile(null);
     setSheetLibrary([]);
+    setContiEnglishTitles({});
     setWebOutcome({});
     setOverview(null);
     setSongs([]);
@@ -946,6 +977,7 @@ export default function PraiseApp() {
               service="praise"
               onSongsChange={handleSongsChange}
               onDateDetected={handleDateDetected}
+              onContiInfoDetected={handleContiInfo}
               onContiFileLoaded={setContiFile}
               restoreVersion={restore.version}
               restoreSongs={restore.songs}

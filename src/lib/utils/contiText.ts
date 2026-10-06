@@ -90,6 +90,119 @@ const TABLE_HEADER_RE =
   /^(?:순서|번호|No\.?)[\s|｜]*(?:찬양|곡|곡명|제목)[\s|｜]*(?:키|key)\s*$/i;
 
 /**
+ * `Songlist (12): Thank you!` — a cover that lists its songs as plain
+ * numbered lines under an English heading (a 찬양집회 conti), with the count
+ * in parentheses when it writes one.
+ */
+const SONG_LIST_HEADING_RE =
+  /^(?:song\s*list|set\s*list|songs|찬양\s*(?:리스트|목록)|곡\s*목록)\s*(?:[(（]\s*(\d{1,2})\s*(?:곡|songs?)?\s*[)）])?\s*(?:[:：]|$)/i;
+/** `3. Praise (English) AK` — one numbered line of that list. */
+const SONG_LIST_ROW_RE = /^(\d{1,2})\s*[.)]\s*(\S.*)$/;
+/** `(English/Korean)`, `(Korean)` — which language a listed song is sung in. */
+const LANGUAGE_WORD = String.raw`(?:english|korean|eng|kor|영어|한국어|한글|영|한)`;
+const LANGUAGE_TAG_RE = new RegExp(
+  String.raw`\s*[(（]\s*${LANGUAGE_WORD}(?:\s*[/&,+·]\s*${LANGUAGE_WORD})*\s*[)）]`,
+  'gi',
+);
+/** `DK`, `EC&DK` — the initials of who leads the song, written last. */
+const LEADER_INITIALS_RE = /\s+[A-Z]{2,3}(?:\s*[&/,]\s*[A-Z]{2,3})*\s*$/;
+/** `Above All + I Will Worship You` — two songs sung as one medley. */
+const MEDLEY_SPLIT_RE = /\s+[+＋]\s+/;
+/** A separator written between a title's two languages. */
+const TITLE_SEPARATOR = String.raw`\s*[/|｜:·\-–—]?\s*`;
+const ENGLISH_THEN_KOREAN_RE = new RegExp(
+  String.raw`^([A-Za-z][^가-힣]*?)${TITLE_SEPARATOR}[(（]?\s*([가-힣][^A-Za-z]*?)\s*[)）]?$`,
+);
+const KOREAN_THEN_ENGLISH_RE = new RegExp(
+  String.raw`^([^A-Za-z]*[가-힣][^A-Za-z]*?)${TITLE_SEPARATOR}[(（]?\s*([A-Za-z][^가-힣]*?)\s*[)）]?$`,
+);
+
+/**
+ * A title written in both languages, as the Korean title and the English.
+ * `God is the Strength of my Heart 하늘 위에 주님밖에` and `나의 슬픔은
+ * (Mourning into Dancing)` both name one song twice; a title in one language
+ * is returned as it is.
+ */
+export function splitBilingualTitle(text: string): { title: string; englishTitle?: string } {
+  const title = text.trim();
+  const englishFirst = ENGLISH_THEN_KOREAN_RE.exec(title);
+  const koreanFirst = englishFirst ? null : KOREAN_THEN_ENGLISH_RE.exec(title);
+  const [korean, english] = englishFirst
+    ? [englishFirst[2], englishFirst[1]]
+    : koreanFirst
+      ? [koreanFirst[1], koreanFirst[2]]
+      : [title, ''];
+  const ko = korean.trim();
+  const en = english.trim();
+  return en && ko ? { title: ko, englishTitle: en } : { title };
+}
+
+/**
+ * The songs one numbered list line names: `Above All + I Will Worship You
+ * (English/Korean) EC` is two songs, each with its own 악보. Which language
+ * it is sung in and who leads it are not part of any title.
+ */
+function songListEntries(text: string): ContiSongEntry[] {
+  // The leader is written after the language: `(English/Korean) EC&DK` —
+  // unless the medley's next song follows the tag instead.
+  const tags = [...text.matchAll(LANGUAGE_TAG_RE)];
+  const lastTag = tags[tags.length - 1];
+  let body = text;
+  if (lastTag) {
+    const end = (lastTag.index ?? 0) + lastTag[0].length;
+    if (!MEDLEY_SPLIT_RE.test(text.slice(end))) body = text.slice(0, end);
+  }
+  body = body.replace(LANGUAGE_TAG_RE, ' ');
+  // Initials left at the end are the leader's too — unless the title itself
+  // is written in capitals, where they cannot be told apart.
+  const initials = LEADER_INITIALS_RE.exec(body);
+  if (initials && /[a-z가-힣]/.test(body.slice(0, initials.index))) {
+    body = body.slice(0, initials.index);
+  }
+  return body.split(MEDLEY_SPLIT_RE).flatMap((part) => {
+    const readable = readableTitle(part);
+    return readable ? [splitBilingualTitle(readable)] : [];
+  });
+}
+
+/**
+ * Read a cover that lists its songs as numbered lines under a `Songlist`
+ * heading — the 찬양집회 conti's form:
+ *
+ *   Songlist (12): Thank you Alex! :)
+ *   1. God is the Strength of my Heart 하늘 위에 주님밖에 (English/Korean) DK
+ *   Prayer Topic 1: …
+ *   2. …
+ *
+ * Only the next number in order is a song, so the 기도 topics and notes
+ * written between them are passed over; the list ends at the count the
+ * heading gives, when it gives one.
+ */
+function parseSongList(lines: string[]): ContiSongEntry[] {
+  const songs: ContiSongEntry[] = [];
+  let inList = false;
+  let count: number | undefined;
+  let lastOrder = 0;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const heading = SONG_LIST_HEADING_RE.exec(line);
+    if (heading && !inList) {
+      inList = true;
+      count = heading[1] ? Number(heading[1]) : undefined;
+      continue;
+    }
+    if (!inList) continue;
+    const row = SONG_LIST_ROW_RE.exec(line);
+    if (!row || Number(row[1]) !== lastOrder + 1) continue;
+    lastOrder += 1;
+    songs.push(...songListEntries(row[2]));
+    if (count !== undefined && lastOrder >= count) break;
+  }
+  return songs;
+}
+
+/**
  * The cover's title for a song the table could not name. It starts with
  * `새 찬양` like every other unnamed card, so the title read off the song's
  * 악보 replaces it (see isPlaceholderTitle), and the number keeps it in the
@@ -529,6 +642,8 @@ export function parseCoverText(text: string): ContiInfo | null {
   // Covers that lay the conti out as a 순서/찬양/키 table carry no
   // "제목 (Key): 설명" lines at all — read the table instead.
   if (songs.length === 0) songs.push(...parseSongTable(lines));
+  // Neither: a `Songlist (12):` heading over plain numbered lines.
+  if (songs.length === 0) songs.push(...parseSongList(lines));
 
   // A 진행 순서 written with the song ("I-V1-C-V2-C-B-C") is how the conti
   // says which parts to sing; it goes with the song to the lyric editor.

@@ -450,6 +450,12 @@ export default function LyricsGenerator({
    * An edit by hand ends the stand-in: the card is then the user's.
    */
   const standInRef = useRef<Map<string, StandIn>>(new Map());
+  /**
+   * The English title the conti printed beside each song's Korean one, by
+   * song id: a 악보 that prints only the English title is still found as
+   * that song's page.
+   */
+  const contiEnglishTitlesRef = useRef<Map<string, string>>(new Map());
   // What each song last wrote to 찬양 라이브러리, so an unchanged song is
   // never written twice.
   const librarySavedRef = useRef<Map<string, string>>(new Map());
@@ -1226,6 +1232,7 @@ export default function LyricsGenerator({
         const slots = alignPagesToConti(
           active.map((song) => song.title),
           aliasedTitles.map((identity) => identity.title),
+          active.map((song) => contiEnglishTitlesRef.current.get(song.id)),
         );
         if (slots.some((slot, index) => slot !== index)) {
           const pages = [...active.map((song) => song.pageIndex), ...spares];
@@ -1653,6 +1660,7 @@ export default function LyricsGenerator({
       librarySavedRef.current.clear();
       userEditedRef.current.clear();
       standInRef.current.clear();
+      contiEnglishTitlesRef.current.clear();
       for (const song of restoreSongs) librarySavedRef.current.set(song.id, libraryContentKey(song));
       setPageImages({});
       setRecog({});
@@ -1970,6 +1978,7 @@ export default function LyricsGenerator({
       docRef.current = doc;
       sparePagesRef.current = [];
       standInRef.current.clear();
+      contiEnglishTitlesRef.current.clear();
       const parsed = doc.parsed;
 
       // The 악보 previews start now, while the library and settings lookups
@@ -2138,6 +2147,7 @@ export default function LyricsGenerator({
           });
         }
         song.title = entry.title;
+        if (entry.englishTitle) contiEnglishTitlesRef.current.set(song.id, entry.englishTitle);
         song.key = entry.key ?? song.key;
         song.description = entry.description;
         song.pageIndex = entry.pageIndex;

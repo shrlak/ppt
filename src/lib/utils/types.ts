@@ -96,6 +96,11 @@ export interface Song {
 /** A song entry parsed off the conti cover page (title + key + description). */
 export interface ContiSongEntry {
   title: string;
+  /**
+   * The English title the cover prints beside the Korean one ("God is the
+   * Strength of my Heart 하늘 위에 주님밖에"); `title` is then the Korean.
+   */
+  englishTitle?: string;
   key?: string;
   description?: string;
   /** 진행 순서 written on the cover for this song, e.g. ["I","V1","C","B","C"]. */
