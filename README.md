@@ -198,6 +198,19 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
     라이브러리에서 불러옵니다. 라이브러리에 없는 찬양만 악보에서 가사를 읽습니다.
   - 같은 제목이 여럿이면 **사용자가 확인한 저장본(검증됨/수정본)**을 먼저 쓰고, 없으면 초안을
     씁니다. 아티스트를 아는 경우 아티스트까지 같아야 합니다. 제목이 비슷하기만 한 곡은 쓰지 않습니다.
+- **파트로 나뉘지 않고 저장된 곡은 가사를 보고 파트별로 정리합니다** — 라이브러리에는 파트 없이 저장된
+  곡이 있습니다: 수련회·찬양집회 PPT에서 **띄운 슬라이드 그대로**(파트 이름이 1, 2, 3…) 저장된 곡과, 예전에
+  웹 가사가 **한 덩어리로**(파트 하나에 곡 전체, 9줄 이상) 자동 저장된 초안입니다. 이런 곡은 그대로 불러오지
+  않습니다 (사람이 확인해 한 파트로 저장한 곡은 그대로 둡니다).
+  - **콘티에 그 곡의 악보가 있으면** 새 곡처럼 악보를 읽어 **파트와 진행 순서**를 정하고 웹 가사를 파트별로
+    나눠 넣습니다. 저장된 가사는 읽는 동안 카드에 먼저 보이고, 악보에서 아무것도 얻지 못하면 그대로 남습니다.
+    **사람이 확인한 저장 가사**(검증됨·수정본, 작년 찬양집회 PPT의 가사)는 웹 글자보다 우선해서, 악보·웹이 정한
+    파트마다 저장된 그 줄을 넣습니다(`'곡 제목'의 저장된 가사를 악보·웹의 파트 N개에 나눠 넣었습니다`). 웹에
+    확실한 가사가 없으면 초안이든 아니든 저장된 가사를 악보의 파트마다 나눠 넣습니다.
+  - **악보가 없거나 읽기 전에도** 가사 자체를 보고 나눕니다: `후렴`·`[Bridge]` 같은 파트 머리말이 있으면 그대로,
+    없으면 **되풀이되는 줄 묶음**을 후렴(C)으로, 매번 그 앞에 붙는 줄을 프리코러스(PC)로, 사이의 부분을 절(V, V2…)
+    또는 브릿지(B)로 정리하고, 후렴은 한 번만 두고 진행 순서(`I-V-C-V2-C`)가 되풀이합니다. 되풀이도 머리말도
+    없으면 짐작해서 나누지 않고 저장된 그대로 둡니다.
 - **파트별 가사 관리** — V/PC/C/B/I 등 파트 이름을 자유롭게 정하고 순서를 지정합니다. 실제
   예배에서는 절·후렴이 여러 번 반복되므로, 슬라이드는 콘티 순서를 그대로 펼치지 않고 **각 파트를
   최소 1장씩만** 생성합니다 (반복은 진행자가 화면에서 되돌아가며 사용). 슬라이드 순서는 콘티에
@@ -520,11 +533,11 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
 - **슬라이드로만 저장된 곡도 파트로 다시 나눕니다** — 작년 찬양집회 PPT나 이전 찬양집회에서 저장된 곡은
   파트가 아니라 **띄웠던 슬라이드 그대로**(1, 2, 3…) 저장되어 있어서, 그대로 불러오면 콘티의 진행 순서를
   쓸 수 없었습니다. 이제 이런 곡도 콘티에 악보가 있으면 새 곡처럼 **악보를 읽어 파트와 진행 순서를 정하고,
-  웹 가사를 파트별로 나눠 넣습니다.** 웹에 확실한 가사가 없으면 **저장된 가사(작년에 띄운 그대로의 글자)를
-  악보의 파트마다 나눠** 넣고(`'곡 제목'의 저장된 가사를 악보의 파트 N개에 나눠 넣었습니다`), 악보에서도 맞는
-  파트를 찾지 못하면 저장된 슬라이드를 그대로 둡니다. 악보를 읽는 동안에는 저장된 슬라이드가 카드에 먼저
-  보이고, 그 사이에 카드를 직접 고치면 고친 그대로 둡니다. 영어 가사는 한글 글자로 맞춰 넣으므로 파트로
-  다시 나뉘어도 작년 영어가 제자리에 따라갑니다.
+  파트별로 나눠 넣습니다** (주일예배의 [파트로 나뉘지 않고 저장된 곡](#-찬양)과 같은 규칙). 작년 PPT의 가사는
+  사람이 띄운 가사라 웹 글자보다 우선해서, 악보·웹이 정한 파트마다 **작년에 띄운 그대로의 글자**가 들어갑니다.
+  악보에서도 맞는 파트를 찾지 못하면 저장된 슬라이드를 그대로 둡니다. 악보를 읽는 동안에는 저장된 슬라이드가
+  카드에 먼저 보이고, 그 사이에 카드를 직접 고치면 고친 그대로 둡니다. 영어 가사는 한글 글자로 맞춰 넣으므로
+  파트로 다시 나뉘어도 작년 영어가 제자리에 따라갑니다.
 - 웹 후보가 여럿이라 고르게 된 곡은, 고른 웹 가사도 **콘티에 적힌 진행 순서**를 그대로 따릅니다 (주일예배도
   같습니다). 고르지 않으면(사용하지 않음) 악보가 가사를 못 읽은 곡은 카드가 그대로 남습니다.
 
@@ -1004,11 +1017,13 @@ that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a co
 exactly like the Sunday wizard, then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
-and matched by text, so different line breaks still line up. A song that store (or a 찬양 라이브러리 copy
-saved from it) holds only slide by slide — parts `1, 2, 3…` — is read off its 악보 like a new song when the
-conti has its page: the score's parts and 진행, then the web's words part by part, or, with no confirmed web
-page, its own saved words laid over the score's parts (`src/lib/lyrics/savedSlides.ts`); the saved slides
-stand in on the card meanwhile and stay if the score gives nothing better. Then, for a song neither the conti nor
+and matched by text, so different line breaks still line up. A saved song with no parts — slide by slide
+(`1, 2, 3…`, as 찬양집회 and 수련회 decks are saved) or a draft holding the whole song in one block — is read
+off its 악보 like a new song on the Sunday and praise pages when the conti has its page: the score's parts and
+진행, then the web's words part by part, except that words somebody confirmed (and last year's deck) are kept
+and laid over those parts (`src/lib/lyrics/savedLyrics.ts`); the saved lyrics stand in on the card meanwhile and
+stay if the score gives nothing better. Without a score it is organized by what its lyrics show — headings, or
+the chorus it prints again — and left as saved when they show neither. Then, for a song neither the conti nor
 that store gives English for, from the web with no button pressed: the Worker's `/praise/english`
 searches `"<제목> 영어 가사"` (Google through SerpApi when keyed, 다음·네이버 blogs, DuckDuckGo) — and, where
 `BUGS_SCRAPING_ALLOWED`, Bugs's track search for the same Korean title, whose English-named track

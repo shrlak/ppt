@@ -81,7 +81,7 @@ import { correctConsensus } from '../lib/learning/correctionModel';
 import type { ParsedScore } from '../lib/ai/scoreParser';
 import { fetchWebLyricsForTitles, hasWebLyricsLookup, lyricSample } from '../lib/lyrics/webLyrics';
 import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../lib/lyrics/mergeWebLyrics';
-import { hasSlideNumberParts, savedWordsInParts } from '../lib/lyrics/savedSlides';
+import { hasSlideNumberParts, lacksParts, organizeSavedEntry, savedWordsInParts } from '../lib/lyrics/savedLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { findSection, sortSectionsByOrder } from '../lib/utils/slidePlanner';
 import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
@@ -237,15 +237,18 @@ function recognitionBaseline(score: ParsedScore): NonNullable<Song['provenance']
 }
 
 /**
- * A 찬양집회 song whose saved lyrics are only the slides a deck projected
- * (parts 1, 2, 3…): its words, but not its parts. With its 악보 in the conti
- * it is read like a new song, and the saved slides stand in until then.
+ * A song whose saved lyrics are not organized by part — saved slide by slide
+ * (1, 2, 3…) or in one block (see lacksParts): its words, but not its parts.
+ * With its 악보 in the conti it is read like a new song, and the saved lyrics
+ * stand in until then.
  */
 interface StandIn {
-  /** The saved song: its words, slide by slide. */
+  /** The saved song: its words, as saved. */
   entry: LibraryEntry;
   /** The 진행 the conti wrote for the song, which its parts will follow. */
   contiOrder?: string[];
+  /** Somebody confirmed the saved words: they are kept over a web page's. */
+  trusted: boolean;
 }
 
 /** Vision engines may identify a non-score page explicitly or by returning
@@ -276,7 +279,8 @@ function songFromLibrary(
   contiOrder?: string[],
   linesPerSlide = 4,
 ): Song {
-  const lyrics = libraryLyrics(entry, contiOrder);
+  // Saved without parts, it loads organized by the parts its lyrics show.
+  const lyrics = libraryLyrics(organizeSavedEntry(entry), contiOrder);
   return {
     id: crypto.randomUUID(),
     title: entry.title,
@@ -439,9 +443,9 @@ export default function LyricsGenerator({
   // the user's trust level instead of the machine's.
   const userEditedRef = useRef<Set<string>>(new Set());
   /**
-   * 찬양집회 songs whose saved lyrics are only the slides a deck projected
-   * (parts 1, 2, 3…). The 악보 is read for their parts and 진행 like a new
-   * song's, then the web's words go in part by part; the saved slides stay
+   * Songs whose saved lyrics are not organized by part (saved slide by slide
+   * or in one block). The 악보 is read for their parts and 진행 like a new
+   * song's, then the web's words go in part by part; the saved lyrics stay
    * on the card until then, and stay for good if nothing better comes back.
    * An edit by hand ends the stand-in: the card is then the user's.
    */
@@ -730,7 +734,7 @@ export default function LyricsGenerator({
               key: s.key ?? entry.key,
               // The saved order is last time's arrangement; one the conti
               // wrote is this week's, and the saved parts follow it.
-              ...libraryLyrics(entry, s.orderFromConti ? s.order : standInOrder),
+              ...libraryLyrics(organizeSavedEntry(entry), s.orderFromConti ? s.order : standInOrder),
               ...(standIn ? { linesPerSlide, orderFromConti: s.orderFromConti || !!standInOrder || undefined } : {}),
             }
           : s,
@@ -832,13 +836,17 @@ export default function LyricsGenerator({
         const held = standInRef.current.get(id);
         standInRef.current.delete(id);
         if (!held) return;
+        const saved = organizeSavedEntry(held.entry);
         setSongs((current) =>
           current.map((song) =>
             song.id === id && !isCancelled(id) && !songHasLyrics(song)
               ? {
                   ...song,
-                  ...libraryLyrics(held.entry),
-                  linesPerSlide: Math.max(song.linesPerSlide ?? 1, ...held.entry.sections.map((section) => section.lines.length)),
+                  ...libraryLyrics(saved),
+                  // Slides kept as saved come back split as saved.
+                  ...(hasSlideNumberParts(saved.sections)
+                    ? { linesPerSlide: Math.max(song.linesPerSlide ?? 1, ...saved.sections.map((section) => section.lines.length)) }
+                    : {}),
                 }
               : song,
           ),
@@ -847,15 +855,19 @@ export default function LyricsGenerator({
       };
 
       /**
-       * Take a song the library holds by the title read off its 악보. A
-       * 찬양집회 song saved only slide by slide is not taken: the page goes on
-       * to be read for its parts, and the saved slides wait in case it gives
-       * none. Returns true when the song is settled.
+       * Take a song the library holds by the title read off its 악보. A song
+       * saved without parts is not taken: the page goes on to be read for
+       * its parts, and the saved lyrics wait in case it gives none. Returns
+       * true when the song is settled.
        */
       const takeLibraryMatch = (song: Song, entry: LibraryEntry, message?: string): boolean => {
-        if (service === 'praise' && hasSlideNumberParts(entry.sections)) {
+        if (lacksParts(entry)) {
           if (!standInRef.current.has(song.id)) {
-            standInRef.current.set(song.id, { entry, contiOrder: song.orderFromConti ? [...song.order] : undefined });
+            standInRef.current.set(song.id, {
+              entry,
+              contiOrder: song.orderFromConti ? [...song.order] : undefined,
+              trusted: isGroundTruth(entry),
+            });
           }
           return false;
         }
@@ -1075,6 +1087,20 @@ export default function LyricsGenerator({
             if (merged.score.sections.length === 0) {
               failures.set(id, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
               return;
+            }
+            // Saved words somebody confirmed stay: the 악보 and the page give
+            // the parts, and each part takes its own saved lines.
+            const held = standInRef.current.get(id);
+            if (held?.trusted) {
+              const laid = savedWordsInParts(merged.score.sections, held.entry.sections);
+              if (laid.matched > 0) {
+                applyRecognizedScore(id, { ...merged.score, sections: laid.sections }, engine, {
+                  source: 'library',
+                  webSourceUrl: auto.sourceUrl,
+                });
+                showToast(`'${held.entry.title}'의 저장된 가사를 악보·웹의 파트 ${laid.matched}개에 나눠 넣었습니다.`);
+                return;
+              }
             }
             applyRecognizedScore(id, merged.score, engine, {
               source: 'web',
@@ -1559,7 +1585,7 @@ export default function LyricsGenerator({
         }
       }
     },
-    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, service, linesPerSlide],
+    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, linesPerSlide],
   );
 
   const handleRecognizeClick = useCallback(
@@ -2088,23 +2114,27 @@ export default function LyricsGenerator({
         // unless the conti's tokens cannot name the saved parts at all (a song
         // saved slide by slide from a 찬양집회 deck has parts 1, 2, 3…), in
         // which case taking the conti's order would leave it with no slides.
+        // A song saved without parts is measured by the parts its lyrics
+        // show, which is how it loads (songFromLibrary).
+        const loaded = hit ? organizeSavedEntry(hit) : undefined;
         const orderFits =
-          !hit || (entry.order ?? []).some((token) => token !== 'I' && findSection(hit.sections, token));
+          !loaded || (entry.order ?? []).some((token) => token !== 'I' && findSection(loaded.sections, token));
         const song = hit
           ? songFromLibrary(hit, entry.pageIndex, orderFits ? entry.order : undefined, linesPerSlide)
           : blankSong(entry.title, linesPerSlide);
-        if (preferred) {
+        if (preferred && loaded && hasSlideNumberParts(loaded.sections)) {
           // Split as it was saved: one saved slide per part, never re-chunked.
           song.linesPerSlide = Math.max(linesPerSlide, ...preferred.sections.map((section) => section.lines.length));
         }
-        // 찬양집회: saved only slide by slide (1, 2, 3…), the song has its
-        // words but not its parts. With its 악보 in the conti it is read like
-        // a new song — the 악보's parts and 진행, then the web's words part by
-        // part — and the saved slides stand in on the card until then.
-        if (service === 'praise' && hit && entry.pageIndex != null && hasSlideNumberParts(hit.sections)) {
+        // Saved without parts (slide by slide, or in one block), the song has
+        // its words but not its parts. With its 악보 in the conti it is read
+        // like a new song — the 악보's parts and 진행, then the web's words
+        // part by part — and the saved lyrics stand in on the card until then.
+        if (hit && entry.pageIndex != null && lacksParts(hit)) {
           standInRef.current.set(song.id, {
             entry: hit,
             contiOrder: entry.order && entry.order.length > 0 ? [...entry.order] : undefined,
+            trusted: isGroundTruth(hit),
           });
         }
         song.title = entry.title;
@@ -2357,13 +2387,17 @@ export default function LyricsGenerator({
       const hit = findLibrarySong(lib, { title });
       if (!hit) return null;
       const contiOrder = base?.orderFromConti ? base.order : undefined;
-      // 찬양집회: saved only slide by slide, it stands in until its 악보
-      // gives it parts, as on upload.
-      const standIn = service === 'praise' && pageIndex != null && hasSlideNumberParts(hit.sections);
+      // Saved without parts, it stands in until its 악보 gives it parts, as
+      // on upload.
+      const standIn = pageIndex != null && lacksParts(hit);
       const song = songFromLibrary(hit, pageIndex, standIn ? undefined : contiOrder, linesPerSlide);
       if (standIn) {
         const id = base?.id ?? song.id;
-        standInRef.current.set(id, { entry: hit, contiOrder: contiOrder ?? standInRef.current.get(id)?.contiOrder });
+        standInRef.current.set(id, {
+          entry: hit,
+          contiOrder: contiOrder ?? standInRef.current.get(id)?.contiOrder,
+          trusted: isGroundTruth(hit),
+        });
       }
       return base ? { ...song, id: base.id, description: base.description, postSermon: base.postSermon } : song;
     };
