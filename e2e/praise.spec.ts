@@ -472,3 +472,163 @@ test.describe('찬양집회 generator', () => {
   });
 });
 
+
+// --- Songs saved slide by slide, read again for their parts -------------------
+//
+// A song only a past 찬양집회 deck knows is saved slide by slide: parts 1, 2,
+// 3… On a conti with its 악보 it is read like a new song — the 악보's parts and
+// 진행, then the web's words part by part — and its saved slides stand in
+// until then. All lyrics here are invented.
+
+const PROXY = '**/ppt/__proxy';
+
+/** Last year's slides for the conti's first song, each with its English. */
+const SAVED_SLIDES = [
+  {
+    ko: ['사랑의 주님 나를 부르시네', '그 음성 따라 나아가리'],
+    en: ['Loving Lord, You call my name', 'I will follow where You lead'],
+  },
+  {
+    ko: ['주님의 사랑 끝이 없어라', '영원히 나 노래하리'],
+    en: ['Your love, O Lord, will never end', 'Forever I will sing'],
+  },
+  {
+    ko: ['주님의 사랑 넓고 깊어라', '날마다 나 찬양하리'],
+    en: ['Your love, O Lord, is wide and deep', 'Each day I will praise'],
+  },
+];
+
+/** What the models read off the 악보: its parts and 진행, one syllable misread. */
+const SCORE_READING = {
+  pageType: 'score',
+  sermonTitle: '',
+  scripture: '',
+  title: '주님의 사랑',
+  artist: '',
+  key: 'G',
+  order: ['I', 'V', 'C', 'V'],
+  lyricRowCount: 1,
+  sections: [
+    { label: 'V', lines: ['사랑의 주님 나를 부르시녜', '그 음성 따라 나아가리'] },
+    { label: 'C', lines: ['주님의 사랑 끝이 없어라', '영원히 나 노래하리', '주님의 사랑 넓고 깊어라', '날마다 나 찬양하리'] },
+  ],
+};
+
+async function stubSavedSlideSong(page: Page, webLines: string[] | null): Promise<void> {
+  // The 찬양 라이브러리 lacks the song; only last year's deck has it.
+  await page.route('**/ppt/library.json', (route) => route.fulfill({ json: [] }));
+  await page.route('**/ppt/praise-english.json', (route) =>
+    route.fulfill({ json: [{ title: '주님의 사랑', englishTitle: 'Love of the Lord', slides: SAVED_SLIDES }] }),
+  );
+  await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+  await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+  const answer = (images: number) =>
+    JSON.stringify({ results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({ imageIndex, ...SCORE_READING })) });
+  await page.route(`${PROXY}/gemini/**`, async (route) => {
+    const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData);
+    await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images.length) }] } }] } });
+  });
+  await page.route(`${PROXY}/openrouter`, async (route) => {
+    const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+    const images = (payload.messages?.[0]?.content ?? []).filter((part) => (part as { type?: string }).type === 'image_url');
+    await route.fulfill({ json: { choices: [{ message: { content: answer(images.length) } }] } });
+  });
+  await page.route(`${PROXY}/lyrics*`, (route) =>
+    route.fulfill({
+      json: {
+        candidates: webLines
+          ? [
+              {
+                id: 'ccm:ccm.co.kr/song/7',
+                title: '주님의 사랑',
+                artist: '어느 사역팀',
+                lines: webLines,
+                url: 'https://ccm.co.kr/song/7',
+                host: 'ccm.co.kr',
+                source: 'ccm',
+                sourceTrust: 0.9,
+                score: 0.95,
+                titleScore: 1,
+                artistScore: 0,
+                lyricsScore: 0.9,
+                decision: 'auto',
+              },
+            ]
+          : [],
+        links: [],
+      },
+    }),
+  );
+  await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+}
+
+async function sectionsOf(card: Locator): Promise<{ labels: string[]; texts: string[] }> {
+  const labels = await card
+    .locator('.section-label')
+    .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+  const texts = await card
+    .getByTestId('section-textarea')
+    .evaluateAll((boxes) => boxes.map((box) => (box as HTMLTextAreaElement).value));
+  return { labels, texts };
+}
+
+async function recognizeFirstSong(page: Page): Promise<Locator> {
+  const card = page.getByTestId('song-card').first();
+  // Automatic recognition is skipped under browser automation: press the button a user could.
+  await card.getByTestId('recognize-btn').click();
+  await expect(card.getByTestId('recog-running')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await expect(card.getByTestId('recog-done')).toBeVisible({ timeout: PARSE_TIMEOUT });
+  return card;
+}
+
+test.describe('찬양집회 songs saved slide by slide', () => {
+  test('reads the 악보 for the parts, then puts the web lyrics in part by part', async ({ page }) => {
+    // The page prints the verse, then the chorus twice, as stanzas.
+    const verse = ['사랑의 주님 나를 부르시네', '그 음성 따라 나아가리'];
+    const chorus = ['주님의 사랑 끝이 없어라', '영원히 나 노래하리', '주님의 사랑 넓고 깊어라', '날마다 나 찬양하리'];
+    await stubSavedSlideSong(page, [...verse, '', ...chorus, '', ...chorus]);
+    await page.goto('praise.html');
+    await page.getByTestId('pdf-input').setInputFiles(SAMPLE_PDF);
+    await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+    // Until the 악보 is read, last year's slides stand in.
+    const card = page.getByTestId('song-card').first();
+    await expect(card.getByTestId('song-title-input')).toHaveValue('주님의 사랑');
+    expect((await sectionsOf(card)).labels).toEqual(['1', '2', '3']);
+
+    await recognizeFirstSong(page);
+    const { labels, texts } = await sectionsOf(card);
+    expect(labels).toEqual(['V', 'C']);
+    expect(texts).toEqual([verse.join('\n'), chorus.join('\n')]);
+    await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
+
+    // The English of last year's slides follows the Korean into its parts.
+    await page.getByTestId('praise-next-songs').click();
+    const english = page.getByTestId('praise-english-song').filter({ hasText: '주님의 사랑' });
+    await expect(english.getByTestId('praise-english-title')).toHaveValue('Love of the Lord');
+    const boxes = english.getByTestId('praise-slide-english');
+    await expect(boxes).toHaveCount(3);
+    await expect(boxes.nth(0)).toHaveValue(SAVED_SLIDES[0].en.join('\n'));
+    await expect(boxes.nth(1)).toHaveValue(SAVED_SLIDES[1].en.join('\n'));
+    await expect(boxes.nth(2)).toHaveValue(SAVED_SLIDES[2].en.join('\n'));
+  });
+
+  test('with no page on the web, lays its own saved words over the 악보’s parts', async ({ page }) => {
+    await stubSavedSlideSong(page, null);
+    await page.goto('praise.html');
+    await page.getByTestId('pdf-input').setInputFiles(SAMPLE_PDF);
+    await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
+
+    const card = await recognizeFirstSong(page);
+    const { labels, texts } = await sectionsOf(card);
+    expect(labels).toEqual(['V', 'C']);
+    // The misread syllable is gone: the words are the ones the deck projected.
+    expect(texts).toEqual([
+      SAVED_SLIDES[0].ko.join('\n'),
+      [...SAVED_SLIDES[1].ko, ...SAVED_SLIDES[2].ko].join('\n'),
+    ]);
+    await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
+    await expect(page.getByText("'주님의 사랑'의 저장된 가사를 악보의 파트 2개에 나눠 넣었습니다.")).toBeVisible();
+  });
+});
