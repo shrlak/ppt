@@ -54,6 +54,11 @@ function savedTime(at: string | undefined): string {
     : ` · ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+/** The conti pages a song's 악보 is on: "p.3", or "p.3, p.4" for a score over two. */
+function scorePagesLabel(song: Song): string {
+  return [song.pageIndex, ...(song.extraPages ?? [])].map((page) => `p.${page}`).join(', ');
+}
+
 interface Props {
   song: Song;
   index: number;
@@ -391,11 +396,11 @@ export default function SongCard({
             <button type="button" className="score-zoom" onClick={onZoom} aria-label="악보를 크게 보기">
               <img src={pageImage} alt="악보 미리보기" />
             </button>
-            <span className="score-hint">클릭하면 콘티 전체를 보며 가사를 편집할 수 있어요 (p.{song.pageIndex})</span>
+            <span className="score-hint">클릭하면 콘티 전체를 보며 가사를 편집할 수 있어요 ({scorePagesLabel(song)})</span>
             {recogBox}
           </div>
         ) : song.pageIndex != null ? (
-          <div className="score-pane score-loading">악보 미리보기 준비 중… (p.{song.pageIndex})</div>
+          <div className="score-pane score-loading">악보 미리보기 준비 중… ({scorePagesLabel(song)})</div>
         ) : null}
 
         <div className="editor-pane">

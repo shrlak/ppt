@@ -28,9 +28,10 @@ export interface PraiseSongExtras {
   /**
    * Where the English came from, so the card can say how far to trust it:
    * last year's deck / a saved song, the chord sheet the conti was uploaded
-   * as, a post found on the web, the AI, or the operator's own typing.
+   * as, the song's English 악보 in the conti, a post found on the web, the
+   * AI, or the operator's own typing.
    */
-  englishSource?: 'memory' | 'sheet' | 'web' | 'ai' | 'manual';
+  englishSource?: 'memory' | 'sheet' | 'score' | 'web' | 'ai' | 'manual';
   /** The post the web English came from, for the card to link to. */
   englishSourceUrl?: string;
 }

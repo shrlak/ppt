@@ -91,7 +91,8 @@ export function titleSimilarity(a: string | undefined, b: string | undefined): n
  *
  * A song already on a page that reads as its title stays there. The rest are
  * paired best match first; a song nothing matches (or a placeholder) keeps
- * its own page, or takes whatever pages are left, its own range first. When
+ * its own page, or takes whatever pages are left, its own range first — but
+ * not a page printing another listed song's title while any other is left. When
  * the titles say nothing, the answer is the identity and the conti's pairing
  * stands.
  *
@@ -135,16 +136,24 @@ export function alignPagesToConti(
     taken.add(slot);
   }
 
+  // A page printing a listed song's title is that song's — its second page,
+  // or the song in its other language — so a song whose own title was not
+  // found takes it only when no other page is left.
+  const anotherSongs = (slot: number) =>
+    songTitles.some((_, song) => named(song) && similarity(song, slot) >= SAME_TITLE_THRESHOLD);
+
   // Unmatched songs keep their own page when it is still free, so a pairing
   // the titles cannot improve on is left exactly as the conti made it.
   for (let song = 0; song < count; song += 1) {
-    if (slots[song] === undefined && !taken.has(song)) {
+    if (slots[song] === undefined && !taken.has(song) && !anotherSongs(song)) {
       slots[song] = song;
       taken.add(song);
     }
   }
   const free = [...Array(slotCount).keys()].filter((slot) => !taken.has(slot));
-  return slots.map((slot) => slot ?? (free.shift() as number));
+  const open = free.filter((slot) => !anotherSongs(slot));
+  const claimed = free.filter((slot) => anotherSongs(slot));
+  return slots.map((slot) => slot ?? ((open.shift() ?? claimed.shift()) as number));
 }
 
 /**

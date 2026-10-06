@@ -12,6 +12,14 @@ import {
 } from '../lib/utils/chordSheet';
 import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
 import {
+  combinePageReadings,
+  foldRepeatedTitles,
+  groupContiPages,
+  mergeReadings,
+  readingLanguage,
+  type ScoreEnglish,
+} from '../lib/utils/scorePages';
+import {
   applyAnnouncementToEntries,
   isAnnouncedConfession,
   isSameSong,
@@ -359,6 +367,13 @@ interface Props {
    * into — for the 찬양집회 page, the English printed under every Korean slide.
    */
   onChordSheetLoaded?: (songs: { song: Song; sheet: ChordSheetSong; slides: SheetSlide[] }[]) => void;
+  /**
+   * Fired with a song's English when the conti prints the song a second
+   * time in English (its own 악보 page): the 찬양집회 page puts it under the
+   * Korean in its English lyrics step. Given, the conti's English pages are
+   * read even for a song the library already filled.
+   */
+  onScoreEnglish?: (songId: string, english: ScoreEnglish) => void;
 }
 
 /** Korean lines whose word spacing can be trusted, to space a chord sheet's lyrics by. */
@@ -381,8 +396,12 @@ export default function LyricsGenerator({
   preferredSongs,
   chordSheetTitle,
   onChordSheetLoaded,
+  onScoreEnglish,
 }: Props) {
   const linesPerSlide = defaultLinesPerSlide(service);
+  // Latest English handler, for the recognition callback that must stay stable.
+  const onScoreEnglishRef = useRef(onScoreEnglish);
+  onScoreEnglishRef.current = onScoreEnglish;
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
     hasCloudLibrary() ? 'syncing' : 'local',
@@ -426,11 +445,17 @@ export default function LyricsGenerator({
   const [zoomSongId, setZoomSongId] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
   const docRef = useRef<ContiDocument | null>(null);
-  // 악보 pages the conti's order does not list (a Plan B song, the 공동체
-  // 고백송 when it is not in the order, a score's second page). No card is
-  // made for them and their lyrics are never read; recognition only reads
-  // their titles, so a listed song whose score sits on one can claim it.
+  // 악보 pages no listed song holds yet (a score's second page, a song's
+  // English 악보, a Plan B song, the 공동체 고백송 when it is not in the
+  // order). Recognition reads every one's title: a page that turns out to be
+  // a listed song's — its title printed again, a page carrying on the one
+  // before, the song in English — joins that song and is read with it
+  // (scorePages.ts); one that is another song gets no card.
   const sparePagesRef = useRef<number[]>([]);
+  // The cover or the 카톡 공지 listed this conti's songs. Without a list every
+  // 악보 page became a card, and cards whose pages print the same title are
+  // one song.
+  const pagesListedRef = useRef(false);
   // This deck's 설교 후 찬양, when it was added rather than read off the
   // conti's list: an unnamed 악보 page that turns out to be the same song is
   // the same card, not a second one.
@@ -456,6 +481,8 @@ export default function LyricsGenerator({
    * that song's page.
    */
   const contiEnglishTitlesRef = useRef<Map<string, string>>(new Map());
+  // The pages last reported as another song's 악보, so a song read again does not say so twice.
+  const reportedUnclaimedRef = useRef('');
   // What each song last wrote to 찬양 라이브러리, so an unchanged song is
   // never written twice.
   const librarySavedRef = useRef<Map<string, string>>(new Map());
@@ -902,11 +929,28 @@ export default function LyricsGenerator({
         .filter((song) => songHasLyrics(song) && !standInRef.current.has(song.id))
         .map((song) => song.id);
       if (prefilled.length > 0) markDone(prefilled, 'library');
-      // Every song already has its lyrics: nothing is left to read.
-      if (prefilled.length === active.length) {
+      // 악보 pages no card holds, and the further pages cards were given
+      // before (they are grouped afresh): every one's title is read, so each
+      // joins the song it belongs to — or, a song the order does not list,
+      // none.
+      const regrouped = pagesListedRef.current ? active.flatMap((song) => song.extraPages ?? []) : [];
+      const spares = [...new Set([...sparePagesRef.current, ...regrouped])]
+        .filter((page) => !active.some((song) => song.pageIndex === page))
+        .sort((a, b) => a - b);
+      // Wanted on a 찬양집회: the English 악보 the conti prints beside a song,
+      // even one whose Korean the library already holds.
+      const wantsEnglish = service === 'praise' && !!onScoreEnglishRef.current;
+      // Every song already has its lyrics: nothing is left to read — but an
+      // English 악보 still may be.
+      if (prefilled.length === active.length && !(wantsEnglish && spares.length > 0)) {
         window.clearInterval(ticker);
         return;
       }
+      /** Hand a song's English, read off its English-only 악보, to the 찬양집회 page. */
+      const forwardEnglish = (id: string, english: ParsedScore | null, pages: number[]) => {
+        if (!wantsEnglish || !english || english.sections.length === 0 || isCancelled(id)) return;
+        onScoreEnglishRef.current?.(id, { title: english.title, sections: english.sections, order: english.order, pages });
+      };
 
       /**
        * Songs the models read off the 악보 that are new to the library, with
@@ -1138,9 +1182,6 @@ export default function LyricsGenerator({
         // Rendering and the setup lookups don't depend on each other, so they
         // run together instead of one after another.
         let renderedPages = 0;
-        // 악보 pages no card holds: only their titles are read, so a listed
-        // song whose score is on one of them can be moved there.
-        const spares = sparePagesRef.current.filter((page) => !active.some((song) => song.pageIndex === page));
         const [renderedImages, spareImages, settings, reliabilities, memory] = await Promise.all([
           // Rendering and recognition are both batched: no per-song request loop.
           // The cards' previews are drawn first, since they are what is on
@@ -1223,6 +1264,16 @@ export default function LyricsGenerator({
         let aliasedTitles = titleScores.map((identity) =>
           identity.title ? { ...identity, title: resolveTitleAlias(identity.title, memory) } : identity,
         );
+        // What the title pass read off every page, and its drawing, by page —
+        // the further pages of a song are read from these too.
+        const titlePages = [...active.map((song) => song.pageIndex as number), ...spares];
+        const readByPage = new Map(titlePages.map((page, index) => [page, aliasedTitles[index]]));
+        const imageByPage = new Map(titlePages.map((page, index) => [page, [...images, ...spareImages][index]]));
+        const imageOf = (page: number): Promise<string | null> => {
+          const drawn = imageByPage.get(page);
+          if (drawn) return Promise.resolve(drawn);
+          return doc.renderPage(page, RECOGNITION_RENDER_WIDTH, 'png').catch(() => null);
+        };
 
         // 콘티 순서대로 악보 배치: the cards follow the conti's song order, but
         // scanned pages could only be handed out in PDF order. Now that each
@@ -1267,10 +1318,141 @@ export default function LyricsGenerator({
             );
           }
         }
-        // From here on only the cards' own pages are read — spare pages never.
+        // Every page of the conti is read. A page no song took by its title
+        // joins the song it belongs to — its title printed again, a page
+        // carrying on the one before, or on a 찬양집회 the song in English —
+        // and is read along with it (scorePages.ts).
+        if (pagesListedRef.current) {
+          const held = new Set(active.map((song) => song.pageIndex as number));
+          const grouped = groupContiPages({
+            songs: active.map((song) => ({
+              title: song.title,
+              englishTitle: contiEnglishTitlesRef.current.get(song.id),
+              page: song.pageIndex as number,
+            })),
+            spares: titlePages.filter((page) => !held.has(page)),
+            musicPages: doc.parsed.musicPages,
+            titleOf: (page) => readByPage.get(page)?.title,
+            isNonScore: (page) => readByPage.get(page)?.pageType === 'non_score',
+            bilingual: service === 'praise',
+          });
+          const before = new Map(active.map((song) => [song.id, (song.extraPages ?? []).join(',')]));
+          active = await Promise.all(
+            active.map(async (song, index) => {
+              const [main, ...rest] = grouped.pages[index];
+              if (main !== song.pageIndex) {
+                // The page printing the song's own title is the one its card
+                // shows and its reading is kept as evidence for.
+                images[index] = imageByPage.get(main) ?? images[index];
+                pageHashes[index] = await hashPageImage(images[index]).catch(() => undefined);
+                aliasedTitles[index] = readByPage.get(main) ?? aliasedTitles[index];
+                const found = evidence.get(song.id);
+                if (found) evidence.set(song.id, { ...found, pageHash: pageHashes[index], image: images[index] });
+              }
+              return { ...song, pageIndex: main, extraPages: rest.length > 0 ? rest : undefined };
+            }),
+          );
+          const holding = new Set(active.flatMap((song) => [song.pageIndex as number, ...(song.extraPages ?? [])]));
+          sparePagesRef.current = [...new Set([...sparePagesRef.current, ...titlePages])]
+            .filter((page) => !holding.has(page))
+            .sort((a, b) => a - b);
+          const placed = new Map(active.map((song) => [song.id, song]));
+          setSongs((current) =>
+            current.map((song) => {
+              const next = placed.get(song.id);
+              return next ? { ...song, pageIndex: next.pageIndex, extraPages: next.extraPages } : song;
+            }),
+          );
+          const joined = active.filter(
+            (song) => song.extraPages && (song.extraPages ?? []).join(',') !== before.get(song.id),
+          );
+          if (joined.length > 0) {
+            const named = joined.map(
+              (song) =>
+                `'${song.title.trim() || '새 찬양'}'(${[song.pageIndex, ...(song.extraPages ?? [])].map((page) => `p.${page}`).join(', ')})`,
+            );
+            showToast(
+              `악보가 여러 장인 곡은 한 곡으로 합쳐 모든 페이지를 읽습니다: ${named.join(', ')}.` +
+                (service === 'praise' ? ' 영어로 된 악보의 가사는 영어 가사 단계에 넣습니다.' : ''),
+            );
+          }
+          const unclaimed = grouped.unclaimed.map((page) => `p.${page}`).join(', ');
+          if (unclaimed && unclaimed !== reportedUnclaimedRef.current) {
+            showToast(`${unclaimed}은(는) 콘티 순서에 없는 다른 곡의 악보라 찬양 편집에 넣지 않았습니다.`);
+          }
+          reportedUnclaimedRef.current = unclaimed;
+        } else if (active.length > 1) {
+          // No list to go by, every 악보 page became a card: cards whose pages
+          // print the same title, one after another, are one song.
+          const byPage = active
+            .map((_, index) => index)
+            .sort((a, b) => (active[a].pageIndex as number) - (active[b].pageIndex as number));
+          const heads = foldRepeatedTitles(
+            byPage.map((index) =>
+              aliasedTitles[index]?.title ?? (isPlaceholderTitle(active[index].title) ? undefined : active[index].title),
+            ),
+          );
+          const into = new Map<number, number>();
+          heads.forEach((head, position) => {
+            const index = byPage[position];
+            // A card the user has written in is theirs, never folded away.
+            if (head !== position && !userEditedRef.current.has(active[index].id)) into.set(index, byPage[head]);
+          });
+          if (into.size > 0) {
+            const gained = new Map<number, number[]>();
+            for (const [index, head] of into) {
+              const song = active[index];
+              gained.set(head, [...(gained.get(head) ?? []), song.pageIndex as number, ...(song.extraPages ?? [])]);
+            }
+            const removed = new Set([...into.keys()].map((index) => active[index].id));
+            const headIds = new Set([...gained.keys()].map((index) => active[index].id));
+            const keep = (_: unknown, index: number) => index >= active.length || !into.has(index);
+            images = images.filter(keep);
+            pageHashes = pageHashes.filter(keep);
+            aliasedTitles = aliasedTitles.filter(keep);
+            active = active
+              .map((song, index) =>
+                gained.has(index)
+                  ? { ...song, extraPages: [...(song.extraPages ?? []), ...(gained.get(index) ?? [])].sort((a, b) => a - b) }
+                  : song,
+              )
+              .filter((_, index) => !into.has(index));
+            const extras = new Map(active.map((song) => [song.id, song.extraPages]));
+            setSongs((current) =>
+              current
+                .filter((song) => !removed.has(song.id))
+                .map((song) => (extras.get(song.id) ? { ...song, extraPages: extras.get(song.id) } : song)),
+            );
+            for (const id of removed) {
+              resolvedIds.add(id);
+              evidence.delete(id);
+            }
+            tracked.ids = tracked.ids.filter((id) => !removed.has(id));
+            setRecog((current) => {
+              const next = { ...current };
+              for (const id of removed) delete next[id];
+              return next;
+            });
+            const named = active
+              .filter((song) => headIds.has(song.id))
+              .map((song) => [song.pageIndex, ...(song.extraPages ?? [])].map((page) => `p.${page}`).join('·'));
+            showToast(`같은 제목의 악보 페이지(${named.join(', ')})를 한 곡으로 합쳤습니다.`);
+          }
+        }
+        // From here on the cards' pages are read — each card's own, and the
+        // further pages it was given. A page no song took is never read.
         aliasedTitles = aliasedTitles.slice(0, active.length);
         const unmatched: { song: Song; image: string; identity: ParsedScore }[] = [];
         const identityById = new Map<string, ParsedScore>();
+        /**
+         * Songs whose lyrics are settled (the library, the user) but whose
+         * conti prints them again in English: on a 찬양집회 that English is
+         * still read, for the English lyrics step.
+         */
+        const englishOnly: Song[] = [];
+        const settled = (song: Song) => {
+          if (wantsEnglish && (song.extraPages?.length ?? 0) > 0) englishOnly.push(song);
+        };
         const titlePlan = planScoreBatch(
           aliasedTitles,
           active.map((song) => song.title),
@@ -1285,6 +1467,7 @@ export default function LyricsGenerator({
           // Saved slides standing in for its parts are the one exception.
           if (songHasLyrics(song) && !standInRef.current.has(song.id)) {
             markDone([song.id], 'library');
+            settled(song);
             return;
           }
           const identity = aliasedTitles[index] ?? { order: [], sections: [] };
@@ -1306,6 +1489,7 @@ export default function LyricsGenerator({
             match &&
             takeLibraryMatch(song, match, `'${match.title}'은(는) 라이브러리에 있어 가사 인식을 건너뛰고 불러왔습니다.`)
           ) {
+            settled(song);
             return;
           }
           identityById.set(song.id, identity);
@@ -1324,7 +1508,7 @@ export default function LyricsGenerator({
         }
 
         const remaining = unmatched.filter(({ song }) => !isCancelled(song.id));
-        if (remaining.length === 0) return;
+        if (remaining.length === 0 && englishOnly.length === 0) return;
 
         // Full-lyrics pass for every unmatched page in one request. If the
         // whole batch fails (payload too large, every engine down for batch
@@ -1337,16 +1521,44 @@ export default function LyricsGenerator({
           if (coverTitle && !/^새 찬양/.test(coverTitle)) return coverTitle;
           return identity.title?.trim() || undefined;
         };
+        // The further pages go in the same request: a card's other pages, and
+        // a settled song's pages that are not printed in Korean — its English
+        // 악보. A page's hint is the title printed on it, so an English page
+        // is not told to read a Korean title.
+        const further = [
+          ...remaining.flatMap(({ song }) =>
+            (song.extraPages ?? []).map((page) => ({
+              songId: song.id,
+              page,
+              hint: readByPage.get(page)?.title?.trim() || (isPlaceholderTitle(song.title) ? undefined : song.title.trim()),
+            })),
+          ),
+          ...englishOnly.flatMap((song) =>
+            [song.pageIndex as number, ...(song.extraPages ?? [])]
+              .filter((page) => !/[가-힣]/.test(readByPage.get(page)?.title ?? ''))
+              .map((page) => ({ songId: song.id, page, hint: readByPage.get(page)?.title?.trim() || undefined })),
+          ),
+        ];
+        const furtherImages = await Promise.all(further.map(({ page }) => imageOf(page)));
+        const furtherReads = further
+          .map((entry, index) => ({ ...entry, image: furtherImages[index] }))
+          .filter((entry): entry is (typeof further)[number] & { image: string } => !!entry.image);
+        let furtherScores: ParsedScore[] = [];
+        /** What a song's further pages read, in page order. */
+        const furtherFor = (id: string) =>
+          furtherReads
+            .map((entry, index) => ({ page: entry.page, score: furtherScores[index] }))
+            .filter((entry, index) => furtherReads[index].songId === id && !!entry.score);
         let lyricScores: ParsedScore[] | null = null;
         let lyricEngine = '';
         try {
           // Three champions read every page; only a page they disagreed on is
           // escalated to a challenger, one at a time and one page at a time.
           const lyricResult = await recognizeAdaptiveBatch(
-            remaining.map(({ image }) => image),
+            [...remaining.map(({ image }) => image), ...furtherReads.map(({ image }) => image)],
             settings,
             'full',
-            remaining.map(hintFor),
+            [...remaining.map(hintFor), ...furtherReads.map(({ hint }) => hint)],
             reliabilities,
             undefined,
             promptExamplesFor(
@@ -1358,7 +1570,8 @@ export default function LyricsGenerator({
             ),
             deadline.stageEndsAt('lyrics'),
           );
-          lyricScores = lyricResult.scores;
+          lyricScores = lyricResult.scores.slice(0, remaining.length);
+          furtherScores = lyricResult.scores.slice(remaining.length);
           lyricEngine = lyricResult.engine;
           for (const modelKey of lyricResult.exhaustedModels) exhausted.add(modelKey);
           remaining.forEach(({ song }, index) => {
@@ -1375,10 +1588,36 @@ export default function LyricsGenerator({
           console.warn('가사 일괄 인식 실패, 곡별 인식으로 전환:', error instanceof Error ? error.message : error);
         }
 
+        // A settled song's English 악보: its English goes to the 찬양집회's
+        // English step; the song's Korean stays as it was.
+        for (const song of englishOnly) {
+          const english = furtherFor(song.id).filter(({ score }) => readingLanguage(score) === 'en');
+          if (english.length === 0) continue;
+          forwardEnglish(
+            song.id,
+            mergeReadings(english.map(({ score }) => score)),
+            english.map(({ page }) => page),
+          );
+        }
+
         const scoreById = new Map<string, ParsedScore>();
         remaining.forEach(({ song, identity }, index) => {
           if (isCancelled(song.id)) return;
-          const full = lyricScores?.[index] ?? { order: [], sections: [] };
+          // The song off all of its pages: the Korean ones are its lyrics, an
+          // English-only one beside them its English (scorePages.ts).
+          const read = [
+            { page: song.pageIndex as number, score: lyricScores?.[index] ?? { order: [], sections: [] } },
+            ...furtherFor(song.id),
+          ];
+          const { score: full, english } = combinePageReadings(
+            read.map(({ score }) => score),
+            /[가-힣]/.test(song.title),
+          );
+          forwardEnglish(
+            song.id,
+            english,
+            read.filter(({ score }) => readingLanguage(score) === 'en').map(({ page }) => page),
+          );
           scoreById.set(
             song.id,
             // Learned corrections land after the models have agreed and before
@@ -1518,13 +1757,38 @@ export default function LyricsGenerator({
                 .catch(() => image);
               // Hard page: race the complete model pool and take the first
               // non-empty answer. One page takes a model as long to read as
-              // it takes, so the call always gets a full window.
-              const single = await recognizeScoreRaced(rescueImage, settings, rescueAttemptMs(deadline));
+              // it takes, so the call always gets a full window. The song's
+              // further pages the batch read are taken as read; one it could
+              // not read is tried again beside this one.
+              const earlier = furtherFor(song.id);
+              const [single, ...more] = await Promise.all([
+                recognizeScoreRaced(rescueImage, settings, rescueAttemptMs(deadline)),
+                ...(song.extraPages ?? []).map(async (page) => {
+                  const had = earlier.find((entry) => entry.page === page)?.score;
+                  if (had && readingLanguage(had) !== 'none') return { page, score: had };
+                  try {
+                    const url = await doc.renderPage(page, RESCUE_RENDER_WIDTH, 'png');
+                    return { page, score: (await recognizeScoreRaced(url, settings, rescueAttemptMs(deadline))).score };
+                  } catch {
+                    return { page, score: { order: [], sections: [] } as ParsedScore };
+                  }
+                }),
+              ]);
               if (isCancelled(song.id)) return;
+              const read = [{ page: song.pageIndex as number, score: single.score }, ...more];
+              const pagesRead = combinePageReadings(
+                read.map(({ score }) => score),
+                /[가-힣]/.test(song.title),
+              );
+              forwardEnglish(
+                song.id,
+                pagesRead.english,
+                read.filter(({ score }) => readingLanguage(score) === 'en').map(({ page }) => page),
+              );
               const merged: ParsedScore = {
-                ...single.score,
-                title: single.score.title ?? known.title,
-                key: single.score.key ?? known.key,
+                ...pagesRead.score,
+                title: pagesRead.score.title ?? known.title,
+                key: pagesRead.score.key ?? known.key,
               };
               if (holdStandIn(song, merged, settings.excludedTitles)) return;
               if (discardNonScorePage(song, merged)) {
@@ -1592,7 +1856,7 @@ export default function LyricsGenerator({
         }
       }
     },
-    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, linesPerSlide],
+    [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, linesPerSlide, service],
   );
 
   const handleRecognizeClick = useCallback(
@@ -1651,6 +1915,7 @@ export default function LyricsGenerator({
       docRef.current?.destroy();
       docRef.current = null;
       sparePagesRef.current = [];
+      pagesListedRef.current = false;
       infoRef.current = null;
       setInfo(null);
       setSongs(restoreSongs.map((song) => structuredClone(song)));
@@ -1977,6 +2242,8 @@ export default function LyricsGenerator({
       const doc = await loadConti(data);
       docRef.current = doc;
       sparePagesRef.current = [];
+      pagesListedRef.current = false;
+      reportedUnclaimedRef.current = '';
       standInRef.current.clear();
       contiEnglishTitlesRef.current.clear();
       const parsed = doc.parsed;
@@ -2174,6 +2441,7 @@ export default function LyricsGenerator({
       const unreadPostSermon = next.find((song) => song.postSermon && song.pageIndex == null && !songHasLyrics(song));
       if (unreadPostSermon && listedOrder && unlisted.length > 0) unreadPostSermon.pageIndex = unlisted.shift();
       sparePagesRef.current = listedOrder ? unlisted : [];
+      pagesListedRef.current = listedOrder;
       postSermonTitleRef.current = postSermonSong?.title ?? null;
 
       // Cover-listed songs on the administrator exclusion list (공동체
@@ -2222,7 +2490,9 @@ export default function LyricsGenerator({
       if (sparePagesRef.current.length > 0) {
         const pages = sparePagesRef.current.map((page) => `p.${page}`).join(', ');
         showToast(
-          `콘티 순서에 없는 악보 ${sparePagesRef.current.length}장(${pages})은 찬양 편집에 넣지 않고 인식하지 않습니다.`,
+          `콘티 순서에 없는 악보 ${sparePagesRef.current.length}장(${pages})도 모두 읽습니다. 같은 제목이거나 앞 곡에서 이어지는 페이지` +
+            (service === 'praise' ? '(그 곡의 영어 악보 포함)' : '') +
+            '는 그 곡에 합치고, 다른 곡의 악보는 찬양 편집에 넣지 않습니다.',
         );
       }
       const postSermonKept = kept.find((song) => song.postSermon);
@@ -2412,7 +2682,9 @@ export default function LyricsGenerator({
       return base ? { ...song, id: base.id, description: base.description, postSermon: base.postSermon } : song;
     };
     const held = new Set(pairs.map((pair) => pair.item?.pageIndex).filter((page): page is number => page != null));
-    const free = [...new Set([...sparePagesRef.current, ...dropped.map((song) => song.pageIndex)])]
+    const free = [
+      ...new Set([...sparePagesRef.current, ...dropped.flatMap((song) => [song.pageIndex, ...(song.extraPages ?? [])])]),
+    ]
       .filter((page): page is number => page != null && !held.has(page))
       .sort((a, b) => a - b);
     const next = pairs.map(({ announced, item }): Song => {
@@ -2449,6 +2721,7 @@ export default function LyricsGenerator({
       postSermonTitleRef.current = postSermon.title;
     }
     sparePagesRef.current = docRef.current ? free : [];
+    pagesListedRef.current = !!docRef.current;
     setSongs(next);
     setEdited(true);
     setAppliedNotice(noticeText);

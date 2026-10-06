@@ -21,6 +21,7 @@ import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
 import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
 import type { ChordSheetSong, SheetSlide } from '../lib/utils/chordSheet';
+import type { ScoreEnglish } from '../lib/utils/scorePages';
 import { normalizeTitle } from '../lib/storage/library';
 import type { DeckOverviewItem } from '../lib/utils/deckOverview';
 import type { AdditionalFile } from '../lib/additionalFiles/types';
@@ -42,6 +43,7 @@ import PraisePosterCard from './PraisePosterCard';
 import PraisePrayerStep from './PraisePrayerStep';
 import PraiseSongList from './PraiseSongList';
 import { englishFromWeb, fetchWebEnglish, hasWebEnglishLookup, type WebEnglishLookup, type WebEnglishOutcome } from './englishWeb';
+import { englishFromScore } from './englishScore';
 import { buildPraiseDeck, formatCoverDate, isoDateFromConti, suggestPraiseFileName } from './deckBuilder';
 import {
   englishFromSheet,
@@ -200,6 +202,11 @@ export default function PraiseApp() {
   // Web lookups by song title, and what each did for the song it was for.
   const [webEnglish, setWebEnglish] = useState<Record<string, WebEnglishLookup>>({});
   const [webOutcome, setWebOutcome] = useState<Record<string, WebEnglishOutcome>>({});
+  // English read off the conti's own English 악보, by song id — a song the
+  // conti prints once in Korean and once in English — and the songs whose
+  // English could only be laid in order, to be checked.
+  const [scoreEnglish, setScoreEnglish] = useState<Record<string, ScoreEnglish>>({});
+  const [scoreGuessed, setScoreGuessed] = useState<Record<string, boolean>>({});
   // What was last written for each song, so one edit is one write.
   const englishWrittenRef = useRef<Map<string, string>>(new Map());
 
@@ -394,6 +401,41 @@ export default function PraiseApp() {
     });
   }, [songs, webEnglish]);
 
+  // ---- 영어 가사 from the conti's own English 악보 ----
+  // The 찬양 step read a song's English page along with its Korean one: that
+  // English goes under the Korean slides — only into empty ones, like
+  // everything else — and is put back under the Korean whenever the Korean
+  // changes (the web's wording replacing the 악보's).
+  const handleScoreEnglish = useCallback((songId: string, english: ScoreEnglish) => {
+    setScoreEnglish((previous) => ({ ...previous, [songId]: english }));
+  }, []);
+
+  useEffect(() => {
+    if (songs.length === 0 || Object.keys(scoreEnglish).length === 0) return;
+    const guessed: Record<string, boolean> = {};
+    for (const song of songs) {
+      const page = scoreEnglish[song.id];
+      if (!page) continue;
+      const result = englishFromScore(song, extrasFor(extrasRef.current, song.id).english, page);
+      if (result.filled > 0) guessed[song.id] = result.guessed;
+    }
+    if (Object.keys(guessed).length > 0) setScoreGuessed((previous) => ({ ...previous, ...guessed }));
+    setExtras((previous) => {
+      let changed = false;
+      const next = { ...previous };
+      for (const song of songs) {
+        const page = scoreEnglish[song.id];
+        if (!page) continue;
+        const current = extrasFor(previous, song.id);
+        const result = englishFromScore(song, current.english, page);
+        if (result.filled === 0 && !result.titleFilled) continue;
+        next[song.id] = { ...current, english: result.english, englishSource: current.englishSource ?? 'score' };
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [songs, scoreEnglish]);
+
   const searchWebAgain = useCallback(
     (song: Song) => {
       const key = normalizeTitle(song.title);
@@ -430,6 +472,8 @@ export default function PraiseApp() {
       }
       setSheetLibrary(entries);
       setContiEnglishTitles({});
+      setScoreEnglish({});
+      setScoreGuessed({});
       setExtras(english);
       // A new conti is a new list of songs: no 기도 keeps its old song. One
       // with something typed into it waits for a song to be checked again.
@@ -890,6 +934,8 @@ export default function PraiseApp() {
     setFileNameOverride(null);
     setContiFile(null);
     setSheetLibrary([]);
+    setScoreEnglish({});
+    setScoreGuessed({});
     setContiEnglishTitles({});
     setWebOutcome({});
     setOverview(null);
@@ -986,6 +1032,7 @@ export default function PraiseApp() {
               preferredSongs={preferredSongs}
               chordSheetTitle={chordSheetTitle}
               onChordSheetLoaded={handleChordSheetLoaded}
+              onScoreEnglish={handleScoreEnglish}
               onContiDropAnywhere={showSongsStep}
             />
             <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="praise" />
@@ -1039,6 +1086,8 @@ export default function PraiseApp() {
               savedAt={englishSavedAt}
               webLookups={webEnglish}
               webOutcomes={webOutcome}
+              scoreEnglish={scoreEnglish}
+              scoreGuessed={scoreGuessed}
               onWebSearch={hasWebEnglishLookup() ? searchWebAgain : undefined}
               onPrayerAfter={togglePrayerAfter}
               prayerNumbers={prayerNumbers}

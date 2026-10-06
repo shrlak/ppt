@@ -80,6 +80,12 @@ export interface Song {
   /** 1-based page number of this song's score in the uploaded conti PDF */
   pageIndex?: number;
   /**
+   * Further pages of the same song in the conti, read along with `pageIndex`:
+   * the rest of a score printed over several pages, or — on a 찬양집회 conti —
+   * the song's 악보 in its other language (see scorePages.ts).
+   */
+  extraPages?: number[];
+  /**
    * 설교 후 찬양: sung after the sermon rather than in the opening praise
    * set, so its slides are placed right after the post-sermon 기도 slide
    * instead of at the front of the deck. Set from the 콘티 (the song listed
