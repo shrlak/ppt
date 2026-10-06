@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Download } from '@playwright/test';
+import { test, expect, type Locator, type Page, type Download } from '@playwright/test';
 import JSZip from 'jszip';
 import { RECOGNITION_MODEL_CATALOG } from '../src/lib/ai/aiSettings';
 import fs from 'node:fs/promises';
@@ -1582,6 +1582,91 @@ test.describe('web lyrics candidate review', () => {
 
     await expect(card.getByTestId('web-review')).toHaveCount(0);
     await expect(card.getByTestId('section-textarea').first()).toHaveValue(/가나다라 마바사 아자차/);
+  });
+});
+
+test.describe('a song the library holds without parts', () => {
+  // Invented lyrics. The library's copy is a draft that holds the whole song
+  // in one block, as old web readings were auto-saved.
+  const verse1 = ['첫째 절 첫 줄', '첫째 절 둘째 줄', '첫째 절 셋째 줄', '첫째 절 넷째 줄'];
+  const verse2 = ['둘째 절 첫 줄', '둘째 절 둘째 줄', '둘째 절 셋째 줄', '둘째 절 넷째 줄'];
+  const chorus = ['후렴 첫 줄', '후렴 둘째 줄', '후렴 셋째 줄', '후렴 넷째 줄'];
+
+  function oneBlockDraft(lines: string[]) {
+    return { title: '주님의 사랑', verification: 'draft', sections: [{ label: 'V', lines }], order: ['I', 'V'] };
+  }
+
+  async function labelsAndTexts(card: Locator) {
+    const labels = await card.locator('.section-label').evaluateAll((inputs) =>
+      inputs.map((input) => (input as unknown as { value: string }).value),
+    );
+    const texts = await card.getByTestId('section-textarea').evaluateAll((boxes) =>
+      boxes.map((box) => (box as unknown as { value: string }).value),
+    );
+    return { labels, texts };
+  }
+
+  test('loads organized by the chorus its lyrics print again', async ({ page }) => {
+    await stubRecognitionProxy(page);
+    await page.route('**/ppt/library.json', (route) =>
+      route.fulfill({ json: [DEFAULT_POST_SERMON_ENTRY, oneBlockDraft([...verse1, ...chorus, ...verse2, ...chorus])] }),
+    );
+    await page.goto('./?service=sunday');
+    await uploadExamplePdf(page);
+
+    const card = page.getByTestId('song-card').first();
+    await expect(card.getByTestId('song-title-input')).toHaveValue('주님의 사랑');
+    // No 악보 read yet: the lyrics themselves give the parts.
+    const { labels, texts } = await labelsAndTexts(card);
+    expect(labels).toEqual(['V', 'C', 'V2']);
+    expect(texts).toEqual([verse1.join('\n'), chorus.join('\n'), verse2.join('\n')]);
+    await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V2-C');
+  });
+
+  test('reads its 악보 for the parts and puts the web lyrics in part by part', async ({ page }) => {
+    const verse = ['가상의 첫 줄 노래해', '가상의 둘째 줄 찬양해'];
+    const refrain = ['가상의 후렴 높이 높이', '가상의 후렴 영원토록'];
+    await stubRecognitionProxy(page, {
+      score: () =>
+        stubScore({
+          title: '주님의 사랑',
+          order: ['I', 'V', 'C'],
+          sections: [
+            { label: 'V', lines: ['가상의 첫 줄 노래헤', '가상의 둘째 줄 찬양해'] },
+            { label: 'C', lines: ['가상의 후렴 높이 높이', '가상의 후렴 영원토룩'] },
+          ],
+        }),
+      lyrics: {
+        candidates: [
+          webCandidate({
+            title: '주님의 사랑',
+            decision: 'auto',
+            score: 0.95,
+            lines: [...verse, '', ...refrain, '', ...refrain],
+          }),
+        ],
+        links: [],
+      },
+    });
+    // Nothing repeats in the saved block, so nothing is guessed from it.
+    const saved = ['가상의 첫 줄 노래해요', '가상의 둘째 줄 찬양해요', '가상의 후렴 높이', '가상의 후렴 영원히', ...verse2, '끝 줄 하나', '끝 줄 둘'];
+    await page.route('**/ppt/library.json', (route) =>
+      route.fulfill({ json: [DEFAULT_POST_SERMON_ENTRY, oneBlockDraft(saved)] }),
+    );
+    await page.goto('./?service=sunday');
+    await uploadExamplePdf(page);
+
+    const card = page.getByTestId('song-card').first();
+    await expect(card.getByTestId('song-title-input')).toHaveValue('주님의 사랑');
+    expect((await labelsAndTexts(card)).labels).toEqual(['V']);
+
+    await card.getByTestId('recognize-btn').click();
+    await expect(card.getByTestId('recog-running')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+    await expect(card.getByTestId('recog-done')).toBeVisible({ timeout: PARSE_TIMEOUT });
+    const { labels, texts } = await labelsAndTexts(card);
+    expect(labels).toEqual(['V', 'C']);
+    expect(texts).toEqual([verse.join('\n'), refrain.join('\n')]);
+    await expect(card.getByTestId('order-input')).toHaveValue('I-V-C');
   });
 });
 

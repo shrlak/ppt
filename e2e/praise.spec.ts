@@ -583,11 +583,13 @@ async function recognizeFirstSong(page: Page): Promise<Locator> {
 }
 
 test.describe('찬양집회 songs saved slide by slide', () => {
-  test('reads the 악보 for the parts, then puts the web lyrics in part by part', async ({ page }) => {
-    // The page prints the verse, then the chorus twice, as stanzas.
+  test('reads the 악보 for the parts, with the web’s page beside it, and keeps last year’s words', async ({ page }) => {
+    // The page prints the verse, then the chorus twice, as stanzas — one
+    // word put another way than last year's deck projected it.
     const verse = ['사랑의 주님 나를 부르시네', '그 음성 따라 나아가리'];
     const chorus = ['주님의 사랑 끝이 없어라', '영원히 나 노래하리', '주님의 사랑 넓고 깊어라', '날마다 나 찬양하리'];
-    await stubSavedSlideSong(page, [...verse, '', ...chorus, '', ...chorus]);
+    const webChorus = chorus.map((line) => line.replace('끝이', '끝도'));
+    await stubSavedSlideSong(page, [...verse, '', ...webChorus, '', ...webChorus]);
     await page.goto('praise.html');
     await page.getByTestId('pdf-input').setInputFiles(SAMPLE_PDF);
     await expect(page.getByTestId('conti-info')).toBeVisible({ timeout: PARSE_TIMEOUT });
@@ -600,8 +602,10 @@ test.describe('찬양집회 songs saved slide by slide', () => {
     await recognizeFirstSong(page);
     const { labels, texts } = await sectionsOf(card);
     expect(labels).toEqual(['V', 'C']);
+    // The words last year's deck projected stay, in the 악보's parts.
     expect(texts).toEqual([verse.join('\n'), chorus.join('\n')]);
     await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
+    await expect(page.getByText("'주님의 사랑'의 저장된 가사를 악보·웹의 파트 2개에 나눠 넣었습니다.")).toBeVisible();
 
     // The English of last year's slides follows the Korean into its parts.
     await page.getByTestId('praise-next-songs').click();
