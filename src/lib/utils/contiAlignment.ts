@@ -94,19 +94,26 @@ export function titleSimilarity(a: string | undefined, b: string | undefined): n
  * its own page, or takes whatever pages are left, its own range first. When
  * the titles say nothing, the answer is the identity and the conti's pairing
  * stands.
+ *
+ * `englishTitles[i]` is the English title the conti printed beside song
+ * `i`'s Korean one: a 악보 that prints only the English title (`You Are
+ * Good` for 좋으신 하나님) is that song's page too.
  */
 export function alignPagesToConti(
   songTitles: string[],
   pageTitles: (string | undefined)[],
+  englishTitles: (string | undefined)[] = [],
 ): number[] {
   const count = songTitles.length;
   const slotCount = Math.max(count, pageTitles.length);
   const slots: (number | undefined)[] = new Array(count).fill(undefined);
   const taken = new Set<number>();
   const named = (i: number) => !isPlaceholderTitle(songTitles[i]);
+  const similarity = (song: number, slot: number) =>
+    Math.max(titleSimilarity(songTitles[song], pageTitles[slot]), titleSimilarity(englishTitles[song], pageTitles[slot]));
 
   for (let i = 0; i < count; i += 1) {
-    if (named(i) && titleSimilarity(songTitles[i], pageTitles[i]) >= SAME_TITLE_THRESHOLD) {
+    if (named(i) && similarity(i, i) >= SAME_TITLE_THRESHOLD) {
       slots[i] = i;
       taken.add(i);
     }
@@ -117,7 +124,7 @@ export function alignPagesToConti(
     if (slots[song] !== undefined || !named(song)) continue;
     for (let slot = 0; slot < slotCount; slot += 1) {
       if (taken.has(slot)) continue;
-      const score = titleSimilarity(songTitles[song], pageTitles[slot]);
+      const score = similarity(song, slot);
       if (score >= SAME_TITLE_THRESHOLD) candidates.push({ score, song, slot });
     }
   }

@@ -49,6 +49,15 @@ describe('alignPagesToConti', () => {
     expect(slots.map((slot) => pages[slot])).toEqual(songs);
   });
 
+  it('finds a song by the English title its conti printed beside the Korean one', () => {
+    // 좋으신 하나님's 악보 prints only "You Are Good"; the page it was handed
+    // in PDF order is the second page of the song before it.
+    const songs = ['Call on Jesus', '좋으신 하나님'];
+    const pages = ['Call On Jesus', undefined, 'You Are Good'];
+    expect(alignPagesToConti(songs, pages)).toEqual([0, 1]);
+    expect(alignPagesToConti(songs, pages, [undefined, 'You are Good'])).toEqual([0, 2]);
+  });
+
   it('moves every later song back after a two-page score shifted them', () => {
     // Cover: 3 songs. PDF: the first song's score takes two pages, so the
     // extra page became a trailing placeholder card.

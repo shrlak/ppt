@@ -825,3 +825,18 @@ export function songFromChordSheet(
 export function looksLikeChordSheetText(text: string): boolean {
   return text.split(/\r?\n/).some((line) => KEY_LINE.test(line.trim())) && /CCLI|ChordPro|SongSelect/i.test(text);
 }
+
+/**
+ * Is the whole PDF a chord sheet, every song's lyrics in its text?
+ *
+ * A conti can carry a SongSelect sheet or two among scanned 악보: the night's
+ * other songs are pictures, with no text layer at all. Reading that PDF as a
+ * chord sheet would keep only the sheets' songs and drop every scanned one,
+ * so it is read as an ordinary conti instead — its cover lists every song,
+ * and each 악보 page is recognized, the SongSelect pages included.
+ * `musicPages` are the 1-based pages past the cover (see classifyPages).
+ */
+export function isChordSheetConti(pageTexts: string[], musicPages: number[]): boolean {
+  if (!looksLikeChordSheetText(pageTexts.join('\n'))) return false;
+  return musicPages.every((page) => /\p{L}/u.test(pageTexts[page - 1] ?? ''));
+}

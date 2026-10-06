@@ -10,7 +10,7 @@ import {
   parseCoverText,
   parseSermonInfoText,
 } from './contiText';
-import { looksLikeChordSheetText, type PositionedPage, type PositionedText } from './chordSheet';
+import { isChordSheetConti, type PositionedPage, type PositionedText } from './chordSheet';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -158,8 +158,9 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
 
   const parsed: ParsedConti = { info, numPages: doc.numPages, pageTexts, musicPages };
   // A chord-sheet PDF carries its lyrics as text; where each piece of it
-  // sits is what puts the lines back together (see chordSheet.ts).
-  if (looksLikeChordSheetText(pageTexts.join('\n'))) parsed.chordSheetPages = positionedPages;
+  // sits is what puts the lines back together (see chordSheet.ts). One that
+  // also holds scanned 악보 is an ordinary conti with a sheet or two in it.
+  if (isChordSheetConti(pageTexts, musicPages)) parsed.chordSheetPages = positionedPages;
 
   return {
     parsed,

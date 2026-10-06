@@ -13,6 +13,7 @@ import {
   nameUntitledRowsFromLayout,
   parseCoverText,
   parseSermonInfoText,
+  splitBilingualTitle,
   splitLyricsAndConfessionSongs,
   untitledSongTitle,
 } from '../../src/lib/utils/contiText';
@@ -23,6 +24,7 @@ const coverText = readFileSync(join(__dirname, '..', 'fixtures', 'cover.txt'), '
 const coverTableText = readFileSync(join(__dirname, '..', 'fixtures', 'cover-table.txt'), 'utf-8');
 const continuationText = readFileSync(join(__dirname, '..', 'fixtures', 'cover-continuation.txt'), 'utf-8');
 const notesText = readFileSync(join(__dirname, '..', 'fixtures', 'notes.txt'), 'utf-8');
+const songListText = readFileSync(join(__dirname, '..', 'fixtures', 'cover-songlist.txt'), 'utf-8');
 
 describe('parseCoverText', () => {
   const info = parseCoverText(coverText);
@@ -381,6 +383,85 @@ describe('parseCoverText — Plan A, with a Plan B after it', () => {
     )?.songs;
     expect(titles?.map((s) => s.title)).toEqual(['그 사랑']);
     expect(titles?.[0].description).toBeUndefined();
+  });
+});
+
+describe('parseCoverText — a `Songlist (12):` of numbered lines', () => {
+  // Laid out like the 2026 joint praise night conti: a numbered list under
+  // an English heading, each line with its language and its leader, a 기도
+  // topic between some of them, and two medleys.
+  const info = parseCoverText(songListText);
+
+  it('lists every song in order, a medley as its songs, by its Korean title', () => {
+    expect(info?.songs.map((s) => s.title)).toEqual([
+      '하늘 위에 주님밖에',
+      '나의 슬픔은',
+      'Praise',
+      '크신 내 주님',
+      'Above All',
+      'I Will Worship You',
+      '나의 백성이',
+      '부르신 곳에서',
+      '예수 우리들의 밝은 빛',
+      'Hosanna',
+      'Heart of Worship',
+      'Call on Jesus',
+      'Washed',
+      '좋으신 하나님',
+    ]);
+  });
+
+  it('keeps the English title printed beside a Korean one', () => {
+    const english = Object.fromEntries((info?.songs ?? []).map((s) => [s.title, s.englishTitle]));
+    expect(english['하늘 위에 주님밖에']).toBe('God is the Strength of my Heart');
+    expect(english['크신 내 주님']).toBe('Our God');
+    expect(english['좋으신 하나님']).toBe('You are Good');
+    expect(english['Praise']).toBeUndefined();
+    expect(english['나의 백성이']).toBeUndefined();
+  });
+
+  it('reads the date, and makes the page the cover rather than a score', () => {
+    expect(info?.date).toBe('10/17/2026');
+    expect(looksLikeCoverText(songListText)).toBe(true);
+    const { coverPages, musicPages } = classifyPages([songListText, '', '', 'INTRO\nPraise the Lord']);
+    expect(coverPages).toEqual([1]);
+    expect(musicPages).toEqual([2, 3, 4]);
+  });
+
+  it('stops at the count the heading gives', () => {
+    const songs = parseCoverText(
+      ['2026.10.17', 'Songlist (2):', '1. 첫째 곡', '2. 둘째 곡', '3. 메모입니다'].join('\n'),
+    )?.songs;
+    expect(songs?.map((s) => s.title)).toEqual(['첫째 곡', '둘째 곡']);
+  });
+
+  it('drops the leader initials even without a language tag', () => {
+    const songs = parseCoverText(['2026.10.17', 'Set list', '1. 나의 백성이 DK', '2. YET NOT I'].join('\n'))?.songs;
+    expect(songs?.map((s) => s.title)).toEqual(['나의 백성이', 'YET NOT I']);
+  });
+
+  it('keeps a medley song written after the first song’s language tag', () => {
+    const songs = parseCoverText(['2026.10.17', 'Songlist:', '1. Hosanna (English) + Heart of Worship AN'].join('\n'))?.songs;
+    expect(songs?.map((s) => s.title)).toEqual(['Hosanna', 'Heart of Worship']);
+  });
+});
+
+describe('splitBilingualTitle', () => {
+  it('takes the Korean as the title and the English beside it', () => {
+    expect(splitBilingualTitle('Our God 크신 내 주님')).toEqual({ title: '크신 내 주님', englishTitle: 'Our God' });
+    expect(splitBilingualTitle('나의 슬픔은 (Mourning into Dancing)')).toEqual({
+      title: '나의 슬픔은',
+      englishTitle: 'Mourning into Dancing',
+    });
+    expect(splitBilingualTitle('주님의 선하심 / Goodness of God')).toEqual({
+      title: '주님의 선하심',
+      englishTitle: 'Goodness of God',
+    });
+  });
+
+  it('leaves a title in one language as it is', () => {
+    expect(splitBilingualTitle('예수 우리들의 밝은 빛')).toEqual({ title: '예수 우리들의 밝은 빛' });
+    expect(splitBilingualTitle('Call on Jesus')).toEqual({ title: 'Call on Jesus' });
   });
 });
 
