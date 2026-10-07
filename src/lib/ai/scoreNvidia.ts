@@ -2,7 +2,7 @@
 // retained to avoid a noisy module rename, but every catalog model handled
 // here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
 // travel as data: URLs in an OpenAI-compatible chat-completions request.
-import { RecognitionError } from './recognitionError';
+import { RecognitionError, parseRetryAfterMs } from './recognitionError';
 import { basePrompt, correctionExampleLines } from './scorePrompt';
 import {
   coerceParsedScore,
@@ -114,8 +114,20 @@ export function buildOpenRouterBatchBody(
     model,
     messages: [{ role: 'user', content }],
     temperature: 0,
-    max_tokens: 4096,
+    max_tokens: batchMaxTokens(dataUrls.length, mode),
   };
+}
+
+/**
+ * Room for the answer to a batch: a title is a few tokens a page, but a full
+ * page of Korean lyrics in JSON runs to several hundred — and a reasoning
+ * model spends from the same budget before it writes. A fixed 4096 cut a
+ * conti of more than a few pages off mid-JSON, and the whole batch failed to
+ * parse. Every catalog model takes at least 32k.
+ */
+export function batchMaxTokens(pageCount: number, mode: BatchRecognitionMode): number {
+  if (mode === 'titles') return 4096;
+  return Math.min(32_768, Math.max(4096, pageCount * 1500));
 }
 
 /** Pull the assistant's text out of a chat-completions response. */
@@ -153,14 +165,26 @@ async function callOpenRouter(body: unknown, apiKey: string, proxyUrl?: string):
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
-      const err = (await res.json()) as { error?: { message?: string } | string; detail?: string };
+      const err = (await res.json()) as {
+        error?: { message?: string; metadata?: { raw?: unknown } } | string;
+        detail?: string;
+      };
       if (typeof err?.error === 'string') detail = err.error;
       else if (err?.error?.message) detail = err.error.message;
       else if (typeof err?.detail === 'string') detail = err.detail;
+      // "Provider returned error" alone does not say whether the model is
+      // busy for a moment ("temporarily rate-limited upstream") or done for
+      // the day; the provider's own words, kept with it, do.
+      const raw = typeof err?.error === 'object' ? err.error?.metadata?.raw : undefined;
+      if (typeof raw === 'string' && raw.trim()) detail = `${detail} (${raw.trim().slice(0, 200)})`;
     } catch {
       // ignore body parse errors; keep the status code
     }
-    throw new RecognitionError(`OpenRouter 호출 실패: ${detail}`, res.status);
+    throw new RecognitionError(
+      `OpenRouter 호출 실패: ${detail}`,
+      res.status,
+      parseRetryAfterMs(res.headers?.get?.('Retry-After')),
+    );
   }
 
   return extractOpenRouterText((await res.json()) as unknown);

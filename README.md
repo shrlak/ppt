@@ -260,8 +260,9 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
   - **진행률 표시** — 인식이 도는 동안 각 곡 카드에 현재 단계(악보 준비 → 제목 확인 → 가사 인식
     → 재시도 → 웹 가사 확인)와 **퍼센트(%) 진행률 막대**가 실시간으로 표시됩니다.
   - **Gemini (동시 모델 풀)** — 악보 이미지를 Gemini에 보내 구조화된 결과(JSON)를 받습니다.
-    무료 API 한도가 있는 **Gemini 3.6 Flash**와 **Gemini 3.5 Flash**가 다른 공급자 모델과 동시에
-    실행됩니다. 주 1회 콘티 정도는 무료 한도 안에서 처리됩니다. 인식용 악보
+    무료 API 한도가 있는 **Gemini 3.6 Flash**, **Gemini 3.5 Flash**, **Gemini 3.5 Flash-Lite**가
+    주 모델로, **Gemini 3.7 Flash**가 첫 교차 검증 모델로 다른 공급자 모델과 함께 실행됩니다. 모델마다
+    무료 한도가 따로라 주 1회 콘티 정도는 무료 한도 안에서 처리됩니다. 인식용 악보
     이미지는 고해상도 **무손실 PNG**로 렌더링해 작은 가사 글씨도 잘 읽히게 합니다.
   - **웹 띄어쓰기·맞춤법 교정** — Gemini의 Google 검색 그라운딩으로 곡 제목을 웹에서 검색해
     **띄어쓰기·맞춤법**을 바로잡고 음절 하이픈(-)을 자연스럽게 이어 붙입니다. 가사 **내용(단어)은
@@ -327,7 +328,7 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
     추가 호출이 아무것도 사지 못하는데, 아낀 무료 한도가 정작 어려운 페이지에서 교차 검증을
     할 수 있게 해 줍니다.
     - 시작 역할은 카탈로그에 정해져 있고(주 모델: Gemini 3.6 Flash, Gemini 3.5 Flash,
-      NVIDIA Nemotron Nano 12B VL), 검증된 표본이 **20건**을 넘으면 그때부터는 **측정된 정확도**가
+      Gemini 3.5 Flash-Lite), 검증된 표본이 **20건**을 넘으면 그때부터는 **측정된 정확도**가
       역할을 정합니다. 표본이 적을 때 운 좋게 잘 읽은 모델과 진짜 잘 읽는 모델은 구분되지 않기
       때문입니다.
     - 최근 20번 중 실패가 20%를 넘거나 정확도가 **자기 예전 수준보다** 떨어진 모델은 자동으로
@@ -348,7 +349,27 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
     되기 때문입니다.
   - **무료 한도 소진 안내** — 오늘 치 무료 한도가 끝난 모델은 그 작업 내내 다시 부르지 않고,
     "무료 한도 소진"이라고 따로 알려 줍니다 (일반적인 인식 실패와 구분됩니다).
-  - **자동 재시도·구출 인식** — 일시적 오류(408/5xx/네트워크)는 잠시 후 한 번 더 시도하고,
+  - **모델이 몰려도 다시 시도합니다** — 무료 Gemini는 사람이 몰리는 시간에 `This model is currently
+    experiencing high demand`(503)로 요청을 한동안 거절합니다. 예전에는 1.5초 뒤 한 번만 다시 시도해서,
+    18쪽짜리 찬양집회 콘티가 대부분의 곡을 `인식 실패 — 가사를 읽지 못했고 웹에서도 찾지 못했습니다`로
+    끝냈습니다(영어 곡은 한국 가사 사이트에 없어 웹으로도 채울 수 없습니다). 이제 모델이 바쁘다고(503 등
+    5xx, 분당 한도 429, 응답 시간 초과, 연결 끊김) 거절하면 **그 단계의 시간이 남아 있는 동안** 1.5초·3초·
+    6초…(최대 12초) 간격으로 다시 시도하고, 모델이 알려 준 대기 시간(`retry in 41s`)이 있으면 그만큼
+    기다립니다. 주 모델은 교차 검증 모델이 읽을 시간을 남기고 멈춥니다. 오늘 치 한도가 끝난 모델,
+    없는 모델, 잘못된 키는 다시 부르지 않습니다.
+    - **세 번째 주 모델은 Flash-Lite** — Flash 모델들은 몰리는 시간에 함께 거절하지만 Flash-Lite는
+      한도와 처리 용량이 따로라 대개 그때도 답합니다(2026년 10월 확인: Flash가 연달아 503일 때 Flash-Lite는
+      5초 만에 제목·파트·진행을 읽음). 이 자리에 있던 NVIDIA Nemotron Nano 12B VL은 OpenRouter가 무료
+      엔드포인트를 없애(`No endpoints found`) 목록에서 뺐습니다. 저장된 모델 순서에 없던 새 모델은 맨
+      뒤가 아니라 카탈로그에서 바로 앞 모델 다음에 들어가, 느린 교차 검증 모델 뒤에서 기다리지 않습니다.
+    - Gemini는 분당 한도와 하루 한도를 둘 다 `You exceeded your current quota`라고 알리므로, 응답에
+      적힌 한도 이름(`…PerMinute…` / `…PerDay…`)으로 구분합니다. 분당 한도로 그 모델을 콘티 내내 빼지
+      않습니다.
+    - 그래도 읽지 못한 곡의 카드는 이유를 알려 줍니다 (`AI 모델에 요청이 몰려 악보를 읽지 못했습니다. …
+      웹에서도 가사를 찾지 못했습니다.`). 잠시 뒤 그 곡의 **가사 자동 인식**을 다시 누르면 됩니다.
+    - OpenRouter 일괄 인식은 페이지 수만큼 답의 길이(`max_tokens`, 쪽당 1,500, 최대 32,768)를 늘려, 쪽이
+      많은 콘티의 가사 JSON이 4,096 토큰에서 잘려 통째로 실패하지 않게 합니다.
+  - **자동 재시도·구출 인식** — 일시적 오류는 위처럼 다시 시도하고,
     일괄 인식에서 가사를 읽지 못한 페이지는 **곡별로 다시 인식**해 한 페이지 문제가 전체 콘티를
     망치지 않습니다. 빈 응답은 성공으로 치지 않고 동시에 실행 중인 다른 모델의 결과를 기다립니다.
   - **시간 제한** — 인식은 악보를 다 그린 뒤부터 잽니다(제목 30초 → 가사 90초 → 교정 100초 →
@@ -1038,6 +1059,14 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    even when the cover or the KakaoTalk notice lists the songs: a page past the list joins the song
    whose title it prints, or — untitled, right after a song's page — carries on that song's score,
    and is read with it; a page printing another song's title is left out (`src/lib/utils/scorePages.ts`).
+   The pages are read by three primary models — Gemini 3.6 Flash, Gemini 3.5 Flash and Gemini 3.5
+   Flash-Lite — with Gemini 3.7 Flash and free OpenRouter models cross-checking pages they disagree
+   on. Free-tier Gemini turns calls away with 503 "high demand" in spikes that can last a minute, so a
+   busy model (5xx, a per-minute 429, a timeout, a dropped connection) is tried again with backoff
+   for as long as its stage has time, waiting as long as the provider asks; a spent daily quota is
+   not retried, and Gemini's per-minute and per-day 429s are told apart by the quota they name.
+   Flash-Lite has its own capacity and usually still answers when every Flash model is busy; it took
+   the slot of NVIDIA Nemotron Nano 12B VL, whose free OpenRouter endpoint was withdrawn.
 2. **Scripture** (ported from
    [edcho1012/kccp-bible-slide](https://github.com/edcho1012/kccp-bible-slide)) — free-text verse
    references (`행1:8-10 요3:16`) become verse slides in up to two translations. The conti's

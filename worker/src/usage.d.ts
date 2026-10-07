@@ -31,7 +31,6 @@ export interface UsageRecord {
 }
 
 export const DEFAULT_GEMINI_MODEL: string;
-export const DEFAULT_NVIDIA_MODEL: string;
 export const DEFAULT_OPENROUTER_MODEL: string;
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT: number;
 export const DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT: number;

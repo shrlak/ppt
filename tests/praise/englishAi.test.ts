@@ -26,6 +26,8 @@ describe('which models the English AI asks', () => {
     expect(attempts.filter((attempt) => attempt.engine === 'gemini').map((attempt) => attempt.model)).toEqual([
       'gemini-3.5-flash',
       'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.7-flash',
     ]);
     const firstOpenRouter = attempts.findIndex((attempt) => attempt.engine === 'openrouter');
     expect(firstOpenRouter).toBeGreaterThan(1);

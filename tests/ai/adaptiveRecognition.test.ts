@@ -12,6 +12,7 @@ import {
 } from '../../src/lib/ai/aiSettings';
 import { emptyReliability, modelKeyFor, rankModels, type ModelReliability } from '../../src/lib/ai/modelReliability';
 import { RecognitionError } from '../../src/lib/ai/recognitionError';
+import { MIN_ESCALATION_MS } from '../../src/lib/ai/recognitionBudget';
 import type { BatchAttemptResult } from '../../src/lib/ai/scoreRecognition';
 import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 
@@ -354,5 +355,26 @@ describe('recognizeAdaptiveBatch', () => {
     const result = await recognizeAdaptiveBatch([], settings, 'full', undefined, [], fakeProvider.provider);
     expect(result.scores).toEqual([]);
     expect(fakeProvider.calls).toEqual([]);
+  });
+});
+
+describe('time for the challengers', () => {
+  it('stops retrying busy champions early enough for a challenger to still read the page', async () => {
+    const retryUntil = new Map<string, number | undefined>();
+    const provider: BatchProvider = async (attempt, dataUrls, _settings, _mode, _hints, _examples, _timeoutMs, until) => {
+      retryUntil.set(attempt.model, until);
+      return {
+        attempt,
+        // The champions read different sentences, so the page goes to a challenger.
+        scores: dataUrls.map(() => (attempt.model === CHAMPIONS[0].model ? DISAGREED : AGREED)),
+        latencyMs: 10,
+      };
+    };
+    const deadlineAt = Date.now() + 60_000;
+    await recognizeAdaptiveBatch(['page-0'], settings, 'full', undefined, [], provider, [], deadlineAt);
+    for (const champion of CHAMPIONS) expect(retryUntil.get(champion.model)).toBe(deadlineAt - MIN_ESCALATION_MS);
+    // A challenger has the rest of the pass to itself.
+    expect(retryUntil.has(CHALLENGERS[0].model)).toBe(true);
+    expect(retryUntil.get(CHALLENGERS[0].model)).toBeUndefined();
   });
 });

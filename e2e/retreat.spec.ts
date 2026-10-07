@@ -53,7 +53,7 @@ async function stubRecognition(page: Page): Promise<{ requests: number }> {
   await page.route(`${PROXY}/gemini/**`, async (route) => {
     seen.requests += 1;
     const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
-    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData).length;
+    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inline_data?: unknown }).inline_data).length;
     await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: body(images) }] } }] } });
   });
   await page.route(`${PROXY}/openrouter`, async (route) => {

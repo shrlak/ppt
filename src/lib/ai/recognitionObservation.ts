@@ -11,7 +11,7 @@
 // category is enough to decide whether to retry, pause, or stop calling a
 // model for the rest of the job.
 import type { RecognitionAttempt } from './aiSettings';
-import { RecognitionError } from './recognitionError';
+import { RecognitionError, isTransientRecognitionError } from './recognitionError';
 import type { ParsedScore } from './scoreParser';
 
 /** Why a model call did not produce an answer. */
@@ -37,8 +37,17 @@ export interface RecognitionObservation {
 }
 
 /** Wording providers use when the allowance is spent for the day, not the minute. */
-const DAILY_LIMIT_WORDING =
-  /per[- ]?day|per[- ]?d\b|daily|하루|일일|rpd|free-models-per-day|quota|exhaust/i;
+const DAILY_LIMIT_WORDING = /per[- ]?day|per[- ]?d\b|daily|하루|일일|rpd|free-models-per-day/i;
+
+/**
+ * Wording of a limit that lifts within the minute. Gemini says "You exceeded
+ * your current quota" for its per-minute limit too, so this is checked before
+ * the bare word "quota": the quota it names (`…PerMinute…`) is what tells.
+ */
+const BURST_LIMIT_WORDING = /per[- ]?minute|\brpm\b|\btpm\b|retry shortly|temporarily rate-limited/i;
+
+/** A spent allowance the provider named without saying which one. */
+const QUOTA_WORDING = /quota|exhaust/i;
 
 /**
  * Reduce a thrown error to a storable category.
@@ -53,7 +62,11 @@ export function classifyRecognitionError(error: unknown): RecognitionErrorCatego
   const message = error instanceof Error ? error.message : String(error ?? '');
   if (error instanceof RecognitionError && error.status != null) {
     const { status } = error;
-    if (status === 429) return DAILY_LIMIT_WORDING.test(message) ? 'quota' : 'rate-limit';
+    if (status === 429) {
+      if (DAILY_LIMIT_WORDING.test(message)) return 'quota';
+      if (BURST_LIMIT_WORDING.test(message)) return 'rate-limit';
+      return QUOTA_WORDING.test(message) ? 'quota' : 'rate-limit';
+    }
     if (status === 401 || status === 403) return 'auth';
     if (status === 408) return 'timeout';
     if (status >= 500) return 'server';
@@ -63,6 +76,17 @@ export function classifyRecognitionError(error: unknown): RecognitionErrorCatego
   if (/JSON|해석하지 못했습니다|비어 있습니다/i.test(message)) return 'format';
   if (/abort|timeout/i.test(message)) return 'timeout';
   return 'unknown';
+}
+
+/**
+ * True when the same call is worth trying again shortly: the provider was
+ * busy (503 and other 5xx, a burst 429), the request timed out, or the
+ * connection dropped. A spent daily quota, a refused key, an unknown model or
+ * a malformed answer is not.
+ */
+export function isRetryableRecognitionError(error: unknown): boolean {
+  if (isTransientRecognitionError(error)) return true;
+  return classifyRecognitionError(error) === 'rate-limit';
 }
 
 /** True when this model is finished for the rest of the job, not just this call. */

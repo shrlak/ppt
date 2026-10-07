@@ -17,13 +17,13 @@ import {
   sanitizeSharedSettings,
 } from '../../src/lib/ai/aiSettings';
 import {
-  OPENROUTER_NEMOTRON_MODEL,
   RECOGNITION_MODEL_CATALOG as WORKER_CATALOG,
   DEFAULT_CONFESSION_SONG as WORKER_CONFESSION,
   DEFAULT_POST_SERMON_SONG as WORKER_POST_SERMON,
   DEFAULT_EXCLUDED_TITLES as WORKER_EXCLUDED,
   migrateEngineName as workerMigrateEngineName,
   resolveOpenRouterRoute,
+  sanitizeAttemptOrder as workerSanitizeAttemptOrder,
   sanitizeSharedSettings as workerSanitize,
 } from '../../worker/src/config.js';
 
@@ -70,10 +70,6 @@ describe('recognition model catalog', () => {
   });
 
   it('pins every OpenRouter fallback to an allowlisted free vision model', () => {
-    expect(resolveOpenRouterRoute('nvidia/nemotron-nano-12b-v2-vl')).toEqual({
-      configuredModel: 'nvidia/nemotron-nano-12b-v2-vl',
-      upstreamModel: OPENROUTER_NEMOTRON_MODEL,
-    });
     expect(resolveOpenRouterRoute('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')).toEqual({
       configuredModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       upstreamModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
@@ -82,6 +78,15 @@ describe('recognition model catalog', () => {
     // substituting would spend the shared key on a request nobody made and
     // would credit the accuracy to the wrong model.
     expect(resolveOpenRouterRoute('paid/or-made-up-model')).toBeNull();
+    // OpenRouter withdrew Nemotron Nano 12B VL's free endpoint; it is no
+    // longer in the catalog, so a stale client asking for it is refused.
+    expect(resolveOpenRouterRoute('nvidia/nemotron-nano-12b-v2-vl')).toBeNull();
+  });
+
+  it('keeps a Gemini Flash-Lite among the champions, so a Flash-wide 503 spike still leaves a reader', () => {
+    const champions = RECOGNITION_MODEL_CATALOG.filter((entry) => entry.role === 'champion').map((entry) => entry.model);
+    expect(champions).toEqual(['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']);
+    expect(RECOGNITION_MODEL_CATALOG.some((entry) => entry.model === 'nvidia/nemotron-nano-12b-v2-vl')).toBe(false);
   });
 });
 
@@ -102,17 +107,48 @@ describe('migrateEngineName', () => {
 
   it('still resolves catalog info for a stored legacy attempt', () => {
     expect(
-      findModelInfo({ engine: 'nvidia' as 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl' })?.role,
-    ).toBe('champion');
+      findModelInfo({
+        engine: 'nvidia' as 'openrouter',
+        model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+      })?.role,
+    ).toBe('challenger');
   });
 });
 
 describe('sanitizeAttemptOrder', () => {
   it('migrates the legacy nvidia engine without changing its model', () => {
-    expect(sanitizeAttemptOrder([{ engine: 'nvidia', model: 'nvidia/nemotron-nano-12b-v2-vl' }])[0]).toEqual({
+    const order = sanitizeAttemptOrder([
+      { engine: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
+    ]);
+    expect(order).toContainEqual({
       engine: 'openrouter',
-      model: 'nvidia/nemotron-nano-12b-v2-vl',
+      model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
+  });
+
+  it('drops a model the catalog withdrew and puts the new ones beside their catalog neighbours', () => {
+    // The pool every device had stored before Nemotron Nano 12B VL's free
+    // endpoint went away.
+    const stored = [
+      { engine: 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl' },
+      { engine: 'gemini', model: 'gemini-3.6-flash' },
+      { engine: 'gemini', model: 'gemini-3.5-flash' },
+      { engine: 'openrouter', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' },
+      { engine: 'openrouter', model: 'dots-studio/dots-3-note-preview:free' },
+      { engine: 'openrouter', model: 'google/gemma-4-31b-it:free' },
+    ];
+    // Not behind the slow challengers: the rescue takes the first answer
+    // down this order.
+    expect(sanitizeAttemptOrder(stored).map((attempt) => attempt.model)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.7-flash',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+      'dots-studio/dots-3-note-preview:free',
+      'google/gemma-4-31b-it:free',
+    ]);
+    expect(workerSanitizeAttemptOrder(stored)).toEqual(sanitizeAttemptOrder(stored));
   });
 
   it('keeps a valid custom order and appends the missing catalog models', () => {
@@ -133,7 +169,8 @@ describe('sanitizeAttemptOrder', () => {
       { engine: 'gemini', model: 'gemini-3.5-flash' },
       { engine: 'gemini', model: 'gemini-3.5-flash' },
     ]);
-    expect(order[0]).toEqual({ engine: 'gemini', model: 'gemini-3.5-flash' });
+    expect(order.filter((attempt) => attempt.model === 'gemini-3.5-flash')).toHaveLength(1);
+    expect(order.some((attempt) => attempt.model === 'made-up-model' || attempt.model === 'gemini-2.5-pro')).toBe(false);
     expect(order).toHaveLength(DEFAULT_ATTEMPT_ORDER.length);
   });
 

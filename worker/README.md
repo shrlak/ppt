@@ -296,9 +296,11 @@ Library reads are limited by the same origin allowlist as recognition. Library
 writes require the administrator credential used by `/settings`. This matches
 the app's current shared-admin model; it is not per-user account isolation.
 
-The `/openrouter` route pins every request to one of the two free vision
-models in the pool: NVIDIA Nemotron Nano 12B VL (document intelligence) or
-NVIDIA Nemotron 3 Nano Omni 30B (reasoning). The legacy `/nvidia` path remains
+The `/openrouter` route pins every request to one of the free OpenRouter
+vision models in the catalog (`src/config.js`): NVIDIA Nemotron 3 Nano Omni 30B
+(reasoning), dots.note 3 and Gemma 4 31B. NVIDIA Nemotron Nano 12B VL was
+removed when OpenRouter withdrew its free endpoint, and is refused like any
+model outside the catalog. The legacy `/nvidia` path remains
 as an alias for older deployed clients, but new builds use `/openrouter`. No
 request goes directly from the deployed browser to OpenRouter.
 

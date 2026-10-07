@@ -120,8 +120,13 @@ const RESCUE_RENDER_WIDTH = 2200;
  * back.
  */
 function rescueFailureMessage(error: unknown): string {
-  if (classifyRecognitionError(error) === 'timeout') {
+  const category = classifyRecognitionError(error);
+  if (category === 'timeout') {
     return 'AI 모델이 제한 시간 안에 답하지 않았습니다. 이 곡만 다시 인식하면 대개 읽힙니다.';
+  }
+  // Free-tier models turn calls away in spikes ("high demand"); they pass.
+  if (category === 'server' || category === 'rate-limit') {
+    return 'AI 모델에 요청이 몰려 악보를 읽지 못했습니다. 잠시 뒤 이 곡만 다시 인식하면 대개 읽힙니다.';
   }
   return error instanceof Error ? error.message : String(error);
 }
@@ -958,7 +963,16 @@ export default function LyricsGenerator({
        * from "done" and from auto-save until the web pass below has had its
        * turn — otherwise the library would keep the uncorrected OCR wording.
        */
-      const webQueue = new Map<string, { score: ParsedScore; engine: string; title: string }>();
+      const webQueue = new Map<
+        string,
+        {
+          score: ParsedScore;
+          engine: string;
+          title: string;
+          /** Why the 악보 gave no lyrics, said on the card if the web has none either. */
+          unread?: string;
+        }
+      >();
 
       /** Songs neither the models nor the web could fill, with the reason. */
       const failures = new Map<string, string>();
@@ -1075,7 +1089,11 @@ export default function LyricsGenerator({
 
         enterPhase('web', pending.map(([id]) => id));
         await Promise.all(
-          pending.map(async ([id, { score, engine, title }]) => {
+          pending.map(async ([id, { score, engine, title, unread }]) => {
+            // Said when neither the 악보 nor the web gave this song lyrics.
+            const notFound = unread
+              ? `${unread.trim()} 웹에서도 가사를 찾지 못했습니다.`
+              : '가사를 읽지 못했고 웹에서도 찾지 못했습니다.';
             // What the models read is sent as matching evidence, so a page
             // that merely shares this title cannot be mistaken for this song.
             // The title read off the 악보 is searched as well as the conti's
@@ -1130,12 +1148,12 @@ export default function LyricsGenerator({
             }
 
             if (!auto) {
-              settleWithoutWeb(id, score, engine, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
+              settleWithoutWeb(id, score, engine, notFound);
               return;
             }
             const merged = mergeRankedWebLyrics(score, auto);
             if (merged.score.sections.length === 0) {
-              failures.set(id, '가사를 읽지 못했고 웹에서도 찾지 못했습니다.');
+              failures.set(id, notFound);
               return;
             }
             // Saved words somebody confirmed stay: the 악보 and the page give
@@ -1737,17 +1755,18 @@ export default function LyricsGenerator({
             const known: ParsedScore = scoreById.get(song.id) ?? { ...identity, order: [], sections: [] };
             // No lyrics off the page: a title — the conti's, or the one read
             // off the 악보 — is still enough for the web pass to find them.
-            const toWebOrFail = (score: ParsedScore, engine: string, failure: string) => {
+            const toWebOrFail = (score: ParsedScore, engine: string, failure: string, why?: string) => {
               const lookupTitle = lyricsLookupTitle(song.title, score.title);
               if (lookupTitle && !isPlaceholderTitle(lookupTitle)) {
-                webQueue.set(song.id, { score, engine, title: lookupTitle });
+                webQueue.set(song.id, { score, engine, title: lookupTitle, unread: why });
               } else {
                 failures.set(song.id, failure);
               }
             };
             // Out of time for another model call: hand the title straight on.
             if (deadline.remainingTotal() < MIN_ATTEMPT_MS) {
-              toWebOrFail(known, lyricEngine, '인식 시간이 초과되어 가사를 읽지 못했습니다.');
+              const late = '인식 시간이 초과되어 가사를 읽지 못했습니다.';
+              toWebOrFail(known, lyricEngine, late, late);
               return;
             }
             try {
@@ -1822,7 +1841,8 @@ export default function LyricsGenerator({
               // The retry failed too — most often every model was too slow
               // to answer. A song whose title is known still gets its lyrics
               // from the web rather than a failed card.
-              toWebOrFail(known, lyricEngine, rescueFailureMessage(error));
+              const why = rescueFailureMessage(error);
+              toWebOrFail(known, lyricEngine, why, why);
             }
           }),
         );

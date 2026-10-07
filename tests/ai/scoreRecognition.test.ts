@@ -17,6 +17,8 @@ const OPENROUTER_MODEL_COUNT = RECOGNITION_MODEL_CATALOG.filter(
 ).length;
 /** Lowest-priority model in the pool — the one every other model outranks. */
 const LAST_MODEL = RECOGNITION_MODEL_CATALOG[RECOGNITION_MODEL_CATALOG.length - 1].model;
+/** The OpenRouter model listed first in the pool. */
+const FIRST_OPENROUTER_MODEL = RECOGNITION_MODEL_CATALOG.find((entry) => entry.engine === 'openrouter')!.model;
 
 vi.mock('../../src/lib/ai/scoreAi', () => ({
   recognizeWithGemini: vi.fn(),
@@ -70,7 +72,7 @@ describe('concurrent single-page recognition', () => {
 
   it('launches the complete model pool together and returns the first usable result', async () => {
     vi.mocked(recognizeWithOpenRouter).mockImplementation(async (_url, _key, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return result;
+      if (model === FIRST_OPENROUTER_MODEL) return result;
       throw new Error('down');
     });
 
@@ -130,6 +132,87 @@ describe('concurrent single-page recognition', () => {
 
     await expect(pending).resolves.toMatchObject({ engine: 'gemini' });
     expect(recognizeWithGemini).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps trying a model that answers 503 high demand until it reads the page', async () => {
+    // Free-tier Gemini refuses calls in spikes ("This model is currently
+    // experiencing high demand"); one quick retry was not enough to get past
+    // one, and the page came back unread.
+    vi.useFakeTimers();
+    const oneModel = {
+      ...settings,
+      attempts: [{ engine: 'gemini' as const, model: 'gemini-3.6-flash' }],
+    };
+    const busy = () => new RecognitionError('Gemini 호출 실패: This model is currently experiencing high demand.', 503);
+    vi.mocked(recognizeWithGemini)
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockResolvedValueOnce(result);
+
+    const pending = recognizeScore('data:image/png;base64,x', oneModel, 60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await expect(pending).resolves.toMatchObject({ engine: 'gemini' });
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(4);
+  });
+
+  it('stops trying a busy model in time for its call to end, and fires nothing after', async () => {
+    vi.useFakeTimers();
+    const oneModel = {
+      ...settings,
+      attempts: [{ engine: 'gemini' as const, model: 'gemini-3.6-flash' }],
+    };
+    vi.mocked(recognizeWithGemini).mockRejectedValue(new RecognitionError('Gemini 호출 실패: HTTP 503', 503));
+
+    const pending = recognizeScore('data:image/png;base64,x', oneModel, 20_000);
+    const settled = expect(pending).rejects.toThrow('503');
+    await vi.advanceTimersByTimeAsync(20_000);
+    await settled;
+    const tries = vi.mocked(recognizeWithGemini).mock.calls.length;
+    expect(tries).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(tries);
+  });
+
+  it('waits as long as the provider asks before trying a rate-limited model again', async () => {
+    vi.useFakeTimers();
+    const oneModel = {
+      ...settings,
+      attempts: [{ engine: 'gemini' as const, model: 'gemini-3.6-flash' }],
+    };
+    vi.mocked(recognizeWithGemini)
+      .mockRejectedValueOnce(
+        new RecognitionError(
+          'Gemini 호출 실패: You exceeded your current quota. [GenerateRequestsPerMinutePerProjectPerModel-FreeTier]',
+          429,
+          20_000,
+        ),
+      )
+      .mockResolvedValueOnce(result);
+
+    const pending = recognizeScore('data:image/png;base64,x', oneModel, 60_000);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(pending).resolves.toMatchObject({ engine: 'gemini' });
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not try again a model whose daily quota is spent', async () => {
+    const oneModel = {
+      ...settings,
+      attempts: [{ engine: 'gemini' as const, model: 'gemini-3.6-flash' }],
+    };
+    vi.mocked(recognizeWithGemini).mockRejectedValue(
+      new RecognitionError(
+        'Gemini 호출 실패: You exceeded your current quota. [GenerateRequestsPerDayPerProjectPerModel-FreeTier]',
+        429,
+      ),
+    );
+
+    await expect(recognizeScore('data:image/png;base64,x', oneModel)).rejects.toThrow('quota');
+    expect(recognizeWithGemini).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the rescue API on the same all-model race', async () => {
@@ -196,7 +279,7 @@ describe('concurrent batch recognition', () => {
       model === 'gemini-3.6-flash' ? gemini : Promise.reject(new Error('down')),
     );
     vi.mocked(recognizeBatchWithOpenRouter).mockImplementation((_urls, _key, _mode, model) =>
-      model === 'nvidia/nemotron-nano-12b-v2-vl' ? openRouter : Promise.reject(new Error('down')),
+      model === FIRST_OPENROUTER_MODEL ? openRouter : Promise.reject(new Error('down')),
     );
 
     const pending = recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
@@ -213,10 +296,14 @@ describe('concurrent batch recognition', () => {
   });
 
   it('records every model’s answer as an observation instead of dropping the losers', async () => {
+    vi.useFakeTimers();
     vi.mocked(recognizeBatchWithGemini).mockResolvedValue([first, second]);
     vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new RecognitionError('rate limited', 429));
 
-    const out = await recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+    // A burst rate limit is waited out while the call has time, then recorded.
+    const pending = recognizeScoreBatch(['image-1', 'image-2'], settings, 'full');
+    await vi.advanceTimersByTimeAsync(130_000);
+    const out = await pending;
 
     // One observation per model per page, successful or not. The losing
     // answers are what a later verified correction scores each model against.
@@ -262,7 +349,7 @@ describe('concurrent batch recognition', () => {
       throw new Error('down');
     });
     vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [openRouterAnswer];
+      if (model === FIRST_OPENROUTER_MODEL) return [openRouterAnswer];
       throw new Error('down');
     });
 
@@ -387,7 +474,7 @@ describe('concurrent batch recognition', () => {
       throw new Error('down');
     });
     vi.mocked(recognizeBatchWithOpenRouter).mockImplementation(async (_urls, _key, _mode, model) => {
-      if (model === 'nvidia/nemotron-nano-12b-v2-vl') return [disagreeing];
+      if (model === FIRST_OPENROUTER_MODEL) return [disagreeing];
       throw new Error('down');
     });
 
@@ -545,9 +632,11 @@ describe('line-level consensus across the model pool', () => {
   });
 
   it('is inert for a pool of two, where one vote can never beat the winner', async () => {
-    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) =>
-      model === 'gemini-3.6-flash' ? [one(['능력이'])] : [one(['실력이'])],
-    );
+    vi.mocked(recognizeBatchWithGemini).mockImplementation(async (_urls, _key, model) => {
+      if (model === 'gemini-3.6-flash') return [one(['능력이'])];
+      if (model === 'gemini-3.5-flash') return [one(['실력이'])];
+      throw new Error('down');
+    });
     vi.mocked(recognizeBatchWithOpenRouter).mockRejectedValue(new Error('down'));
     const out = await recognizeScoreBatch(['image-1'], settings, 'full');
     expect(out.scores[0].sections[0].lines[0]).toBe('능력이');

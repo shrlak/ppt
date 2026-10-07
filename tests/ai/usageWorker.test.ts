@@ -126,16 +126,17 @@ describe('AI proxy usage records', () => {
   it('maps every catalog model to the provider/model pair it is metered under', () => {
     const pairs = usageCatalogModels();
     expect(pairs).toHaveLength(RECOGNITION_MODEL_CATALOG.length);
-    // The Nemotron slot meters as the exact :free slug the Worker forwards to.
-    expect(pairs).toContainEqual({ provider: 'openrouter', model: 'nvidia/nemotron-nano-12b-v2-vl:free' });
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.6-flash' });
     expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.5-flash' });
+    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.5-flash-lite' });
+    expect(pairs).toContainEqual({ provider: 'gemini', model: 'gemini-3.7-flash' });
+    // An OpenRouter model meters as the exact :free slug the Worker forwards to.
     expect(pairs).toContainEqual({
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     });
     // Three champions plus the free challengers used for cross-checking.
-    expect(pairs).toHaveLength(6);
+    expect(pairs).toHaveLength(7);
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free' });
     expect(pairs).toContainEqual({ provider: 'openrouter', model: 'google/gemma-4-31b-it:free' });
   });
