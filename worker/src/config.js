@@ -8,29 +8,20 @@
 // pinned to an OpenRouter :free model. Arbitrary model IDs can never spend
 // the shared OpenRouter key.
 
-import { DEFAULT_NVIDIA_MODEL } from './usage.js';
-
-/** The OpenRouter free variant used for the existing Nemotron catalog slot. */
-export const OPENROUTER_NEMOTRON_MODEL = `${DEFAULT_NVIDIA_MODEL}:free`;
-
 // Each entry declares its starting ROLE: champions read every page,
 // challengers are called only for pages the champions disagreed on. Only
 // currently-best free vision models belong here — see the entry bar
 // documented in src/lib/ai/aiSettings.ts, which this mirrors exactly.
 //
-// `upstreamModel` is what the proxy actually forwards to. It differs from
-// `model` only for the legacy suffix-free Nemotron ID that stored settings
-// still carry; every OpenRouter route ends in `:free`, so the shared key can
-// never be spent on a paid model.
+// `upstreamModel` is what the proxy actually forwards to. Every OpenRouter
+// route ends in `:free`, so the shared key can never be spent on a paid
+// model. A model the catalog no longer lists (Nemotron Nano 12B VL, whose free
+// endpoint OpenRouter withdrew) is refused and dropped from stored settings.
 export const RECOGNITION_MODEL_CATALOG = [
   { engine: 'gemini', model: 'gemini-3.6-flash', upstreamModel: 'gemini-3.6-flash', role: 'champion' },
   { engine: 'gemini', model: 'gemini-3.5-flash', upstreamModel: 'gemini-3.5-flash', role: 'champion' },
-  {
-    engine: 'openrouter',
-    model: 'nvidia/nemotron-nano-12b-v2-vl',
-    upstreamModel: OPENROUTER_NEMOTRON_MODEL,
-    role: 'champion',
-  },
+  { engine: 'gemini', model: 'gemini-3.5-flash-lite', upstreamModel: 'gemini-3.5-flash-lite', role: 'champion' },
+  { engine: 'gemini', model: 'gemini-3.7-flash', upstreamModel: 'gemini-3.7-flash', role: 'challenger' },
   {
     engine: 'openrouter',
     model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
@@ -126,8 +117,28 @@ export function sanitizeAttemptOrder(raw) {
       if (known && isFreeVisionCatalogEntry(known)) push(known);
     }
   }
-  for (const entry of RECOGNITION_MODEL_CATALOG) push(entry);
-  return order;
+  return withMissingCatalogModels(order);
+}
+
+/**
+ * A stored order plus the catalog models it does not list yet, each right
+ * after the listed model that comes before it in the catalog (mirrors
+ * src/lib/ai/aiSettings.ts): a new primary model is not queued behind every
+ * slow challenger.
+ */
+function withMissingCatalogModels(order) {
+  const rank = (attempt) => RECOGNITION_MODEL_CATALOG.findIndex((entry) => attemptKey(entry) === attemptKey(attempt));
+  const result = [...order];
+  for (const entry of RECOGNITION_MODEL_CATALOG) {
+    if (result.some((attempt) => attemptKey(attempt) === attemptKey(entry))) continue;
+    const own = rank(entry);
+    let at = 0;
+    result.forEach((attempt, index) => {
+      if (rank(attempt) < own) at = index + 1;
+    });
+    result.splice(at, 0, { engine: entry.engine, model: entry.model });
+  }
+  return result;
 }
 
 /** Non-empty trimmed strings, deduped case/spacing-insensitively, capped. */
@@ -201,8 +212,7 @@ export function allowedOpenRouterModels() {
  *
  * Rejecting is deliberate: quietly substituting another model would spend the
  * shared key on a request nobody asked for and would report accuracy for the
- * wrong model. Nemotron keeps its suffix-free client ID for stored-settings
- * compatibility, and the Worker adds `:free` before forwarding it.
+ * wrong model.
  */
 export function resolveOpenRouterRoute(requested) {
   const known = RECOGNITION_MODEL_CATALOG.find(

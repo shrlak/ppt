@@ -44,6 +44,8 @@ export type BatchProvider = (
   hints?: (string | undefined)[],
   examples?: PromptExample[],
   timeoutMs?: number,
+  /** Epoch ms after which a busy model is not tried again (see runBatchAttempt). */
+  retryUntil?: number,
 ) => Promise<BatchAttemptResult>;
 
 export interface AdaptivePlan {
@@ -190,13 +192,15 @@ export async function recognizeAdaptiveBatch(
 
   const timeLeft = () => (deadlineAt === undefined ? undefined : msUntil(deadlineAt));
 
-  const runRound = async (attempts: RecognitionAttempt[], pages: number[]): Promise<void> => {
+  const runRound = async (attempts: RecognitionAttempt[], pages: number[], retryUntil?: number): Promise<void> => {
     if (attempts.length === 0 || pages.length === 0) return;
     const images = pages.map((page) => dataUrls[page]);
     const pageHints = hints ? pages.map((page) => hints[page]) : undefined;
     const timeoutMs = timeLeft();
     const results = await Promise.all(
-      attempts.map((attempt) => provider(attempt, images, settings, mode, pageHints, examples, timeoutMs)),
+      attempts.map((attempt) =>
+        provider(attempt, images, settings, mode, pageHints, examples, timeoutMs, retryUntil),
+      ),
     );
     for (const result of results) {
       // A spent daily allowance does not recover within this job, so the model
@@ -212,7 +216,9 @@ export async function recognizeAdaptiveBatch(
   if (plan.champions.length === 0) throw new Error('사용할 수 있는 인식 모델이 없습니다.');
   const startLeft = timeLeft();
   if (startLeft !== undefined && startLeft < MIN_ATTEMPT_MS) throw new Error('인식 시간이 부족합니다.');
-  await runRound(plan.champions, allPages);
+  // A busy champion is tried again while the pass has time, but stops in time
+  // for a challenger to read the pages the champions could not settle.
+  await runRound(plan.champions, allPages, deadlineAt === undefined ? undefined : deadlineAt - MIN_ESCALATION_MS);
 
   let consensus = observations.map((page) => buildWeightedConsensus(page, reliabilities));
 

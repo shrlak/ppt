@@ -31,10 +31,8 @@ export interface RecognitionModelInfo extends RecognitionAttempt {
   /** Starting role, used until measured reliability takes over (see modelReliability.ts). */
   role: ModelRole;
   /**
-   * Exact slug the request is forwarded to. It differs from `model` only for
-   * the legacy suffix-free Nemotron ID, which stored settings still carry;
-   * every OpenRouter route ends in `:free` so the shared key can never be
-   * spent on a paid model.
+   * Exact slug the request is forwarded to. Every OpenRouter route ends in
+   * `:free` so the shared key can never be spent on a paid model.
    */
   upstreamModel: string;
 }
@@ -97,13 +95,28 @@ export const RECOGNITION_MODEL_CATALOG: RecognitionModelInfo[] = [
     label: 'Gemini 3.5 Flash',
     note: '주 모델 — 별도 무료 한도를 가진 상위 Gemini (15 RPM · 1,500 RPD)',
   },
+  // The third primary is a Flash-Lite on purpose. Free-tier Flash calls meet
+  // "This model is currently experiencing high demand" (503) in spikes that
+  // take every Flash release down together for a minute or more; Flash-Lite
+  // has its own capacity and quota, answered every call while the Flash
+  // models were refusing them (October 2026), and reads the 악보's titles,
+  // parts and lyrics nearly as well. Nemotron Nano 12B VL held this slot
+  // until OpenRouter withdrew its free endpoint ("No endpoints found").
   {
-    engine: 'openrouter',
-    model: 'nvidia/nemotron-nano-12b-v2-vl',
-    upstreamModel: 'nvidia/nemotron-nano-12b-v2-vl:free',
+    engine: 'gemini',
+    model: 'gemini-3.5-flash-lite',
+    upstreamModel: 'gemini-3.5-flash-lite',
     role: 'champion',
-    label: 'NVIDIA Nemotron Nano 12B VL · OpenRouter Free',
-    note: '주 모델 — 문서 OCR·표 인식 특화로 악보의 작은 가사 글씨에 강합니다',
+    label: 'Gemini 3.5 Flash-Lite',
+    note: '주 모델 — Flash가 몰려 응답하지 않을 때도 대개 답하는 별도 한도의 빠른 Gemini',
+  },
+  {
+    engine: 'gemini',
+    model: 'gemini-3.7-flash',
+    upstreamModel: 'gemini-3.7-flash',
+    role: 'challenger',
+    label: 'Gemini 3.7 Flash',
+    note: '교차 검증 — 별도 무료 한도를 가진 최신 Gemini Flash, 주 모델이 갈린 페이지를 가장 먼저 다시 읽습니다',
   },
   {
     engine: 'openrouter',
@@ -285,8 +298,30 @@ export function sanitizeAttemptOrder(raw: unknown): RecognitionAttempt[] {
       if (known && isFreeVisionCatalogEntry(known)) push(known);
     }
   }
-  for (const entry of DEFAULT_ATTEMPT_ORDER) push(entry);
-  return order;
+  return withMissingCatalogModels(order);
+}
+
+/**
+ * A stored order plus the catalog models it does not list yet. Each goes in
+ * right after the listed model that comes before it in the catalog, not at
+ * the end: the single-page rescue takes the first answer down the order, so
+ * a new primary model appended behind every slow challenger would wait for
+ * all of them.
+ */
+function withMissingCatalogModels(order: RecognitionAttempt[]): RecognitionAttempt[] {
+  const rank = (attempt: RecognitionAttempt) =>
+    RECOGNITION_MODEL_CATALOG.findIndex((entry) => attemptKey(entry) === attemptKey(attempt));
+  const result = [...order];
+  for (const entry of RECOGNITION_MODEL_CATALOG) {
+    if (result.some((attempt) => attemptKey(attempt) === attemptKey(entry))) continue;
+    const own = rank(entry);
+    let at = 0;
+    result.forEach((attempt, index) => {
+      if (rank(attempt) < own) at = index + 1;
+    });
+    result.splice(at, 0, { engine: entry.engine, model: entry.model });
+  }
+  return result;
 }
 
 /**

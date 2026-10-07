@@ -3,6 +3,7 @@ import {
   buildGeminiBatchBody,
   buildGeminiBody,
   extractGeminiText,
+  geminiError,
   parseGeminiBatchPayload,
   parseGeminiPayload,
   recognizeBatchWithGemini,
@@ -221,5 +222,36 @@ describe('recognizeWithGemini', () => {
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('generativelanguage.googleapis.com');
+  });
+});
+
+describe('geminiError', () => {
+  it('keeps the quota Gemini names and how long it asks to wait', async () => {
+    const res = new Response(
+      JSON.stringify({
+        error: {
+          code: 429,
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+              violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }],
+            },
+            { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '41s' },
+          ],
+        },
+      }),
+      { status: 429 },
+    );
+    const error = await geminiError(res, 'Gemini 일괄 호출 실패');
+    expect(error.status).toBe(429);
+    expect(error.message).toContain('GenerateRequestsPerMinutePerProjectPerModel-FreeTier');
+    expect(error.retryAfterMs).toBe(41_000);
+  });
+
+  it('keeps the status when the body is not JSON', async () => {
+    const error = await geminiError(new Response('upstream connect error', { status: 503 }), 'Gemini 호출 실패');
+    expect(error.message).toBe('Gemini 호출 실패: HTTP 503');
+    expect(error.status).toBe(503);
   });
 });

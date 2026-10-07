@@ -528,7 +528,7 @@ async function stubSavedSlideSong(page: Page, webLines: string[] | null): Promis
     JSON.stringify({ results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({ imageIndex, ...SCORE_READING })) });
   await page.route(`${PROXY}/gemini/**`, async (route) => {
     const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
-    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData);
+    const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inline_data?: unknown }).inline_data);
     await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images.length) }] } }] } });
   });
   await page.route(`${PROXY}/openrouter`, async (route) => {
@@ -678,7 +678,7 @@ test.describe('찬양집회 conti printing a song in Korean and again in English
       });
     await page.route(`${PROXY}/gemini/**`, async (route) => {
       const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
-      const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inlineData?: unknown }).inlineData);
+      const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inline_data?: unknown }).inline_data);
       await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images.length) }] } }] } });
     });
     await page.route(`${PROXY}/openrouter`, async (route) => {

@@ -6,8 +6,7 @@
 // portable "remaining credit" API.
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
-export const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
-export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
+export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
 export const DEFAULT_GEMINI_DAILY_REQUEST_LIMIT = 250;
 export const DEFAULT_OPENROUTER_DAILY_REQUEST_LIMIT = 50;
 // build.nvidia.com grants free API credits (1 credit = 1 request). The pool

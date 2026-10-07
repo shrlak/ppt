@@ -205,7 +205,7 @@ async function stubRecognitionProxy(page: Page, stubs: ProxyStubs = {}): Promise
     counts.gemini += 1;
     const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
     const images = (payload.contents?.[0]?.parts ?? []).filter(
-      (part) => !!(part as { inlineData?: unknown }).inlineData,
+      (part) => !!(part as { inline_data?: unknown }).inline_data,
     ).length;
     await route.fulfill({
       json: { candidates: [{ content: { parts: [{ text: batchBody(Math.max(1, images)) }] } }] },
@@ -1686,12 +1686,14 @@ test.describe('a page the models cannot read', () => {
       },
     });
     // The title pass answers; every read of the lyrics — the batch and the
-    // page's own retry — fails, as it does when every model is too slow.
+    // page's own retry — fails. A refusal no retry can fix keeps this quick:
+    // a busy model (5xx) is tried again until its stage's time is up, which
+    // ends the same way two minutes later (tests/ai/scoreRecognition.test.ts).
     const titlePass = (body: string) => body.includes('가사, 파트, 진행 순서는');
     for (const route of [`${PROXY}/gemini/**`, `${PROXY}/openrouter`]) {
       await page.route(route, async (request) => {
         if (titlePass(request.request().postData() ?? '')) return request.fallback();
-        await request.fulfill({ status: 500, body: 'upstream timed out' });
+        await request.fulfill({ status: 400, json: { error: { message: 'Request contains an invalid argument.' } } });
       });
     }
 

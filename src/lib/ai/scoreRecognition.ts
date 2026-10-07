@@ -10,8 +10,12 @@ import {
   recognizeWithOpenRouter,
   type PromptExample,
 } from './scoreNvidia';
-import { RecognitionError, isTransientRecognitionError } from './recognitionError';
-import { classifyRecognitionError, type RecognitionObservation } from './recognitionObservation';
+import { RecognitionError } from './recognitionError';
+import {
+  classifyRecognitionError,
+  isRetryableRecognitionError,
+  type RecognitionObservation,
+} from './recognitionObservation';
 import {
   SAME_LINE_THRESHOLD,
   adoptSplitVerses,
@@ -29,8 +33,28 @@ import { findSection, sortSectionsByOrder } from '../utils/slidePlanner';
  */
 const PROXY_URL = import.meta.env.VITE_RECOGNITION_PROXY_URL?.trim() || undefined;
 
-/** Wait before the single transient-failure retry (rate limit bursts, 5xx). */
-const TRANSIENT_RETRY_DELAY_MS = 1500;
+/**
+ * First pause before trying a busy model again; each further pause doubles,
+ * up to RETRY_MAX_DELAY_MS.
+ *
+ * One quick retry used to be all a model got. Free-tier Gemini answers
+ * "This model is currently experiencing high demand" (503) in spikes that
+ * last from seconds to over a minute, and on a busy evening most calls of a
+ * conti met one — a 찬양집회 conti of 18 pages then came back with most of its
+ * songs unread. So a busy model is tried again for as long as the call has
+ * time left, backing off so the retries do not add to the crowd.
+ */
+const RETRY_BASE_DELAY_MS = 1500;
+
+/** The longest pause between two tries of the same call. */
+const RETRY_MAX_DELAY_MS = 12_000;
+
+/**
+ * Another try is only started with at least this much of the call's time
+ * left: a model needs a few seconds to read even one page, and a try cut off
+ * mid-answer is wasted.
+ */
+const MIN_RETRY_WINDOW_MS = 8_000;
 
 /**
  * Hard cap on one model's batch call.
@@ -65,18 +89,35 @@ async function withAttemptTimeout<T>(work: Promise<T>, timeoutMs: number): Promi
   }
 }
 
+/** How long to wait before try number `retry + 2`: the provider's own hint, else backing off. */
+function retryDelayMs(error: unknown, retry: number): number {
+  const backoff = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** retry);
+  // A little spread, so the pages and models that failed together do not
+  // all come back at the same instant.
+  const spread = backoff * (0.8 + Math.random() * 0.4);
+  const hinted = error instanceof RecognitionError ? error.retryAfterMs : undefined;
+  return hinted !== undefined ? Math.max(hinted, spread) : spread;
+}
+
 /**
- * Run an engine call, retrying once after a short pause when the failure is
- * transient (408/5xx/network). One retry rescues brief provider hiccups while
- * the rest of the model pool continues independently.
+ * Run an engine call, trying it again while the provider is only busy (503
+ * and other 5xx, a burst 429, a timeout, a dropped connection) and the call
+ * still has time: no new try starts unless MIN_RETRY_WINDOW_MS would be left
+ * after the pause, so the loop ends on its own by `endsAt` — the request it
+ * is wrapped in is never cut off with retries still firing behind it. A
+ * spent daily quota, a refused key or an unknown model fails at once, and
+ * the rest of the model pool carries on independently either way.
  */
-async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    if (!isTransientRecognitionError(error)) throw error;
-    await delay(TRANSIENT_RETRY_DELAY_MS);
-    return call();
+async function withRetry<T>(call: () => Promise<T>, endsAt: number): Promise<T> {
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await call();
+    } catch (error) {
+      if (!isRetryableRecognitionError(error)) throw error;
+      const wait = retryDelayMs(error, retry);
+      if (endsAt - (Date.now() + wait) < MIN_RETRY_WINDOW_MS) throw error;
+      await delay(wait);
+    }
   }
 }
 
@@ -237,10 +278,12 @@ export async function recognizeScore(
       reject(lastError || new Error('모든 인식 엔진이 실패했습니다.'));
     };
 
+    const callMs = Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS);
+    const endsAt = Date.now() + callMs;
     attempts.forEach((attempt, index) => {
       void withAttemptTimeout(
-        withTransientRetry(() => recognizeWithEngine(attempt, dataUrl, settings)),
-        Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS),
+        withRetry(() => recognizeWithEngine(attempt, dataUrl, settings), endsAt),
+        callMs,
       )
         .then((score) => {
           answers[index] = score;
@@ -397,12 +440,19 @@ export async function runBatchAttempt(
   examples: PromptExample[] = [],
   /** Cut-off for this call; the job's deadline passes its stage's remaining time. */
   timeoutMs: number = ATTEMPT_TIMEOUT_MS,
+  /**
+   * Epoch ms after which a busy model is not tried again, when that should
+   * come before the cut-off — so the time after it is left for other models.
+   */
+  retryUntil?: number,
 ): Promise<BatchAttemptResult> {
   const startedAt = Date.now();
+  const callMs = Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS);
+  const endsAt = Math.min(startedAt + callMs, retryUntil ?? Infinity);
   try {
     const scores = await withAttemptTimeout(
-      withTransientRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints, examples)),
-      Math.min(timeoutMs, ATTEMPT_TIMEOUT_MS),
+      withRetry(() => recognizeBatchWithEngine(attempt, dataUrls, settings, mode, hints, examples), endsAt),
+      callMs,
     );
     return { attempt, scores, latencyMs: Date.now() - startedAt };
   } catch (error) {

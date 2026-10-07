@@ -2,7 +2,7 @@
 // draft song. Called directly from the browser with the user's own free Google
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
-import { RecognitionError } from './recognitionError';
+import { RecognitionError, parseRetryAfterMs } from './recognitionError';
 import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES, correctionExampleLines } from './scorePrompt';
 import type { PromptExample } from './scoreNvidia';
 import {
@@ -207,6 +207,45 @@ export function parseGeminiBatchPayload(
   return coerceParsedScoreBatch(payload, imageCount, mode);
 }
 
+interface GeminiErrorBody {
+  error?: {
+    message?: string;
+    details?: {
+      '@type'?: string;
+      retryDelay?: string;
+      violations?: { quotaId?: string }[];
+    }[];
+  };
+}
+
+/**
+ * A failed Gemini call as a RecognitionError that says what to do next.
+ *
+ * Gemini words its per-minute and per-day free-tier limits the same way ("You
+ * exceeded your current quota"); only the quota it names
+ * (`GenerateRequestsPerMinutePerProjectPerModel-FreeTier` or `…PerDay…`)
+ * tells a limit that lifts in seconds from one that is spent until tomorrow,
+ * so those names go into the message for classifyRecognitionError. Its
+ * RetryInfo (`"41s"`) says how long to wait.
+ */
+export async function geminiError(res: Response, prefix: string): Promise<RecognitionError> {
+  let detail = `HTTP ${res.status}`;
+  let retryAfterMs = parseRetryAfterMs(res.headers?.get?.('Retry-After'));
+  try {
+    const body = (await res.json()) as GeminiErrorBody;
+    if (body?.error?.message) detail = body.error.message.trim();
+    const quotas = new Set<string>();
+    for (const item of body?.error?.details ?? []) {
+      if (item?.retryDelay) retryAfterMs = parseRetryAfterMs(item.retryDelay) ?? retryAfterMs;
+      for (const violation of item?.violations ?? []) if (violation?.quotaId) quotas.add(violation.quotaId);
+    }
+    if (quotas.size > 0) detail = `${detail} [${[...quotas].join(', ')}]`;
+  } catch {
+    // Keep the status code when the error body is not JSON.
+  }
+  return new RecognitionError(`${prefix}: ${detail}`, res.status, retryAfterMs);
+}
+
 /** Pull the model's text part out of a generateContent response. */
 export function extractGeminiText(response: unknown): string {
   const r = response as {
@@ -245,16 +284,7 @@ export async function recognizeWithGemini(
     body: JSON.stringify(buildGeminiBody(dataUrl, useSearch)),
   });
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const err = (await res.json()) as { error?: { message?: string } };
-      if (err?.error?.message) detail = err.error.message;
-    } catch {
-      // ignore body parse errors; keep the status code
-    }
-    throw new RecognitionError(`Gemini 호출 실패: ${detail}`, res.status);
-  }
+  if (!res.ok) throw await geminiError(res, 'Gemini 호출 실패');
 
   const json = (await res.json()) as unknown;
   const payload = parseModelJson(
@@ -287,16 +317,7 @@ export async function recognizeBatchWithGemini(
     body: JSON.stringify(buildGeminiBatchBody(dataUrls, mode, useSearch, hints, examples)),
   });
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const err = (await res.json()) as { error?: { message?: string } };
-      if (err?.error?.message) detail = err.error.message;
-    } catch {
-      // Keep the status code when the error body is not JSON.
-    }
-    throw new RecognitionError(`Gemini 일괄 호출 실패: ${detail}`, res.status);
-  }
+  if (!res.ok) throw await geminiError(res, 'Gemini 일괄 호출 실패');
 
   const payload = parseModelJson(
     extractGeminiText((await res.json()) as unknown),

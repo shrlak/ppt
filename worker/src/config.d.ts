@@ -23,7 +23,6 @@ export const BUNDLED_CONFESSION_SONG: string;
 export const DEFAULT_POST_SERMON_SONG: string;
 export const SETTINGS_DEFAULTS_VERSION: number;
 export const DEFAULT_ADMIN_PASSWORD: string;
-export const OPENROUTER_NEMOTRON_MODEL: string;
 
 export function migrateEngineName(value: unknown): 'gemini' | 'openrouter' | undefined;
 export function isFreeVisionCatalogEntry(entry: CatalogAttempt): boolean;

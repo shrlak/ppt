@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_NVIDIA_MODEL,
+  batchMaxTokens,
   buildNvidiaBatchBody,
   buildNvidiaBody,
   extractNvidiaText,
@@ -185,5 +186,14 @@ describe('recognizeBatchWithNvidia', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(recognizeBatchWithNvidia([], 'nv-key', 'full')).resolves.toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('batchMaxTokens', () => {
+  it('leaves room for every page’s lyrics, so a long conti is not cut off mid-JSON', () => {
+    expect(batchMaxTokens(1, 'full')).toBe(4096);
+    expect(batchMaxTokens(14, 'full')).toBe(21_000);
+    expect(batchMaxTokens(40, 'full')).toBe(32_768);
+    expect(batchMaxTokens(18, 'titles')).toBe(4096);
   });
 });
