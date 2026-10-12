@@ -3,7 +3,7 @@
 // here is an OpenRouter :free endpoint (including NVIDIA's Nemotron). Images
 // travel as data: URLs in an OpenAI-compatible chat-completions request.
 import { RecognitionError, parseRetryAfterMs } from './recognitionError';
-import { basePrompt, correctionExampleLines } from './scorePrompt';
+import { TITLE_PASS_LINES, basePrompt, correctionExampleLines } from './scorePrompt';
 import {
   coerceParsedScore,
   coerceParsedScoreBatch,
@@ -67,13 +67,9 @@ function batchPrompt(
   const task =
     mode === 'titles'
       ? [
-          '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
-          'score 페이지에서만 찬양 제목과 조성을 읽고, 아티스트 이름이 인쇄되어 있으면 함께 읽으세요.',
-          '제목은 한국어 제목을 맞춤법·띄어쓰기에 맞게 적으세요. 영어 제목이 함께 있으면 한국어 제목만 적습니다.',
-          'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
+          ...TITLE_PASS_LINES,
           '가사, 파트, 진행 순서는 읽지 마세요.',
-          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
-          'artist는 페이지에 인쇄된 이름만 적고, 없으면 빈 문자열로 두세요. 제목으로 추측하지 마세요.',
+          '각 결과는 imageIndex, pageType, sermonTitle, scripture, title, artist, key, englishTitle을 포함하세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',

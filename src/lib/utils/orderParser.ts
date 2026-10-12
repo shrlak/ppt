@@ -15,6 +15,10 @@ const SYNONYMS: Record<string, string> = {
   BRIDGE: 'B',
 };
 
+/** A chord chart's part headings, numbered or not: VERSE 1, PRE-CHORUS, CHORUS 2, BRIDGE 1. */
+const WORDED_PART = /^(VERSE|PRE-?\s?CHORUS|CHORUS|BRIDGE)\s*(\d?)$/;
+const WORDED_PARTS: Record<string, string> = { VERSE: 'V', PRECHORUS: 'PC', CHORUS: 'C', BRIDGE: 'B' };
+
 /**
  * Normalize a single order token: trim, uppercase ASCII, and map Korean/
  * English synonyms (간주 → "I", 브릿지 → "B", …). Unknown tokens are kept
@@ -22,6 +26,8 @@ const SYNONYMS: Record<string, string> = {
  */
 export function normalizeToken(raw: string): string {
   const up = raw.trim().toUpperCase();
+  const worded = WORDED_PART.exec(up);
+  if (worded) return `${WORDED_PARTS[worded[1].replace(/[\s-]/g, '')]}${worded[2]}`;
   return SYNONYMS[up] ?? up;
 }
 

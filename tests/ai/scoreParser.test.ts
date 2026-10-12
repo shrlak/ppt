@@ -236,3 +236,42 @@ describe('keepKoreanLyrics', () => {
     expect(keepKoreanLyrics(sections)).toBe(sections);
   });
 });
+
+describe('English printed beside the Korean', () => {
+  it('keeps a bilingual page’s English apart from its Korean lyrics', () => {
+    const parsed = coerceParsedScore({
+      pageType: 'score',
+      title: '모든 능력과 모든 권세',
+      englishTitle: 'Above All',
+      sections: [{ label: 'V', lines: ['모든 능력과 모든 권세', 'Above all powers'] }],
+      englishSections: [
+        { label: 'Verse', lines: ['Above all powers, above all kings', '모든 것 위에'] },
+        { label: 'C', lines: ['Crucified, laid behind the stone'] },
+      ],
+    });
+    expect(parsed.sections).toEqual([{ label: 'V', lines: ['모든 능력과 모든 권세'] }]);
+    expect(parsed.englishTitle).toBe('Above All');
+    expect(parsed.englishSections).toEqual([
+      { label: 'V', lines: ['Above all powers, above all kings'] },
+      { label: 'C', lines: ['Crucified, laid behind the stone'] },
+    ]);
+  });
+
+  it('gives an English-only page no English apart from its lyrics, and drops a Korean englishTitle', () => {
+    const parsed = coerceParsedScore({
+      pageType: 'score',
+      title: 'Hosanna',
+      englishTitle: '호산나',
+      sections: [{ label: 'C', lines: ['Hosanna, hosanna'] }],
+      englishSections: [{ label: 'C', lines: ['Hosanna, hosanna'] }],
+    });
+    expect(parsed.sections).toEqual([{ label: 'C', lines: ['Hosanna, hosanna'] }]);
+    expect(parsed.englishTitle).toBeUndefined();
+    expect(parsed.englishSections).toBeUndefined();
+    // Its own title echoed as the English one is no second title either.
+    expect(coerceParsedScore({ pageType: 'score', title: 'Praise', englishTitle: 'Praise' }).englishTitle).toBeUndefined();
+    expect(coerceParsedScore({ pageType: 'score', title: '좋으신 하나님', englishTitle: 'You Are Good' }).englishTitle).toBe(
+      'You Are Good',
+    );
+  });
+});

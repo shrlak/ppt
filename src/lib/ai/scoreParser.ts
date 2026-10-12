@@ -27,6 +27,14 @@ export interface ParsedScore {
    */
   lyricRowCount?: number;
   sections: Section[];
+  /** The English title printed beside the Korean one (`모든 능력과 모든 권세` / `Above All`). */
+  englishTitle?: string;
+  /**
+   * English lyrics the page prints along with its Korean — a row under each
+   * Korean one, or the English 악보 printed below the Korean on the same
+   * page — by the Korean parts' labels. Never part of `sections`.
+   */
+  englishSections?: Section[];
 }
 
 /** Batch recognition depth: quick title/key identification, or full lyrics. */
@@ -68,19 +76,19 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
   const rowCount = Number(obj.lyricRowCount);
   const lyricRowCount = Number.isFinite(rowCount) && rowCount > 0 ? Math.floor(rowCount) : undefined;
 
-  const rawSections = Array.isArray(obj.sections) ? (obj.sections as SectionLike[]) : [];
-  const sections: Section[] = [];
-  for (const s of rawSections) {
-    const label = typeof s?.label === 'string' ? normalizeToken(s.label) : '';
-    if (!label) continue;
-    const lines = Array.isArray(s?.lines)
-      ? s.lines
-          .filter((l): l is string => typeof l === 'string')
-          .map((l) => cleanLyricLine(l))
-          .filter((l) => l.length > 0)
-      : [];
-    sections.push(...splitNumberedVerses({ label, lines }));
-  }
+  const sections = keepKoreanLyrics(coerceSections(obj.sections));
+  // Beside a Korean title only: an English-only page's title is its title.
+  const rawEnglishTitle = typeof obj.englishTitle === 'string' ? obj.englishTitle.trim() : '';
+  const englishTitle =
+    rawEnglishTitle && !HANGUL.test(rawEnglishTitle) && HANGUL.test(title ?? '') ? rawEnglishTitle : undefined;
+  // English printed beside Korean lyrics: on a page with no Korean at all the
+  // English is the song itself, already in `sections`.
+  const koreanPage = sections.some((section) => section.lines.some((line) => HANGUL.test(line)));
+  const englishSections = koreanPage
+    ? coerceSections(obj.englishSections)
+        .map((section) => ({ label: section.label, lines: section.lines.filter((line) => !HANGUL.test(line)) }))
+        .filter((section) => section.lines.length > 0)
+    : [];
 
   return {
     pageType,
@@ -91,8 +99,27 @@ export function coerceParsedScore(payload: unknown): ParsedScore {
     key,
     order,
     lyricRowCount,
-    sections: keepKoreanLyrics(sections),
+    sections,
+    ...(englishTitle ? { englishTitle } : {}),
+    ...(englishSections.length > 0 ? { englishSections } : {}),
   };
+}
+
+/** A model's `sections`-shaped array as parts: labels canonical, lines cleaned, numbered verses split. */
+function coerceSections(raw: unknown): Section[] {
+  const sections: Section[] = [];
+  for (const s of Array.isArray(raw) ? (raw as SectionLike[]) : []) {
+    const label = typeof s?.label === 'string' ? normalizeToken(s.label) : '';
+    if (!label) continue;
+    const lines = Array.isArray(s?.lines)
+      ? s.lines
+          .filter((l): l is string => typeof l === 'string')
+          .map((l) => cleanLyricLine(l))
+          .filter((l) => l.length > 0)
+      : [];
+    sections.push(...splitNumberedVerses({ label, lines }));
+  }
+  return sections;
 }
 
 const HANGUL = /[가-힣]/;
@@ -193,6 +220,7 @@ export function coerceParsedScoreBatch(
             title: score.title,
             artist: score.artist,
             key: score.key,
+            ...(score.englishTitle ? { englishTitle: score.englishTitle } : {}),
             order: [],
             sections: [],
           }

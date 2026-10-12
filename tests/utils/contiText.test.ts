@@ -13,6 +13,7 @@ import {
   nameUntitledRowsFromLayout,
   parseCoverText,
   parseSermonInfoText,
+  readPrayerPage,
   splitBilingualTitle,
   splitLyricsAndConfessionSongs,
   untitledSongTitle,
@@ -800,5 +801,59 @@ describe('dateFromFileName', () => {
   it('finds none where the name holds no date', () => {
     expect(dateFromFileName('EM_KM_Praise_Night_Chord_Sheets_1.pdf', today)).toBeUndefined();
     expect(dateFromFileName('13_40_scan.pdf', today)).toBeUndefined();
+  });
+});
+
+describe('readPrayerPage — the 기도 pages a conti puts between its songs', () => {
+  it('reads a page that only says 기도, however its text layer spaces it', () => {
+    expect(readPrayerPage('기도')).toEqual({ topics: '' });
+    expect(readPrayerPage('  기 도 \n')).toEqual({ topics: '' });
+    expect(readPrayerPage('기도 2')).toEqual({ topics: '' });
+    expect(readPrayerPage('기도 / Prayer')).toEqual({ topics: '' });
+    expect(readPrayerPage('통성기도\nCorporate Prayer')).toEqual({ topics: '' });
+    expect(readPrayerPage('PRAYER TIME')).toEqual({ topics: '' });
+  });
+
+  it('keeps the topics typed under the heading', () => {
+    expect(readPrayerPage('Prayer Topic 2: Returning our hearts back to God')).toEqual({
+      topics: 'Returning our hearts back to God',
+    });
+    expect(readPrayerPage('기도제목\n- 교회 안에서의 연합\n- 다음 세대')).toEqual({
+      topics: '- 교회 안에서의 연합\n- 다음 세대',
+    });
+  });
+
+  it('puts a topic the page wrapped onto two lines back together', () => {
+    expect(readPrayerPage('Prayer Topic 2: Returning our hearts\nback to God')).toEqual({
+      topics: 'Returning our hearts back to God',
+    });
+    expect(readPrayerPage('기도제목\n- 사랑 안에 두려움이 없고 온전한 사랑이\n두려움을 내어쫓나니\n- 교회 안에서의 연합')).toEqual({
+      topics: '- 사랑 안에 두려움이 없고 온전한 사랑이 두려움을 내어쫓나니\n- 교회 안에서의 연합',
+    });
+    // Unbulleted Korean lines are a topic each.
+    expect(readPrayerPage('기도제목\n교회 연합\n다음 세대')).toEqual({ topics: '교회 연합\n다음 세대' });
+  });
+
+  it('is no 기도 page when the page opens with something else, or runs long', () => {
+    // A 악보 whose text layer holds the leader's handwriting.
+    expect(readPrayerPage('C - V - V - CX 3\nEng\nkor\nPrayer topic')).toBeNull();
+    expect(readPrayerPage('')).toBeNull();
+    expect(readPrayerPage('기도하는 이 시간')).toBeNull();
+    // A typed lyric page of a song titled 기도.
+    expect(readPrayerPage(['기도', ...Array.from({ length: 9 }, (_, i) => `가사 ${i + 1}째 줄`)].join('\n'))).toBeNull();
+    // A SongSelect sheet of a song titled Prayer.
+    expect(readPrayerPage('Prayer\nKey - G | Tempo - 72 | Time - 4/4\nVERSE 1')).toBeNull();
+  });
+});
+
+describe('classifyPages — 기도 pages', () => {
+  it('keeps a 기도 page out of the 악보 pages when the caller says it is one', () => {
+    const texts = ['', '', '기도', '', '기도'];
+    const prayer = (page: number) => readPrayerPage(texts[page - 1]) !== null;
+    const classified = classifyPages(texts, prayer);
+    expect(classified.prayerPages).toEqual([3, 5]);
+    expect(classified.musicPages).toEqual([1, 2, 4]);
+    // Asked of nobody, every page is a 악보 page as before.
+    expect(classifyPages(texts).musicPages).toEqual([1, 2, 3, 4, 5]);
   });
 });

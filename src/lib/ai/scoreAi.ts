@@ -3,7 +3,7 @@
 // AI Studio key (no backend, no SDK — a plain fetch to the REST endpoint, which
 // avoids the CORS-preflight issues the js-genai SDK hits in browsers).
 import { RecognitionError, parseRetryAfterMs } from './recognitionError';
-import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES, correctionExampleLines } from './scorePrompt';
+import { BASE_PROMPT_LINES, SEARCH_PROMPT_LINES, TITLE_PASS_LINES, correctionExampleLines } from './scorePrompt';
 import type { PromptExample } from './scoreNvidia';
 import {
   coerceParsedScore,
@@ -45,6 +45,19 @@ const RESPONSE_SCHEMA = {
         required: ['label', 'lines'],
       },
     },
+    englishTitle: { type: 'string' },
+    // The same shape as `sections`: the English the page prints beside its Korean.
+    englishSections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          lines: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['label', 'lines'],
+      },
+    },
   },
   required: ['pageType', 'sermonTitle', 'scripture', 'title', 'lyricRowCount', 'sections'],
 };
@@ -59,6 +72,7 @@ const BATCH_TITLE_ITEM_SCHEMA = {
     title: { type: 'string' },
     artist: { type: 'string' },
     key: { type: 'string' },
+    englishTitle: { type: 'string' },
   },
   required: ['imageIndex', 'pageType', 'sermonTitle', 'scripture', 'title'],
 };
@@ -76,6 +90,8 @@ const BATCH_FULL_ITEM_SCHEMA = {
     order: { type: 'array', items: { type: 'string' } },
     lyricRowCount: { type: 'integer' },
     sections: RESPONSE_SCHEMA.properties.sections,
+    englishTitle: { type: 'string' },
+    englishSections: RESPONSE_SCHEMA.properties.englishSections,
   },
   required: ['imageIndex', 'pageType', 'sermonTitle', 'scripture', 'title', 'order', 'lyricRowCount', 'sections'],
 };
@@ -143,18 +159,15 @@ export function buildGeminiBatchBody(
   const task =
     mode === 'titles'
       ? [
-          '각 이미지에서 먼저 오선과 음표의 존재를 확인해 pageType을 score 또는 non_score로 분류하세요.',
-          'score 페이지에서만 찬양 제목과 조성을 읽으세요.',
-          '제목은 한국어 제목을 맞춤법·띄어쓰기에 맞게 적으세요. 영어 제목이 함께 있으면 한국어 제목만 적습니다.',
-          'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
+          ...TITLE_PASS_LINES,
           '가사, 파트, 진행 순서는 인식하지 마세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key, englishTitle을 포함하세요.',
         ]
       : [
           '각 이미지를 score 또는 non_score로 먼저 분류하세요.',
           'score 페이지에서만 제목, 조성, 진행 순서와 모든 가사를 읽으세요.',
           'non_score 페이지에서는 설교 제목과 본문만 읽고 찬양 필드는 비우세요.',
-          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key, order, lyricRowCount, sections를 포함하세요.',
+          'results 배열의 각 항목은 imageIndex, pageType, sermonTitle, scripture, title, artist, key, englishTitle, order, lyricRowCount, sections, englishSections를 포함하세요.',
           ...BASE_PROMPT_LINES,
         ];
   const hasHints = (hints ?? []).some((hint) => hint && hint.trim());

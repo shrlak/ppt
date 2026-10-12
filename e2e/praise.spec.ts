@@ -8,6 +8,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.join(HERE, '..', 'samples', 'conti-example.pdf');
 /** A Plan A table of four songs, their four 악보 on p.2–5, then p.6 and p.7 the table does not list. */
 const PLAN_A_B_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-plan-a-b.pdf');
+/**
+ * No cover: 악보 pictures on p.1, 2, 4, 5, 7 and 8, with typed 기도 pages
+ * between them — `기도` on p.3, `Prayer Topic 2: Returning our hearts back to
+ * God` on p.6. p.8 is a 악보 whose text layer holds a pen note `Prayer topic`.
+ */
+const PRAYER_PAGES_PDF = path.join(HERE, '..', 'tests', 'fixtures', 'conti-prayer-pages.pdf');
 // Any portrait picture stands in for this year's flyer.
 const FLYER = path.join(HERE, '..', 'tests', 'fixtures', 'sheet-page.png');
 const PARSE_TIMEOUT = 30_000;
@@ -242,6 +248,37 @@ test.describe('찬양집회 generator', () => {
     await expect(grid.locator('.slide-thumb')).toHaveCount(texts.length, { timeout: BUILD_TIMEOUT });
     await grid.locator('li').nth(topics).scrollIntoViewIfNeeded();
     await grid.screenshot({ path: testInfo.outputPath('praise-prayer-preview.png') });
+  });
+
+  test('reads a conti with no cover whose 기도 pages sit between the songs', async ({ page }) => {
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+    await page.goto('praise.html');
+    await page.getByTestId('pdf-input').setInputFiles(PRAYER_PAGES_PDF);
+
+    // Every 악보 is a song — the one with a pen note too — and no 기도 page is.
+    await expect(page.getByTestId('song-card')).toHaveCount(6, { timeout: PARSE_TIMEOUT });
+    await expect(page.locator('.toast-text', { hasText: '콘티의 기도 페이지 2장(p.3, p.6)' })).toBeVisible();
+
+    await page.getByTestId('praise-tab-prayer').click();
+    const plan = page.getByTestId('praise-prayer-plan');
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('2번');
+    const toggles = plan.getByTestId('praise-prayer-song-toggle');
+    await expect(toggles).toHaveCount(6);
+    const checked = await toggles.evaluateAll((boxes) => boxes.map((box) => (box as HTMLInputElement).checked));
+    // After the songs on p.2 and p.5.
+    expect(checked).toEqual([false, true, false, true, false, false]);
+    const prayers = page.getByTestId('praise-prayer');
+    await expect(prayers.nth(0).getByTestId('praise-prayer-where')).toContainText('2.');
+    await expect(prayers.nth(1).getByTestId('praise-prayer-where')).toContainText('4.');
+    // The topics typed on the 기도 page are its 기도제목.
+    await expect(prayers.nth(0).getByTestId('praise-topics-input')).toHaveValue('');
+    await expect(prayers.nth(1).getByTestId('praise-topics-input')).toHaveValue('Returning our hearts back to God');
+
+    // Checked by hand, the 기도 are the operator's: nothing moves them back.
+    await toggles.nth(5).check();
+    await expect(plan.getByTestId('praise-prayer-count')).toHaveText('3번');
+    await toggles.nth(1).uncheck();
+    await expect(toggles.nth(1)).not.toBeChecked();
   });
 
   test('opens the deck with a poster edited on the page, ahead of the cover', async ({ page }, testInfo) => {

@@ -3,9 +3,11 @@ import type { ParsedScore } from '../../src/lib/ai/scoreParser';
 import { alignPagesToConti } from '../../src/lib/utils/contiAlignment';
 import {
   combinePageReadings,
-  foldRepeatedTitles,
+  foldUnlistedPages,
   groupContiPages,
   mergeReadings,
+  printedEnglish,
+  withEnglishTitle,
   type PageGroupingInput,
 } from '../../src/lib/utils/scorePages';
 
@@ -142,9 +144,89 @@ describe('alignPagesToConti with a song’s second page', () => {
   });
 });
 
-describe('foldRepeatedTitles', () => {
+describe('foldUnlistedPages', () => {
+  const card = (page: number, title?: string, artist?: string, nonScore = false) => ({ page, title, artist, nonScore });
+
   it('folds a page printing the title of the page before it into that card', () => {
-    expect(foldRepeatedTitles(['A곡', 'A곡', 'B곡', undefined, 'B곡'])).toEqual([0, 0, 2, 3, 4]);
+    const heads = foldUnlistedPages(
+      [card(1, 'A곡'), card(2, 'A곡'), card(3, 'B곡'), card(5, 'B곡')],
+      { bilingual: false },
+    );
+    // p.4 (a 기도 page, no 악보) sits between the two B곡 cards.
+    expect(heads).toEqual([0, 0, 2, 3]);
+  });
+
+  it('takes an untitled page right after a card as the rest of its score', () => {
+    const heads = foldUnlistedPages(
+      [card(5, 'Our God'), card(6), card(7, '모든 능력과 모든 권세'), card(8, '예배합니다')],
+      { bilingual: true },
+    );
+    expect(heads).toEqual([0, 0, 2, 3]);
+  });
+
+  it('does not chain untitled pages when the title pass read next to nothing', () => {
+    expect(foldUnlistedPages([card(1, 'A곡'), card(2), card(3), card(4)], { bilingual: false })).toEqual([0, 1, 2, 3]);
+  });
+
+  it('never folds across a page the models found no 악보 on', () => {
+    const heads = foldUnlistedPages(
+      [card(1, 'A곡'), card(2, undefined, undefined, true), card(3), card(4, 'B곡')],
+      { bilingual: false },
+    );
+    expect(heads).toEqual([0, 1, 2, 3]);
+  });
+
+  // 2026 EM&KM 찬양집회 (FINAL): no cover, 기도 pages between the sets, each
+  // Korean 악보 sometimes followed by its English SongSelect sheet.
+  it('reads this year’s 찬양집회 conti: an English sheet joins its Korean song only when the writers match', () => {
+    const cards = [
+      card(1, '하늘 위에 주님밖에', 'Eugene Greco'),
+      card(2, 'God Is The Strength Of My Heart', 'Eugene Greco'),
+      card(3, 'Praise', 'Brandon Lake | Chandler Moore | Chris Brown | Cody Carnes | Pat Barrett | Steven Furtick'),
+      card(4, 'Praise'),
+      card(5, 'Our God', 'Chris Tomlin'),
+      card(6),
+      card(7, '모든 능력과 모든 권세', 'Paul Baloche/Lenny LeBlanc'),
+      card(8, '예배합니다', 'Rose Park'),
+      card(10, '나의 백성이', 'Tom & Robin Brooks'),
+      card(11, '부르신 곳에서', 'Words & Music by 김준영 & 송은정'),
+      card(13, '예수 우리들의 밝은 빛', 'Takafumi Nagasawa'),
+      card(14, 'Hosanna', 'Brooke Ligertwood'),
+      card(15),
+      card(16, '찬양의 열기', 'Matt Redman'),
+      card(18, 'Call On Jesus', 'Jacob Lee | Jin Woo Lim | Joe Lee | Joshua Chang | Maximus Chung'),
+      card(19),
+      card(20, 'Washed', 'Elevation Rhythm - Joe L. Barnes, Joshua Holiday, and Mitch Wong'),
+      card(21),
+      card(22, '좋으신 하나님', 'Israel Houghton'),
+    ];
+    const heads = foldUnlistedPages(cards, { bilingual: true });
+    const songs = [...new Set(heads)].map((head) => cards.filter((_, index) => heads[index] === head).map((c) => c.page));
+    expect(songs).toEqual([[1, 2], [3, 4], [5, 6], [7], [8], [10], [11], [13], [14, 15], [16], [18, 19], [20, 21], [22]]);
+  });
+
+  it('pairs an English sheet by the English title its Korean song was saved with', () => {
+    const heads = foldUnlistedPages([card(1, '부르신 곳에서'), card(2, "At The Place You've Called Me To")], {
+      bilingual: true,
+      englishTitleOf: (title) => (title === '부르신 곳에서' ? "At the Place You've Called Me To" : undefined),
+    });
+    expect(heads).toEqual([0, 0]);
+  });
+
+  it('takes an English sheet printed first, with its second page, into the Korean song after it', () => {
+    const heads = foldUnlistedPages(
+      [card(1, 'Above All', 'Paul Baloche'), card(2), card(3, '모든 능력과 모든 권세', 'Paul Baloche/Lenny LeBlanc')],
+      { bilingual: true },
+    );
+    expect(heads).toEqual([2, 2, 2]);
+  });
+
+  it('keeps English and Korean apart on a Sunday conti', () => {
+    const heads = foldUnlistedPages(
+      [card(1, '하늘 위에 주님밖에', 'Eugene Greco'), card(2, 'God Is The Strength Of My Heart', 'Eugene Greco')],
+      { bilingual: false },
+    );
+    expect(heads).toEqual([0, 1]);
   });
 });
 
@@ -228,5 +310,53 @@ describe('combinePageReadings', () => {
     ]);
     expect(combined.english).toBeNull();
     expect(combined.score.sections.map((section) => section.label)).toEqual(['V', 'C']);
+  });
+});
+
+describe('printedEnglish', () => {
+  it('takes the English a Korean page prints beside its lyrics, and its English title', () => {
+    const page = reading([['V', ['모든 능력과 모든 권세']]], {
+      title: '모든 능력과 모든 권세',
+      englishTitle: 'Above All',
+      englishSections: [{ label: 'V', lines: ['Above all powers'] }],
+    });
+    expect(combinePageReadings([page]).english).toEqual({
+      pageType: undefined,
+      sermonTitle: undefined,
+      scripture: undefined,
+      title: 'Above All',
+      artist: undefined,
+      key: undefined,
+      order: [],
+      lyricRowCount: undefined,
+      sections: [{ label: 'V', lines: ['Above all powers'] }],
+    });
+    // The Korean lyrics are left exactly as read.
+    expect(combinePageReadings([page]).score).toBe(page);
+  });
+
+  it('puts an English page and the English beside the Korean together', () => {
+    const korean = reading([['V', ['하늘 위에 주님밖에']]], { englishSections: [{ label: 'C', lines: ['God is the strength'] }] });
+    const english = reading([['V', ['Whom have I in heaven']]], { title: 'God Is The Strength Of My Heart' });
+    const merged = printedEnglish([korean, english]);
+    expect(merged?.title).toBe('God Is The Strength Of My Heart');
+    expect(merged?.sections).toEqual([
+      { label: 'C', lines: ['God is the strength'] },
+      { label: 'V', lines: ['Whom have I in heaven'] },
+    ]);
+  });
+
+  it('reads a settled Korean song’s English page as its English, and an English song’s pages as none', () => {
+    const english = reading([['V', ['Whom have I in heaven']]], { title: 'God Is The Strength Of My Heart' });
+    expect(printedEnglish([english])).toBeNull();
+    expect(printedEnglish([english], true)?.title).toBe('God Is The Strength Of My Heart');
+  });
+
+  it('gives the English the title the title pass read, when the lyrics pass read none', () => {
+    expect(withEnglishTitle(null, 'Above All')).toEqual({ title: 'Above All', order: [], sections: [] });
+    expect(withEnglishTitle(null, undefined)).toBeNull();
+    const english = reading([['V', ['Above all powers']]]);
+    expect(withEnglishTitle(english, 'Above All')?.title).toBe('Above All');
+    expect(withEnglishTitle({ ...english, title: 'Above All (Live)' }, 'Above All')?.title).toBe('Above All (Live)');
   });
 });

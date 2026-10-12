@@ -84,3 +84,17 @@ describe('extractPartOrder', () => {
     expect(extractPartOrder(undefined)).toBeUndefined();
   });
 });
+
+describe('chord-chart part headings', () => {
+  it('names VERSE 1, PRE-CHORUS, CHORUS 2 and BRIDGE the way the deck does', () => {
+    expect(['VERSE', 'Verse 1', 'PRE-CHORUS', 'Pre-Chorus 2', 'CHORUS', 'Chorus 2', 'BRIDGE 1'].map(normalizeToken)).toEqual([
+      'V',
+      'V1',
+      'PC',
+      'PC2',
+      'C',
+      'C2',
+      'B1',
+    ]);
+  });
+});
