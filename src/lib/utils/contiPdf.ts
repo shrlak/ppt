@@ -9,6 +9,7 @@ import {
   nameUntitledRowsFromLayout,
   parseCoverText,
   parseSermonInfoText,
+  readPrayerPage,
 } from './contiText';
 import { isChordSheetConti, type PositionedPage, type PositionedText } from './chordSheet';
 
@@ -103,6 +104,35 @@ async function extractPageText(page: pdfjs.PDFPageProxy): Promise<{ text: string
   return { text, positioned };
 }
 
+/** Every way pdf.js paints a picture onto a page. */
+const PICTURE_OPS = new Set([
+  pdfjs.OPS.paintImageXObject,
+  pdfjs.OPS.paintImageXObjectRepeat,
+  pdfjs.OPS.paintInlineImageXObject,
+  pdfjs.OPS.paintInlineImageXObjectGroup,
+  pdfjs.OPS.paintImageMaskXObject,
+  pdfjs.OPS.paintImageMaskXObjectGroup,
+  pdfjs.OPS.paintImageMaskXObjectRepeat,
+  pdfjs.OPS.paintSolidColorImageMask,
+]);
+
+/**
+ * True when the page is typed text and nothing else. A 기도 page is; a 악보
+ * is a picture (a scan, a photo, a flattened SongSelect sheet), even one
+ * whose text layer only holds a handwritten `Prayer topic`. Asked only of the
+ * few pages whose text already reads as a 기도 page, since listing a page's
+ * drawing operations means reading its pictures too.
+ */
+async function drawsNoPicture(doc: pdfjs.PDFDocumentProxy, pageNumber: number): Promise<boolean> {
+  try {
+    const page = await doc.getPage(pageNumber);
+    const operators = await page.getOperatorList();
+    return !operators.fnArray.some((op) => PICTURE_OPS.has(op));
+  } catch {
+    return false;
+  }
+}
+
 export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   // pdf.js transfers the buffer to its worker, so hand it a private copy.
   const loadingTask = loadPdfTask(data);
@@ -125,7 +155,14 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
   const pageTexts = extracted.map((page) => page.text);
   const positionedPages = extracted.map((page) => page.positioned);
 
-  const { coverPages, infoPages, musicPages } = classifyPages(pageTexts);
+  // A page saying only `기도` (or `Prayer Topic 2: …`) is where the night
+  // prays, not a song.
+  const prayerCandidates = pageTexts.flatMap((text, index) => (readPrayerPage(text) ? [index + 1] : []));
+  const typedOnly = await Promise.all(prayerCandidates.map((page) => drawsNoPicture(doc, page)));
+  const prayerPageSet = new Set(prayerCandidates.filter((_, index) => typedOnly[index]));
+  const { coverPages, infoPages, prayerPages, musicPages } = classifyPages(pageTexts, (page) =>
+    prayerPageSet.has(page),
+  );
   // The cover is read as ONE document however many pages it spans: a song
   // table on the first page and its commentary bullets on the next belong
   // to the same list, and parsing them separately loses the pairing.
@@ -155,6 +192,12 @@ export async function loadConti(data: ArrayBuffer): Promise<ContiDocument> {
     info.scripture ??= detected.scripture;
   }
   matchSongsToPages(info, pageTexts, musicPages);
+  if (prayerPages.length > 0) {
+    info.prayers = prayerPages.map((page) => {
+      const topics = readPrayerPage(pageTexts[page - 1])?.topics;
+      return topics ? { page, topics } : { page };
+    });
+  }
 
   const parsed: ParsedConti = { info, numPages: doc.numPages, pageTexts, musicPages };
   // A chord-sheet PDF carries its lyrics as text; where each piece of it

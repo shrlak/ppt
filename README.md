@@ -199,7 +199,24 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
   인쇄된 제목**으로 검색합니다 (표지에 없는 곡만 악보에서 읽은 제목을 씁니다).
 - **표지가 없어도 OK** — 표지를 인식하지 못한 콘티는 표지를 건너뛰고 **악보 페이지 순서 그대로** 곡을
   정리합니다. 각 악보 페이지가 한 곡이 되며(라이브러리에 있으면 제목·키를 자동으로 채움), 마지막
-  악보는 공동체 고백송이면 제외합니다.
+  악보는 공동체 고백송이면 제외합니다. AI가 각 페이지의 제목을 읽은 뒤 **한 곡의 여러 장은 한 카드로**
+  합칩니다 — 바로 앞 페이지와 같은 제목이 인쇄된 페이지(`Praise` 둘째 장의 `Praise · Page 2`), 그리고
+  제목이 인쇄되지 않은 페이지가 어떤 곡의 페이지 바로 뒤에 있으면(코드 악보의 둘째 장) 그 곡의 다음
+  장입니다. 제목을 대부분 읽지 못했을 때는 짐작으로 합치지 않고, 사이에 기도 페이지나 악보가 아닌
+  페이지가 있으면 합치지 않습니다.
+- **`기도` 페이지는 곡이 아닙니다** — 곡 사이에 `기도`, `기도 / Prayer`, `Prayer Topic 2: …`처럼 기도
+  제목만 적힌 페이지(그림 없이 글자만 있는 페이지)를 넣은 콘티는 그 페이지를 곡 카드로 만들지 않습니다.
+  찬양집회에서는 그 자리에 기도를 넣습니다([3단계 · 기도](#3단계--기도)). 악보 사진에 손글씨
+  `Prayer topic`이 글자로 들어 있어도 그림이 있는 페이지는 악보로 읽습니다.
+- **오선 없는 코드 악보도 곡입니다** — SongSelect·worshipchords.com의 Chord Sheet처럼 오선 없이 가사
+  위에 코드만 적힌 페이지가 **사진(이미지)으로** 들어 있어도 AI가 곡 페이지로 읽습니다 (예전에는 오선과
+  음표가 없다고 악보가 아닌 페이지로 보고 빼 버릴 수 있었습니다). `VERSE 1`·`PRE-CHORUS`·`CHORUS 2`·
+  `BRIDGE` 머리말은 V1·PC·C2·B 파트가 되고, 같은 후렴을 여러 번 적은 것은 한 번만, 코드 줄·`(REPEAT)`·
+  `(1st Ending)`·`(To Chorus)`·Key/Tempo 머리말·CCLI 꼬리말은 가사에서 뺍니다.
+- **손으로 적은 진행 순서** — 악보 위에 태블릿 펜으로 적은 `I-V-PC-C×2-I-V-PC-C×2`, `C-V-V-CX3` 같은
+  진행도 진행 순서로 읽습니다. `×2`/`x3`는 그만큼 반복, 옆의 `Kor`·`Eng` 언어 표시나 `PAD`·`build up`·
+  `END`·`→ 예배합니다` 같은 메모는 파트가 아닙니다. 가사에 형광펜으로 칠한 색이 진행의 파트 기호 색과
+  같으면 그 색의 가사를 그 파트로 나눕니다.
 - **제목이 라이브러리에 있으면 바로 불러옵니다** — 콘티 표지에 적힌 제목이 찬양 라이브러리에
   **완전히 같은 제목으로**(띄어쓰기·대소문자·문장부호만 무시) 저장되어 있으면, 콘티를 여는 즉시
   저장된 가사를 불러오고 악보는 읽지 않습니다. 모든 곡이 라이브러리에 있으면 AI 인식을 아예
@@ -451,7 +468,8 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 | `I` | 간주 — 곡 제목 슬라이드 표시 |
 
 `Cx2`처럼 순서에 반복이 있어도 해당 파트 슬라이드는 한 번만 생성됩니다. `기도`처럼 알 수 없는
-토큰은 무시됩니다.
+토큰은 무시됩니다. 코드 악보의 `VERSE 1`·`PRE-CHORUS`·`CHORUS 2`·`BRIDGE` 머리말은 `V1`·`PC`·`C2`·`B`로
+읽습니다.
 
 ## 📖 성경 말씀
 
@@ -589,6 +607,20 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
     넣지 않고, 한글 제목으로 웹 가사를 찾습니다.
   - 라이브러리에서 한글 가사를 불러온 곡도 영어 악보는 읽어 영어 가사 단계에 넣습니다.
   - 영어 악보 페이지만 있고 한글 악보가 없는 곡(Praise처럼 영어로만 부르는 곡)은 지금처럼 영어 곡입니다.
+- **표지 없이 악보만 이어지는 콘티** — 2026 연합 찬양집회 FINAL 콘티처럼 곡 목록 표지 없이 악보만 22장
+  이어지고, 한글 악보 뒤에 그 곡의 영어 SongSelect 악보가 붙고, 곡 사이에 `기도` 페이지가 있는 콘티도
+  읽습니다 (위 [표지가 없어도 OK](#-찬양)).
+  - **영어 악보를 그 곡에 붙이는 근거** — 곡 목록이 없으니 영어 제목만 있는 페이지가 바로 앞 한글 곡의 영어
+    악보인지, 다음 영어 곡인지를 따로 확인합니다. 두 페이지에 **같은 작사·작곡자**가 인쇄되어 있거나
+    (`하늘 위에 주님밖에`와 `God Is The Strength Of My Heart` 모두 Eugene Greco), 한글 악보에 함께 인쇄된
+    영어 제목이나 찬양집회 영어 가사 라이브러리에 저장된 그 곡의 영어 제목과 같을 때만 그 곡의 영어
+    악보로 합칩니다. `예수 우리들의 밝은 빛` 뒤의 `Hosanna`처럼 근거가 없으면 따로 영어 곡이 됩니다.
+  - **곡 사이의 `기도` 페이지** — 그 페이지 바로 앞 곡 뒤에 기도가 들어갑니다([3단계 · 기도](#3단계--기도)).
+- **한 페이지에 한글·영어가 함께 인쇄된 악보** — `모든 능력과 모든 권세 / Above All`, `예배합니다 / I Will
+  Worship You`처럼 한 페이지 위쪽에 한글 악보, 아래쪽에 영어 악보가 있거나, 한글 가사 줄 아래에 영어 가사
+  줄이 있는 악보는 한글 가사만 찬양 단계에 넣고, **영어 제목과 영어 가사는 따로 읽어** 영어 가사 단계에
+  넣습니다(한글 가사에 섞이지 않습니다). 라이브러리에서 한글 가사를 불러온 곡도 그 페이지의 영어는
+  읽습니다.
 - **악보 사진 사이에 SongSelect 악보가 몇 장 섞여 있어도** 모든 곡을 읽습니다. 예전에는 글자가 들어 있는
   SongSelect 페이지 때문에 PDF 전체를 코드 악보로 보고 그 두 곡(Praise, Call On Jesus)만 남겼는데, 이제
   글자가 전혀 없는 악보 사진이 한 장이라도 있으면 일반 콘티로 읽어 모든 곡의 악보를 인식합니다.
@@ -627,7 +659,8 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
 영어는 **콘티 → 저장된 영어 가사 → 웹** 순서로, 버튼을 누르지 않아도 비어 있는 칸에만 채워집니다.
 
 - **콘티의 영어 악보에서 바로 채워집니다** — 찬양 단계에서 그 곡의 **영어 악보 페이지**를 함께 읽은 곡은
-  (위 [1단계](#1단계--찬양)의 한글 악보·영어 악보 두 장), 영어 악보의 가사가 한글 슬라이드 아래에 들어가고
+  (위 [1단계](#1단계--찬양)의 한글 악보·영어 악보 두 장, 또는 한 페이지에 함께 인쇄된 영어), 영어 악보의
+  가사가 한글 슬라이드 아래에 들어가고
   `콘티 영어 악보에서 읽음`으로 표시됩니다. 두 페이지를 같은 파트 이름으로 읽으므로 **같은 이름의 파트**끼리
   (V ← V, C ← C, B ← B) 맞추고, 이름이 맞지 않으면 웹 영어처럼 **길이(음절 수)**로 맞춥니다. 그래도 맞지
   않으면 그 곡 자신의 영어이므로 빼 두지 않고 **순서대로 나눠** 넣되 `확인 필요`로 표시합니다. 비어 있는
@@ -698,6 +731,13 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
 
 찬양집회의 기도 시간마다 띄울 슬라이드를 만듭니다.
 
+- **콘티의 `기도` 페이지대로 미리 넣습니다** — 콘티가 곡 사이에 `기도`(또는 `기도 / Prayer`, `Prayer Topic
+  2: …`) 페이지를 넣어 두었으면, 콘티를 올리자마자 **그 페이지 바로 앞 곡**을 기도할 곡으로 체크해 기도 1,
+  기도 2…를 만듭니다 (2026 연합 찬양집회 FINAL 콘티: p.9 → 예배합니다 뒤, p.12 → 부르신 곳에서 뒤, p.17 →
+  찬양의 열기 뒤). 페이지에 기도제목이 적혀 있으면(`Prayer Topic 2: Returning our hearts back to God`, 줄마다
+  `- 교회 안에서의 연합`) 그 기도의 기도제목 칸에 들어갑니다. 악보 인식 중에 카드가 합쳐지면(둘째 장이 앞
+  곡에 합쳐지는 등) 체크도 그 곡으로 따라갑니다. 여기서 곡을 직접 체크하거나 기도를 빼면 그때부터는 손댄
+  그대로 둡니다.
 - **기도 횟수** — `−` / `+`로 기도를 빼고 더합니다. 기도 카드마다 **기도 N 빼기** 버튼도 있습니다.
 - **기도를 넣을 곡** — 곡 목록에서 기도할 곡을 체크하면 기도가 **체크한 곡 뒤에 순서대로** 들어갑니다:
   첫 번째로 체크한 곡 뒤에 기도 1, 두 번째 곡 뒤에 기도 2… 곡을 어떤 순서로 체크해도 기도 1이 가장 앞
@@ -1059,6 +1099,13 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    even when the cover or the KakaoTalk notice lists the songs: a page past the list joins the song
    whose title it prints, or — untitled, right after a song's page — carries on that song's score,
    and is read with it; a page printing another song's title is left out (`src/lib/utils/scorePages.ts`).
+   A conti with no cover at all makes a card per score page and folds the cards that are one song
+   once the titles are read (`foldUnlistedPages`): the same title again, or an untitled page right
+   after a song's page. A typed page that only says `기도` / `Prayer Topic 2: …` and paints no picture
+   is no song (`readPrayerPage` in `src/lib/utils/contiText.ts`, checked against the page's drawing
+   operations in `contiPdf.ts`). Chord charts with no staff (SongSelect sheets flattened to images)
+   are song pages to the models, and a 진행 written by pen over the page, its `×2` repeats and the
+   highlighter colours that tie lyrics to its parts are read as the order (`src/lib/ai/scorePrompt.ts`).
    The pages are read by three primary models — Gemini 3.6 Flash, Gemini 3.5 Flash and Gemini 3.5
    Flash-Lite — with Gemini 3.7 Flash and free OpenRouter models cross-checking pages they disagree
    on. Free-tier Gemini turns calls away with 503 "high demand" in spikes that can last a minute, so a
@@ -1087,8 +1134,13 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
 that now opens the site (주일예배 / 찬양집회 / 수련회). It reads a conti
 exactly like the Sunday wizard — a song printed once in Korean and once in English (an English-only
 page beside its Korean one, or printing the English title the cover gives) is one song, its Korean
-pages its lyrics and its English page laid under them in the English step (`src/praise/englishScore.ts`)
-— then puts the English under every Korean slide, in last year's
+pages its lyrics and its English page laid under them in the English step (`src/praise/englishScore.ts`).
+With no cover to list the songs, an English page joins the Korean one before it only when both print
+the same writers or the English title is known for that song; English printed on the Korean page
+itself (a second score below it, or a row under each line) is read apart as `englishTitle` /
+`englishSections` and goes the same way. Each `기도` page of the conti checks the song just before it,
+so its 기도 (with any topics the page typed) follows that song (`songsBeforeContiPrayers` /
+`applyContiPrayers` in `src/praise/prayers.ts`) — then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
 and matched by text, so different line breaks still line up. A saved song with no parts — slide by slide

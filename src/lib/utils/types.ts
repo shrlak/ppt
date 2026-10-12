@@ -115,6 +115,14 @@ export interface ContiSongEntry {
   pageIndex?: number;
 }
 
+/** A 기도 page the conti puts between its songs (`기도`, `Prayer Topic 2: …`). */
+export interface ContiPrayer {
+  /** 1-based PDF page; the 기도 follows the song whose 악보 comes just before it. */
+  page: number;
+  /** The topics typed under the heading, one per line, when there are any. */
+  topics?: string;
+}
+
 /** Worship-service info parsed from the conti cover page. */
 export interface ContiInfo {
   /** Service date as written, e.g. "7/11/26" */
@@ -124,6 +132,8 @@ export interface ContiInfo {
   /** Scripture reference (본문), e.g. 로마서 5장 1-11절 */
   scripture?: string;
   songs: ContiSongEntry[];
+  /** The conti's 기도 pages, in page order. */
+  prayers?: ContiPrayer[];
 }
 
 /** Result of parsing an uploaded conti PDF. */

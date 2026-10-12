@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   addPrayer,
+  applyContiPrayers,
   applyPrayerFlags,
   checkedSongIds,
   createPrayer,
@@ -12,6 +13,7 @@ import {
   releaseRemovedSongs,
   removePrayer,
   setPrayerAfter,
+  songsBeforeContiPrayers,
   topicLines,
   withPrayerPerCheckedSong,
   type PrayerState,
@@ -256,5 +258,55 @@ describe('말씀 passages', () => {
     expect(psalm.rangeEn).toBe('Psalms 23:1');
     await expect(resolvePraisePassage('시119', loadBible)).rejects.toThrow(/너무 깁니다/);
     expect(await resolvePraisePassage('아무거나', loadBible)).toBeNull();
+  });
+});
+
+describe('the 기도 pages of a conti', () => {
+  // 2026 EM&KM 찬양집회: 기도 on p.9, p.12 and p.17, each after the song before it.
+  const night: Song[] = [
+    { ...song('하늘'), pageIndex: 1, extraPages: [2] },
+    { ...song('예배합니다'), pageIndex: 8 },
+    { ...song('나의 백성이'), pageIndex: 10 },
+    { ...song('부르신 곳에서'), pageIndex: 11 },
+    { ...song('예수'), pageIndex: 13 },
+    { ...song('Hosanna'), pageIndex: 14, extraPages: [15] },
+    { ...song('찬양의 열기'), pageIndex: 16 },
+    { ...song('Call On Jesus'), pageIndex: 18, extraPages: [19] },
+  ];
+
+  it('follow the song holding the 악보 page just before each', () => {
+    const wanted = songsBeforeContiPrayers(night, [{ page: 9 }, { page: 12, topics: 'Returning our hearts back to God' }, { page: 17 }]);
+    expect([...wanted.entries()]).toEqual([
+      ['예배합니다', ''],
+      ['부르신 곳에서', 'Returning our hearts back to God'],
+      ['찬양의 열기', ''],
+    ]);
+  });
+
+  it('count a song’s later pages too, and follow no song when they come first', () => {
+    const wanted = songsBeforeContiPrayers(night, [{ page: 16 }, { page: 0 }]);
+    expect([...wanted.keys()]).toEqual(['Hosanna']);
+  });
+
+  it('check those songs in order, the typed topics going into each new 기도', () => {
+    const wanted = songsBeforeContiPrayers(night, [{ page: 9 }, { page: 12, topics: '교회 안에서의 연합' }, { page: 17 }]);
+    const state = applyContiPrayers(night, { extras: {}, prayers: [] }, wanted, new Set());
+    expect(checkedSongIds(night, state.extras)).toEqual(['예배합니다', '부르신 곳에서', '찬양의 열기']);
+    expect(state.prayers).toHaveLength(3);
+    const topics = state.prayers.map((prayer) => prayer.slides.find((slide) => slide.kind === 'topics'));
+    expect(topics.map((slide) => (slide?.kind === 'topics' ? slide.text : null))).toEqual(['', '교회 안에서의 연합', '']);
+  });
+
+  it('move with the song when the cards settle', () => {
+    // At first the page before p.17 was a card of its own; it turned out to be
+    // the second page of 찬양의 열기's card… here, of Hosanna's.
+    const before: Song[] = [...night.slice(0, 6), { ...song('p16 카드'), pageIndex: 16 }];
+    const first = applyContiPrayers(before, { extras: {}, prayers: [] }, songsBeforeContiPrayers(before, [{ page: 17 }]), new Set());
+    expect(checkedSongIds(before, first.extras)).toEqual(['p16 카드']);
+    const after: Song[] = [...night.slice(0, 5), { ...song('Hosanna'), pageIndex: 14, extraPages: [15, 16] }];
+    const released = { ...first, prayers: releaseRemovedSongs(before, after, first.extras, first.prayers) };
+    const settled = applyContiPrayers(after, released, songsBeforeContiPrayers(after, [{ page: 17 }]), new Set(['p16 카드']));
+    expect(checkedSongIds(after, settled.extras)).toEqual(['Hosanna']);
+    expect(settled.prayers).toHaveLength(1);
   });
 });

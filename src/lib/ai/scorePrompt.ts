@@ -76,22 +76,84 @@ const STACKED_ROW_RULES = [
  * lines — both of which cost more accuracy than anything else on those pages.
  */
 const KOREAN_ONLY_RULES = [
-  '【한국어 가사만 읽으세요】',
-  '가사는 한국어(한글)로 된 줄만 읽습니다. 한국어 가사 아래·위에 영어 번역 가사 줄이 함께 인쇄되어',
-  '있으면 그 영어 줄은 통째로 건너뛰세요. 영어 줄을 lines에 넣거나, 영어 줄로 새 파트(V2 등)를',
+  '【sections에는 한국어 가사만 읽으세요】',
+  'sections에는 한국어(한글)로 된 줄만 읽습니다. 한국어 가사 아래·위에 영어 번역 가사 줄이 함께 인쇄되어',
+  '있으면 그 영어 줄은 sections에서 통째로 건너뛰세요. 영어 줄을 sections의 lines에 넣거나, 영어 줄로 새 파트(V2 등)를',
   '만들거나, 한국어로 번역해 넣지 마세요. 절이 여러 개인지 셀 때도 영어 줄은 세지 않습니다.',
-  '단, 페이지에 한국어 가사가 한 줄도 없고 영어 가사만 있으면(영어 악보) 그 영어 가사를 그대로 읽고,',
-  '파트 이름(V, C, B…)도 한국어 악보와 같은 방식으로 붙이세요. 한국어로 번역하지 마세요.',
-  '제목도 한국어 제목을 쓰세요 (한국어와 영어 제목이 함께 있으면 한국어 제목).',
+  '그 영어 가사는 englishSections에 따로 담으세요 — 같은 멜로디의 한국어 파트와 같은 라벨(V, C, B…)을 붙여',
+  '인쇄된 그대로 옮깁니다. 한 페이지 위쪽에 한국어 악보, 아래쪽에 같은 곡의 영어 악보가 따로 인쇄되어 있어도',
+  '그 영어는 englishSections입니다. 영어 가사가 없으면 englishSections는 빈 배열입니다.',
+  '단, 페이지에 한국어 가사가 한 줄도 없고 영어 가사만 있으면(영어 악보) 그 영어 가사를 sections에 그대로 읽고',
+  '(englishSections는 빈 배열), 파트 이름(V, C, B…)도 한국어 악보와 같은 방식으로 붙이세요. 한국어로 번역하지 마세요.',
+  '제목도 한국어 제목을 쓰세요 (한국어와 영어 제목이 함께 있으면 title은 한국어 제목, 영어 제목은 englishTitle).',
   '한국어 가사는 표준 맞춤법과 띄어쓰기에 맞춰 적으세요.',
+];
+
+/**
+ * What counts as a song's page.
+ *
+ * A conti is not only 오선 악보: a 찬양집회 conti prints its English songs as
+ * chord charts (SongSelect, worshipchords.com, a typed sheet) — lyrics with
+ * chord names over them and no staff at all — and once the PDF is flattened
+ * they are pictures like any scan. Asked only whether staves and notes are
+ * there, a model calls those pages non_score and the songs vanish.
+ */
+export const PAGE_TYPE_RULE =
+  '찬양 한 곡의 악보면 "score"입니다 — 오선과 음표가 있는 악보는 물론, 오선 없이 가사 줄 위에 코드 이름(A, E/G#, C#m…)이 ' +
+  '적힌 코드 악보(SongSelect 같은 Chord Sheet, VERSE·CHORUS 머리말이 붙은 가사·코드 페이지, 앞 장에서 이어지는 둘째 장)도 ' +
+  'score입니다. 표지·순서표·안내문, 「기도」「Prayer」처럼 제목 한두 단어만 있는 페이지, 빈 페이지는 "non_score"입니다.';
+
+/**
+ * Reading a chord chart: its headings are the parts, and everything printed
+ * around the lyrics — chord rows, bar lines, ending marks — is not lyrics.
+ */
+const CHORD_CHART_RULES = [
+  '【코드 악보 — 오선이 없는 가사·코드 페이지】',
+  'VERSE 1 → V, VERSE 2 → V2, PRE-CHORUS → PC, CHORUS → C, BRIDGE → B, TAG·ENDING·OUTRO → O처럼 머리말을 파트로 씁니다.',
+  '가사가 다른 머리말은 번호를 이어 붙이세요(CHORUS 1·CHORUS 2의 가사가 다르면 C, C2 / BRIDGE 1A·1B면 B, B2).',
+  '같은 머리말에 같은 가사가 다시 적혀 있으면(CHORUS를 여러 번 적은 경우) sections에는 한 번만 넣으세요.',
+  'INTRO·INSTRUMENTAL·INTERLUDE·TURNAROUND처럼 코드만 있고 가사가 없는 머리말은 파트로 만들지 마세요.',
+  '코드 줄(E/G#  A  B  C#m), 마디 줄(| A | Asus |), (REPEAT), (1st Ending), (2nd Ending), (To Chorus),',
+  'Key·Tempo·Time 머리말, "Page 2", CCLI 꼬리말, 작사·작곡자 줄, 웹 주소는 가사가 아닙니다.',
+];
+
+/**
+ * A 진행 written by the leader, not printed: pen on a tablet over the top of
+ * the page, often with the lyrics of each part highlighted in the colour its
+ * token was given.
+ */
+const HANDWRITTEN_ORDER_RULES = [
+  '【손으로 적은 진행 순서와 형광펜】',
+  '진행 순서는 인쇄되지 않고 페이지 위쪽에 손글씨(펜·태블릿)로 적혀 있을 수도 있습니다. 그것도 order로 읽으세요.',
+  '「C×2」「Cx2」「CX3」은 그 파트를 그 횟수만큼 부른다는 뜻이니 order에 그만큼 넣으세요.',
+  '진행 위아래의 Kor·Kr·Eng·En 같은 언어 표시나 괄호, PAD·quiet·build up·END·「[ ]」·화살표(→ 예배합니다,',
+  '→ Prayer topic) 같은 메모는 파트가 아니므로 order와 가사에 넣지 마세요.',
+  '가사에 형광펜으로 색을 칠하고 진행 순서의 파트 기호에도 같은 색을 칠해 두었다면, 같은 색의 가사가 그 파트입니다.',
+  '파트 라벨을 정할 때 이 색을 가장 먼저 따르세요.',
+];
+
+/**
+ * The title pass, for every engine: what kind of page it is, and who the song
+ * is when it is one. The artist is read here too — it is what tells a song's
+ * English 악보 from the next English song on a conti with no song list.
+ */
+export const TITLE_PASS_LINES: string[] = [
+  `각 이미지의 pageType을 분류하세요: ${PAGE_TYPE_RULE}`,
+  'score 페이지에서만 찬양 제목과 조성을 읽고, 아티스트(작사·작곡자) 이름이 인쇄되어 있으면 함께 읽으세요.',
+  '제목은 한국어 제목을 맞춤법·띄어쓰기에 맞게 적으세요. 영어 제목이 함께 있으면 title에는 한국어 제목만 적고,',
+  '함께 인쇄된 영어(원곡) 제목은 englishTitle에 적습니다. 없거나 영어로만 된 악보면 englishTitle은 빈 문자열입니다.',
+  '앞 장에서 이어지는 둘째 장처럼 제목이 인쇄되어 있지 않은 페이지는 title을 빈 문자열로 두세요.',
+  '가사 첫 줄이나 VERSE·CHORUS 같은 머리말을 제목으로 짐작하지 마세요.',
+  'artist는 페이지에 인쇄된 이름만 적고, 없으면 빈 문자열로 두세요. 제목으로 추측하지 마세요.',
+  'non_score 페이지에서는 설교 제목과 본문만 읽으세요.',
 ];
 
 /** The shared instruction block, as individual lines so callers can extend it. */
 export const BASE_PROMPT_LINES: string[] = [
   '이 이미지는 한국어 찬양 콘티 PDF의 한 페이지이며, 악보가 아닐 수도 있습니다.',
-  '먼저 오선과 음표가 실제로 보이는지 확인해 페이지 종류를 분류하세요.',
+  '먼저 이 페이지가 찬양 한 곡의 악보인지 확인해 페이지 종류를 분류하세요.',
   '다음을 읽어 JSON으로만 답하세요:',
-  '- pageType: 오선과 음표가 있는 악보 페이지면 "score", 아니면 "non_score".',
+  `- pageType: ${PAGE_TYPE_RULE}`,
   '- sermonTitle: non_score 페이지에 명시된 설교 제목. 없으면 빈 문자열.',
   '- scripture: non_score 페이지에 명시된 본문 성경 구절/범위. 없으면 빈 문자열.',
   'pageType이 "score"일 때만 아래 찬양 필드를 읽으세요:',
@@ -99,6 +161,7 @@ export const BASE_PROMPT_LINES: string[] = [
   '- artist: 악보에 인쇄된 아티스트·사역팀·작사작곡자 이름. 페이지에 적혀 있지 않으면 빈 문자열.',
   '  제목만 보고 아티스트를 추측하지 마세요. 인쇄된 이름이 없으면 반드시 빈 문자열입니다.',
   '- key: 조성(예: E, F, F#m). 안 보이면 빈 문자열.',
+  '- englishTitle: 한국어 제목과 함께 인쇄된 영어 제목(원곡 제목). 없거나 영어로만 된 악보면 빈 문자열.',
   '- order: 악보 맨 위의 진행 순서. 보통 I(간주)로 시작합니다. 예: ["I","V","V2","PC","C","C"]. 없으면 빈 배열.',
   '  진행 순서는 악보에 인쇄된 그대로 옮기세요. 같은 파트가 연달아 두 번 적혀 있으면(예: C C, Cx2)',
   '  두 번 다 넣고, 임의로 한 번으로 줄이거나 없는 파트를 끼워 넣지 마세요.',
@@ -106,7 +169,8 @@ export const BASE_PROMPT_LINES: string[] = [
   '  (I는 예외 — 간주는 가사가 없으므로 sections에 넣지 않습니다).',
   '- lyricRowCount: 한 오선 아래에 한국어 가사 줄이 가장 많이 쌓여 있는 개수(1, 2, 3…). 영어 가사 줄은',
   '  세지 않습니다. 악보가 아니면 0.',
-  '- sections: 가사를 파트별로 나눈 배열. 각 원소는 {label, lines}.',
+  '- sections: 한국어 가사를 파트별로 나눈 배열. 각 원소는 {label, lines}.',
+  '- englishSections: 한국어 가사와 함께 인쇄된 영어 가사를 sections와 같은 모양으로. 없으면 빈 배열.',
   '  label은 V(절), PC(프리코러스), C(후렴), B(브릿지), O(아웃트로) 등입니다.',
   '  같은 파트가 한 번뿐이면 번호 없이 그대로 쓰고(V, PC, C, B, O), 여러 번 있을 때만 두 번째부터',
   '  번호를 붙이세요(V, V2, V3… / C, C2, C3… 등). 콘티에 1, 2 구분이 없는데 임의로 1을 붙이지 마세요.',
@@ -118,6 +182,8 @@ export const BASE_PROMPT_LINES: string[] = [
   ...KOREAN_ONLY_RULES,
   '악보에 보이는 한국어 가사를 빠짐없이 모두 읽으세요. 도돌이표와 1., 2. 괄호(볼타) 안의 가사도 포함하세요.',
   '악보의 코드 기호(C, G, Am7, G/B 등)와 반복 기호는 가사가 아닙니다. lines에 절대 포함하지 마세요.',
+  ...CHORD_CHART_RULES,
+  ...HANDWRITTEN_ORDER_RULES,
   ...STACKED_ROW_RULES,
   '가사는 음절을 나누는 하이픈(-)이나 붙임표 없이 단어를 자연스럽게 이어서 적으세요',
   '(예: "Ce-le-brate" → "Celebrate", "찬-양-해" → "찬양해").',

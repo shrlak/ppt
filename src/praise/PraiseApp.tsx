@@ -19,7 +19,7 @@ import AdditionalFilesSection from '../components/AdditionalFilesSection';
 import PptLibraryPanel from '../components/PptLibraryPanel';
 import SlideThumbnail from '../components/SlideThumbnail';
 import { showToast } from '../lib/utils/toast';
-import type { ContiInfo, LibraryEntry, Song } from '../lib/utils/types';
+import type { ContiInfo, ContiPrayer, LibraryEntry, Song } from '../lib/utils/types';
 import type { ChordSheetSong, SheetSlide } from '../lib/utils/chordSheet';
 import type { ScoreEnglish } from '../lib/utils/scorePages';
 import { normalizeTitle } from '../lib/storage/library';
@@ -51,6 +51,7 @@ import {
   entryFromSong,
   fetchSeedEnglish,
   fillEnglishFromLibrary,
+  findEnglishEntry,
   loadSavedEnglish,
   mergeEnglishLibraries,
   saveEnglishEntry,
@@ -63,12 +64,14 @@ import { isPrayerPlan, missingEnglishCount, planPraiseDeck, type AdditionalPlace
 import { posterInDeck } from './poster';
 import {
   addPrayer,
+  applyContiPrayers,
   applyPrayerFlags,
   placePrayers,
   prayerHasContent,
   releaseRemovedSongs,
   removePrayer,
   setPrayerAfter,
+  songsBeforeContiPrayers,
   withPrayerPerCheckedSong,
   type PrayerState,
 } from './prayers';
@@ -429,7 +432,13 @@ export default function PraiseApp() {
         const current = extrasFor(previous, song.id);
         const result = englishFromScore(song, current.english, page);
         if (result.filled === 0 && !result.titleFilled) continue;
-        next[song.id] = { ...current, english: result.english, englishSource: current.englishSource ?? 'score' };
+        // Only the title off the 악보 (`Above All` under the Korean): the
+        // lyrics are still to come, from the web or by hand.
+        next[song.id] = {
+          ...current,
+          english: result.english,
+          ...(result.filled > 0 ? { englishSource: current.englishSource ?? 'score' } : {}),
+        };
         changed = true;
       }
       return changed ? next : previous;
@@ -452,6 +461,12 @@ export default function PraiseApp() {
   // Latest library, for callbacks that must stay referentially stable.
   const englishLibraryRef = useRef(englishLibrary);
   englishLibraryRef.current = englishLibrary;
+  // A Korean song's saved English title tells its English 악보 from the next
+  // English song on a conti with no song list.
+  const englishTitleOf = useCallback(
+    (title: string) => findEnglishEntry(englishLibraryRef.current, title)?.englishTitle.trim() || undefined,
+    [],
+  );
   const chordSheetTitle = useCallback(
     (sheet: ChordSheetSong) => sheetTitles(sheet, englishLibraryRef.current).title,
     [],
@@ -575,8 +590,32 @@ export default function PraiseApp() {
     setPrayers((previous) => change({ extras: flags, prayers: previous }).prayers);
     setOverview(null);
   }, []);
+  // The 기도 pages of the conti just read: a 기도 after the song before each,
+  // kept in step while the conti's cards settle (two cards found to be one
+  // song). Once the operator checks or takes out a 기도 by hand, theirs it is.
+  const contiPrayersRef = useRef<{ prayers: ContiPrayer[]; applied: Set<string> } | null>(null);
+  useEffect(() => {
+    const pending = contiPrayersRef.current;
+    if (!pending) return;
+    const wanted = songsBeforeContiPrayers(songs, pending.prayers);
+    const present = new Set(songs.map((song) => song.id));
+    const applied = new Set([...pending.applied].filter((id) => present.has(id)));
+    pending.applied = new Set(wanted.keys());
+    if (wanted.size === applied.size && [...wanted.keys()].every((id) => applied.has(id))) return;
+    changePrayers((current) => applyContiPrayers(songs, current, wanted, applied));
+  }, [songs, changePrayers]);
   const togglePrayerAfter = useCallback(
-    (songId: string, on: boolean) => changePrayers((current) => setPrayerAfter(songsRef.current, current, songId, on)),
+    (songId: string, on: boolean) => {
+      contiPrayersRef.current = null;
+      changePrayers((current) => setPrayerAfter(songsRef.current, current, songId, on));
+    },
+    [changePrayers],
+  );
+  const removePrayerAt = useCallback(
+    (index: number) => {
+      contiPrayersRef.current = null;
+      changePrayers((current) => removePrayer(songsRef.current, current, index));
+    },
     [changePrayers],
   );
   const updatePrayer = useCallback((prayerId: string, update: (prayer: PraisePrayer) => PraisePrayer) => {
@@ -679,6 +718,8 @@ export default function PraiseApp() {
     setCoverImage(restored.coverImage);
     setPoster(restored.poster ?? emptyPoster());
     setFileNameOverride(restored.fileNameOverride ?? deck.name);
+    // The saved 기도 are this deck's; no conti is being read.
+    contiPrayersRef.current = null;
     setContiFile(deck.contiPdf);
     setSongs(restored.songs);
     setRestore((previous) => ({ version: previous.version + 1, songs: restored.songs, conti: null }));
@@ -812,7 +853,20 @@ export default function PraiseApp() {
     setSongs(next);
     setOverview(null);
   }, []);
+  const handleContiFile = useCallback((file: { name: string; data: ArrayBuffer }) => {
+    // A new conti: the last one's 기도 pages no longer say anything.
+    contiPrayersRef.current = null;
+    setContiFile(file);
+  }, []);
   const handleContiInfo = useCallback((info: ContiInfo) => {
+    const prayers = info.prayers ?? [];
+    contiPrayersRef.current = prayers.length > 0 ? { prayers, applied: new Set() } : null;
+    if (prayers.length > 0) {
+      showToast(
+        `콘티의 기도 페이지 ${prayers.length}장(${prayers.map((prayer) => `p.${prayer.page}`).join(', ')})을 보고 ` +
+          '각 페이지 바로 앞 곡 뒤에 기도를 넣었습니다. 기도 단계에서 기도제목과 말씀을 채워 주세요.',
+      );
+    }
     setContiEnglishTitles(
       Object.fromEntries(
         info.songs.flatMap((entry) => (entry.englishTitle ? [[normalizeTitle(entry.title), entry.englishTitle]] : [])),
@@ -926,6 +980,7 @@ export default function PraiseApp() {
     savedFingerprintRef.current = null;
     setDate('');
     setExtras({});
+    contiPrayersRef.current = null;
     setPrayers([]);
     setAdditionalFiles([]);
     setPlacements([]);
@@ -1024,7 +1079,7 @@ export default function PraiseApp() {
               onSongsChange={handleSongsChange}
               onDateDetected={handleDateDetected}
               onContiInfoDetected={handleContiInfo}
-              onContiFileLoaded={setContiFile}
+              onContiFileLoaded={handleContiFile}
               restoreVersion={restore.version}
               restoreSongs={restore.songs}
               restoreConti={restore.conti}
@@ -1033,6 +1088,7 @@ export default function PraiseApp() {
               chordSheetTitle={chordSheetTitle}
               onChordSheetLoaded={handleChordSheetLoaded}
               onScoreEnglish={handleScoreEnglish}
+              englishTitleOf={englishTitleOf}
               onContiDropAnywhere={showSongsStep}
             />
             <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="praise" />
@@ -1114,7 +1170,7 @@ export default function PraiseApp() {
               prayers={prayers}
               onPrayerAfter={togglePrayerAfter}
               onAddPrayer={() => changePrayers(addPrayer)}
-              onRemovePrayer={(index) => changePrayers((current) => removePrayer(songsRef.current, current, index))}
+              onRemovePrayer={removePrayerAt}
               onPrayerChange={updatePrayer}
               loadBible={loadBible}
             />

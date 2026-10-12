@@ -13,7 +13,7 @@
 // song, so every other pairing stays as it was, and checking that song again
 // brings it back — while a 기도 nothing was typed into is simply dropped, so
 // checking a song by mistake and unchecking it again leaves nothing behind.
-import type { Song } from '../lib/utils/types';
+import type { ContiPrayer, Song } from '../lib/utils/types';
 import type { PraisePrayer, PraisePrayerSlide, PraisePrayerSlideKind, PraiseSongExtras } from './types';
 
 /** Titles a 기도 slide is often given, offered as one-tap choices. */
@@ -243,6 +243,69 @@ export function releaseRemovedSongs(
     remaining = remaining.filter((candidate) => candidate.id !== song.id);
   }
   return result;
+}
+
+/**
+ * The songs a conti's 기도 pages come after: each 기도 page follows the song
+ * holding the 악보 page closest before it. Keyed by song id, with the topics
+ * typed on the page ('' for a page that only says 기도); two 기도 pages after
+ * one song are one 기도 there. A 기도 page before every song follows none.
+ */
+export function songsBeforeContiPrayers(songs: Song[], prayers: ContiPrayer[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const prayer of prayers) {
+    let before: { songId: string; page: number } | null = null;
+    for (const song of songs) {
+      for (const page of [song.pageIndex, ...(song.extraPages ?? [])]) {
+        if (page == null || page >= prayer.page || (before && page <= before.page)) continue;
+        before = { songId: song.id, page };
+      }
+    }
+    if (!before) continue;
+    const topics = [result.get(before.songId), prayer.topics?.trim()].filter(Boolean).join('\n');
+    result.set(before.songId, topics);
+  }
+  return result;
+}
+
+/** The 기도's first empty 기도제목 given `topics`. */
+function withTopics(prayer: PraisePrayer, topics: string): PraisePrayer {
+  let filled = false;
+  const slides = prayer.slides.map((slide) => {
+    if (filled || slide.kind !== 'topics' || slide.text.trim()) return slide;
+    filled = true;
+    return { ...slide, text: topics };
+  });
+  return filled ? { ...prayer, slides } : prayer;
+}
+
+/**
+ * The conti's 기도 pages put onto the songs (see songsBeforeContiPrayers):
+ * every song in `wanted` is checked — its new 기도 taking the topics its page
+ * typed — and a song checked for the conti before (`applied`) that no longer
+ * comes before a 기도 page is unchecked. As the conti's cards settle (two
+ * cards found to be one song, a page moved to its own song) the 기도 follow.
+ */
+export function applyContiPrayers(
+  songs: Song[],
+  state: PrayerState,
+  wanted: Map<string, string>,
+  applied: ReadonlySet<string>,
+): PrayerState {
+  const present = new Set(songs.map((song) => song.id));
+  let next = state;
+  for (const songId of applied) {
+    if (!wanted.has(songId) && present.has(songId)) next = setPrayerAfter(songs, next, songId, false);
+  }
+  for (const song of songs) {
+    if (!wanted.has(song.id) || applied.has(song.id) || next.extras[song.id]?.prayerAfter) continue;
+    next = setPrayerAfter(songs, next, song.id, true);
+    const topics = wanted.get(song.id);
+    if (!topics) continue;
+    const at = checkedSongIds(songs, next.extras).indexOf(song.id);
+    next = { ...next, prayers: next.prayers.map((prayer, index) => (index === at ? withTopics(prayer, topics) : prayer)) };
+  }
+  return next;
 }
 
 /** A slide moved one place up (-1) or down (+1) within its 기도. */

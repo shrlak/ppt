@@ -103,10 +103,9 @@ export function groupContiPages(input: PageGroupingInput): PageGrouping {
   const titled = songs.filter((song) => titleOf(song.page)?.trim()).length;
   const titlesRead = songs.length > 0 && titled * 2 >= songs.length;
   const hasEnglishPage = (song: number) => pages[song].some((page) => isEnglishTitle(titleOf(page)));
-  const neighbour = (page: number, step: -1 | 1) => {
-    const at = musicPages.indexOf(page);
-    return at < 0 ? undefined : musicPages[at + step];
-  };
+  // The page right beside it in the PDF: a 기도 page or a typed page between
+  // two 악보 keeps them apart.
+  const neighbour = (page: number, step: -1 | 1) => (musicPages.includes(page + step) ? page + step : undefined);
   /** The song holding `page`, when it is a Korean song with no English page yet. */
   const awaitingEnglish = (page: number | undefined) => {
     const song = page === undefined ? undefined : holder.get(page);
@@ -159,25 +158,115 @@ export function groupContiPages(input: PageGroupingInput): PageGrouping {
   };
 }
 
+/** One card of a conti with no song list: one 악보 page, and what the title pass read off it. */
+export interface UnlistedCard {
+  page: number;
+  /** The title read off the page (or the card's own name); undefined or a placeholder when none. */
+  title?: string;
+  /** The writers printed on the page, when they were read. */
+  artist?: string;
+  /** The English title printed beside a Korean one. */
+  englishTitle?: string;
+  /** The title pass found no 악보 on the page. */
+  nonScore?: boolean;
+}
+
+export interface UnlistedFoldOptions {
+  /** 찬양집회: a song's 악보 in its other language is that song's too. */
+  bilingual: boolean;
+  /** The English title a Korean song was saved with, when one was. */
+  englishTitleOf?: (title: string) => string | undefined;
+}
+
+/** What a credit line says besides the names: `Words & Music by`, `천관웅 역`. */
+const CREDIT_WORDS = /\b(?:words|music|lyrics|by|arr|arranged|translated|feat|featuring)\b|작사|작곡|편곡|번역|\s역\s*$/gi;
+
+/** The names a page prints for its writers: `Paul Baloche/Lenny LeBlanc`, `Brandon Lake | Chris Brown`. */
+function writerNames(artist: string | undefined): string[] {
+  return (artist ?? '')
+    .split(/[|,/&;·\n]|\band\b/i)
+    .map((part) => part.toLowerCase().replace(CREDIT_WORDS, ' ').replace(/[^a-z가-힣]+/g, ''))
+    .filter((name) => name.length >= 3);
+}
+
+/** Two pages that print a writer in common. */
+export function sameWriters(a: string | undefined, b: string | undefined): boolean {
+  const left = writerNames(a);
+  const right = writerNames(b);
+  // A longer credit line still names the writer: `Eugene Greco` in `Eugene Greco (Integrity)`.
+  const within = (short: string, long: string) => short.length >= 6 && long.includes(short);
+  return left.some((name) => right.some((other) => name === other || within(name, other) || within(other, name)));
+}
+
 /**
- * Cards made one per 악보 page (a conti with no cover to list its songs) that
- * are the same song: a card whose page prints the same title as the page just
- * before it is folded into that card. `titles[i]` is card `i`'s title, the
- * cards in PDF page order. Returns, for each card, the index of the card it
- * belongs to — its own index when it stands alone.
+ * Cards made one per 악보 page — a conti with no cover or 카톡 공지 to list
+ * its songs — that are one song. `cards` are in PDF page order; returns, for
+ * each, the index of the card it belongs to (its own when it stands alone).
+ *
+ *  - the same title as the card just before it → that card's song;
+ *  - no title, just after a card → the rest of that card's score (only when
+ *    the title pass read most pages' titles: with none read, every page would
+ *    look like one long song);
+ *  - on a 찬양집회, a title in English only, just after (or before) a Korean
+ *    card that has no English page yet → that song in English — but only
+ *    when the two are shown to be one song: the same writers printed on both
+ *    (`Eugene Greco` over 하늘 위에 주님밖에 and over God Is The Strength Of
+ *    My Heart), or the English title the Korean page prints under its own or
+ *    the Korean song was saved with. An
+ *    English song that merely follows a Korean one (Hosanna after 예수
+ *    우리들의 밝은 빛) stays a song of its own.
+ *
+ * "Just after" is the very next PDF page: a 기도 page, a typed page or a page
+ * the models found no 악보 on keeps two cards apart.
  */
-export function foldRepeatedTitles(titles: (string | undefined)[]): number[] {
-  const heads: number[] = [];
-  titles.forEach((title, index) => {
-    const previous = index - 1;
-    const head = previous >= 0 ? heads[previous] : -1;
-    const same =
-      head >= 0 &&
-      !isPlaceholderTitle(title) &&
-      (titleSimilarity(titles[previous], title) >= SAME_TITLE_THRESHOLD ||
-        titleSimilarity(titles[head], title) >= SAME_TITLE_THRESHOLD);
-    heads.push(same ? head : index);
-  });
+export function foldUnlistedPages(cards: UnlistedCard[], options: UnlistedFoldOptions): number[] {
+  const heads = cards.map((_, index) => index);
+  const titleOf = (card: UnlistedCard) => (isPlaceholderTitle(card.title) ? undefined : card.title?.trim());
+  const scored = cards.filter((card) => !card.nonScore);
+  const titlesRead = scored.length > 0 && scored.filter((card) => titleOf(card)).length * 2 >= scored.length;
+  const withEnglish = new Set<number>();
+  const adjacent = (before: number, after: number) =>
+    !cards[before].nonScore && !cards[after].nonScore && cards[after].page === cards[before].page + 1;
+  /** The Korean card `korean` and the English card `english` are one song. */
+  const inEnglish = (korean: number, english: number) => {
+    const ko = titleOf(cards[korean]);
+    const en = titleOf(cards[english]);
+    if (!options.bilingual || !ko || !en || !HANGUL.test(ko) || !isEnglishTitle(en) || withEnglish.has(korean)) return false;
+    const known = [cards[korean].englishTitle, options.englishTitleOf?.(ko)];
+    return (
+      sameWriters(cards[korean].artist, cards[english].artist) ||
+      known.some((title) => titleSimilarity(title, en) >= SAME_TITLE_THRESHOLD)
+    );
+  };
+
+  for (let index = 1; index < cards.length; index++) {
+    if (!adjacent(index - 1, index)) continue;
+    const head = heads[index - 1];
+    const title = titleOf(cards[index]);
+    if (!title) {
+      if (titlesRead && titleOf(cards[head])) heads[index] = head;
+    } else if (
+      titleSimilarity(titleOf(cards[index - 1]), title) >= SAME_TITLE_THRESHOLD ||
+      titleSimilarity(titleOf(cards[head]), title) >= SAME_TITLE_THRESHOLD
+    ) {
+      heads[index] = head;
+    } else if (inEnglish(head, index)) {
+      heads[index] = head;
+      withEnglish.add(head);
+    }
+  }
+  // The English printed first, its Korean on the next page: the English song,
+  // with any page carrying it on, joins the Korean one.
+  for (let index = 0; index < cards.length; index++) {
+    if (heads[index] !== index) continue;
+    const last = heads.lastIndexOf(index);
+    const next = last + 1;
+    if (next >= cards.length || heads[next] !== next || !adjacent(last, next) || !inEnglish(next, index)) continue;
+    heads.forEach((head, at) => {
+      if (head === index) heads[at] = next;
+    });
+    withEnglish.add(next);
+  }
   return heads;
 }
 
@@ -253,7 +342,7 @@ export interface CombinedReading {
 export function combinePageReadings(readings: ParsedScore[], koreanSong = false): CombinedReading {
   if (readings.length === 0) return { score: { order: [], sections: [] }, english: null };
   // One page is read exactly as before: there is nothing to combine.
-  if (readings.length === 1) return { score: readings[0], english: null };
+  if (readings.length === 1) return { score: readings[0], english: printedEnglish(readings) };
   const korean = readings.filter((reading) => readingLanguage(reading) === 'ko');
   const english = readings.filter((reading) => readingLanguage(reading) === 'en');
   const unread = readings.filter((reading) => readingLanguage(reading) === 'none');
@@ -264,7 +353,47 @@ export function combinePageReadings(readings: ParsedScore[], koreanSong = false)
   // The title the song goes by is the Korean one, wherever it was printed.
   score.title = korean.find((reading) => reading.title)?.title ?? score.title ?? english.find((r) => r.title)?.title;
   if (readings.some((reading) => reading.pageType === 'score')) score.pageType = 'score';
-  return { score, english: english.length > 0 ? mergeReadings(english) : null };
+  // A Korean song whose Korean page could not be read: its English pages are its English.
+  return { score, english: korean.length > 0 ? printedEnglish(readings) : mergeReadings(english) };
+}
+
+/**
+ * Whether a page gave the song English of its own: it is an English 악보, or
+ * a Korean one printing the English beside its lyrics or under its title.
+ */
+export function givesEnglish(reading: ParsedScore): boolean {
+  const language = readingLanguage(reading);
+  if (language === 'en') return true;
+  return language !== 'none' && (!!reading.englishTitle || (reading.englishSections?.length ?? 0) > 0);
+}
+
+/**
+ * A song's English, as its pages print it: an English-only page's lyrics,
+ * and the English a Korean page prints beside its own (`Above All` under
+ * 모든 능력과 모든 권세, the English row under each Korean one). Null when no
+ * page gives any. A song printed in English only has no English apart from
+ * its lyrics — its pages are the song.
+ */
+export function printedEnglish(
+  readings: ParsedScore[],
+  /** The song is sung in Korean (its lyrics already settled), so an English page is its English. */
+  koreanSong = readings.some((reading) => readingLanguage(reading) === 'ko'),
+): ParsedScore | null {
+  if (!koreanSong) return null;
+  const parts = readings.flatMap((reading): ParsedScore[] => {
+    if (readingLanguage(reading) === 'en') return [reading];
+    if (!givesEnglish(reading)) return [];
+    return [{ title: reading.englishTitle, order: reading.order, sections: reading.englishSections ?? [] }];
+  });
+  if (parts.length === 0) return null;
+  const english = mergeReadings(parts);
+  return english.sections.length > 0 || english.title ? english : null;
+}
+
+/** `english` with `title` as its title when it has none — or just that title, when there is no English. */
+export function withEnglishTitle(english: ParsedScore | null, title: string | undefined): ParsedScore | null {
+  if (!title?.trim() || english?.title?.trim()) return english;
+  return english ? { ...english, title } : { title, order: [], sections: [] };
 }
 
 /**

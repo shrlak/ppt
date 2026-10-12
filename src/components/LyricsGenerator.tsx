@@ -13,10 +13,12 @@ import {
 import { alignPagesToConti, isPlaceholderTitle, lyricsLookupTitle } from '../lib/utils/contiAlignment';
 import {
   combinePageReadings,
-  foldRepeatedTitles,
+  foldUnlistedPages,
+  givesEnglish,
   groupContiPages,
-  mergeReadings,
+  printedEnglish,
   readingLanguage,
+  withEnglishTitle,
   type ScoreEnglish,
 } from '../lib/utils/scorePages';
 import {
@@ -379,6 +381,11 @@ interface Props {
    * read even for a song the library already filled.
    */
   onScoreEnglish?: (songId: string, english: ScoreEnglish) => void;
+  /**
+   * The English title a Korean song was saved with — on a conti with no song
+   * list, what tells the song's English 악보 from the next English song.
+   */
+  englishTitleOf?: (title: string) => string | undefined;
 }
 
 /** Korean lines whose word spacing can be trusted, to space a chord sheet's lyrics by. */
@@ -402,11 +409,14 @@ export default function LyricsGenerator({
   chordSheetTitle,
   onChordSheetLoaded,
   onScoreEnglish,
+  englishTitleOf,
 }: Props) {
   const linesPerSlide = defaultLinesPerSlide(service);
-  // Latest English handler, for the recognition callback that must stay stable.
+  // Latest English handlers, for the recognition callback that must stay stable.
   const onScoreEnglishRef = useRef(onScoreEnglish);
   onScoreEnglishRef.current = onScoreEnglish;
+  const englishTitleOfRef = useRef(englishTitleOf);
+  englishTitleOfRef.current = englishTitleOf;
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
     hasCloudLibrary() ? 'syncing' : 'local',
@@ -951,9 +961,16 @@ export default function LyricsGenerator({
         window.clearInterval(ticker);
         return;
       }
+      /**
+       * Songs the library (or the user) settled: their scan is called off, but
+       * the English their conti prints is still theirs to have.
+       */
+      const settledForEnglish = new Set<string>();
       /** Hand a song's English, read off its English-only 악보, to the 찬양집회 page. */
       const forwardEnglish = (id: string, english: ParsedScore | null, pages: number[]) => {
-        if (!wantsEnglish || !english || english.sections.length === 0 || isCancelled(id)) return;
+        if (!wantsEnglish || !english || (isCancelled(id) && !settledForEnglish.has(id))) return;
+        // An English title printed under the Korean one is worth passing on by itself.
+        if (english.sections.length === 0 && !english.title?.trim()) return;
         onScoreEnglishRef.current?.(id, { title: english.title, sections: english.sections, order: english.order, pages });
       };
 
@@ -1345,7 +1362,9 @@ export default function LyricsGenerator({
           const grouped = groupContiPages({
             songs: active.map((song) => ({
               title: song.title,
-              englishTitle: contiEnglishTitlesRef.current.get(song.id),
+              // The conti's English title, or the one its own page prints.
+              englishTitle:
+                contiEnglishTitlesRef.current.get(song.id) ?? readByPage.get(song.pageIndex as number)?.englishTitle,
               page: song.pageIndex as number,
             })),
             spares: titlePages.filter((page) => !held.has(page)),
@@ -1400,15 +1419,22 @@ export default function LyricsGenerator({
           }
           reportedUnclaimedRef.current = unclaimed;
         } else if (active.length > 1) {
-          // No list to go by, every 악보 page became a card: cards whose pages
-          // print the same title, one after another, are one song.
+          // No list to go by, every 악보 page became a card: cards that are one
+          // song — its title printed again, a page carrying on the one before,
+          // on a 찬양집회 the song in English — become one (scorePages.ts).
           const byPage = active
             .map((_, index) => index)
             .sort((a, b) => (active[a].pageIndex as number) - (active[b].pageIndex as number));
-          const heads = foldRepeatedTitles(
-            byPage.map((index) =>
-              aliasedTitles[index]?.title ?? (isPlaceholderTitle(active[index].title) ? undefined : active[index].title),
-            ),
+          const heads = foldUnlistedPages(
+            byPage.map((index) => ({
+              page: active[index].pageIndex as number,
+              title:
+                aliasedTitles[index]?.title ?? (isPlaceholderTitle(active[index].title) ? undefined : active[index].title),
+              artist: aliasedTitles[index]?.artist,
+              englishTitle: aliasedTitles[index]?.englishTitle,
+              nonScore: !!aliasedTitles[index] && isNonScoreRecognition(aliasedTitles[index]),
+            })),
+            { bilingual: service === 'praise', englishTitleOf: (title) => englishTitleOfRef.current?.(title) },
           );
           const into = new Map<number, number>();
           heads.forEach((head, position) => {
@@ -1451,10 +1477,20 @@ export default function LyricsGenerator({
               for (const id of removed) delete next[id];
               return next;
             });
-            const named = active
-              .filter((song) => headIds.has(song.id))
-              .map((song) => [song.pageIndex, ...(song.extraPages ?? [])].map((page) => `p.${page}`).join('·'));
-            showToast(`같은 제목의 악보 페이지(${named.join(', ')})를 한 곡으로 합쳤습니다.`);
+            const named = active.flatMap((song, index) =>
+              headIds.has(song.id)
+                ? [
+                    `'${aliasedTitles[index]?.title?.trim() || song.title.trim() || '새 찬양'}'(${[song.pageIndex, ...(song.extraPages ?? [])]
+                      .sort((a, b) => (a as number) - (b as number))
+                      .map((page) => `p.${page}`)
+                      .join(', ')})`,
+                  ]
+                : [],
+            );
+            showToast(
+              `악보가 여러 장인 곡은 한 곡으로 합쳐 모든 페이지를 읽습니다: ${named.join(', ')}.` +
+                (service === 'praise' ? ' 영어로 된 악보의 가사는 영어 가사 단계에 넣습니다.' : ''),
+            );
           }
         }
         // From here on the cards' pages are read — each card's own, and the
@@ -1468,8 +1504,15 @@ export default function LyricsGenerator({
          * still read, for the English lyrics step.
          */
         const englishOnly: Song[] = [];
+        /** Its own page prints English beside the Korean: `Above All` under 모든 능력과 모든 권세. */
+        const printsEnglish = (song: Song) => !!readByPage.get(song.pageIndex as number)?.englishTitle;
         const settled = (song: Song) => {
-          if (wantsEnglish && (song.extraPages?.length ?? 0) > 0) englishOnly.push(song);
+          if (!wantsEnglish) return;
+          settledForEnglish.add(song.id);
+          if ((song.extraPages?.length ?? 0) > 0 || printsEnglish(song)) englishOnly.push(song);
+          // The English title is known now, whatever the lyrics pass reads.
+          const englishTitle = readByPage.get(song.pageIndex as number)?.englishTitle;
+          if (englishTitle) forwardEnglish(song.id, { title: englishTitle, order: [], sections: [] }, [song.pageIndex as number]);
         };
         const titlePlan = planScoreBatch(
           aliasedTitles,
@@ -1553,7 +1596,7 @@ export default function LyricsGenerator({
           ),
           ...englishOnly.flatMap((song) =>
             [song.pageIndex as number, ...(song.extraPages ?? [])]
-              .filter((page) => !/[가-힣]/.test(readByPage.get(page)?.title ?? ''))
+              .filter((page) => !/[가-힣]/.test(readByPage.get(page)?.title ?? '') || !!readByPage.get(page)?.englishTitle)
               .map((page) => ({ songId: song.id, page, hint: readByPage.get(page)?.title?.trim() || undefined })),
           ),
         ];
@@ -1609,12 +1652,15 @@ export default function LyricsGenerator({
         // A settled song's English 악보: its English goes to the 찬양집회's
         // English step; the song's Korean stays as it was.
         for (const song of englishOnly) {
-          const english = furtherFor(song.id).filter(({ score }) => readingLanguage(score) === 'en');
-          if (english.length === 0) continue;
+          const read = furtherFor(song.id).filter(({ score }) => givesEnglish(score));
+          if (read.length === 0) continue;
           forwardEnglish(
             song.id,
-            mergeReadings(english.map(({ score }) => score)),
-            english.map(({ page }) => page),
+            printedEnglish(
+              read.map(({ score }) => score),
+              true,
+            ),
+            read.map(({ page }) => page),
           );
         }
 
@@ -1627,14 +1673,17 @@ export default function LyricsGenerator({
             { page: song.pageIndex as number, score: lyricScores?.[index] ?? { order: [], sections: [] } },
             ...furtherFor(song.id),
           ];
+          // Named in Korean — by the conti, or (a card with no list to name
+          // it) by the page itself.
+          const named = isPlaceholderTitle(song.title) ? (identity.title ?? '') : song.title;
           const { score: full, english } = combinePageReadings(
             read.map(({ score }) => score),
-            /[가-힣]/.test(song.title),
+            /[가-힣]/.test(named),
           );
           forwardEnglish(
             song.id,
-            english,
-            read.filter(({ score }) => readingLanguage(score) === 'en').map(({ page }) => page),
+            withEnglishTitle(english, identity.englishTitle),
+            read.filter(({ score }) => givesEnglish(score)).map(({ page }) => page),
           );
           scoreById.set(
             song.id,
@@ -1797,12 +1846,12 @@ export default function LyricsGenerator({
               const read = [{ page: song.pageIndex as number, score: single.score }, ...more];
               const pagesRead = combinePageReadings(
                 read.map(({ score }) => score),
-                /[가-힣]/.test(song.title),
+                /[가-힣]/.test(isPlaceholderTitle(song.title) ? (known.title ?? '') : song.title),
               );
               forwardEnglish(
                 song.id,
-                pagesRead.english,
-                read.filter(({ score }) => readingLanguage(score) === 'en').map(({ page }) => page),
+                withEnglishTitle(pagesRead.english, known.englishTitle),
+                read.filter(({ score }) => givesEnglish(score)).map(({ page }) => page),
               );
               const merged: ParsedScore = {
                 ...pagesRead.score,

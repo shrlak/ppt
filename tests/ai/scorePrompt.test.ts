@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASE_PROMPT_LINES, basePrompt, correctionExampleLines } from '../../src/lib/ai/scorePrompt';
+import { BASE_PROMPT_LINES, PAGE_TYPE_RULE, TITLE_PASS_LINES, basePrompt, correctionExampleLines } from '../../src/lib/ai/scorePrompt';
 import { buildGeminiBatchBody } from '../../src/lib/ai/scoreAi';
 import { buildOpenRouterBatchBody } from '../../src/lib/ai/scoreNvidia';
 
@@ -79,9 +79,41 @@ describe('the shared score prompt', () => {
 });
 
 describe('Korean-only reading', () => {
-  it('tells every model to skip English lyric rows', () => {
+  it('tells every model to keep English lyric rows out of the Korean, and apart in englishSections', () => {
     const prompt = BASE_PROMPT_LINES.join('\n');
-    expect(prompt).toContain('한국어 가사만 읽으세요');
-    expect(prompt).toContain('영어 줄은 통째로 건너뛰세요');
+    expect(prompt).toContain('sections에는 한국어 가사만 읽으세요');
+    expect(prompt).toContain('영어 줄은 sections에서 통째로 건너뛰세요');
+    expect(prompt).toContain('englishSections에 따로 담으세요');
+    expect(prompt).toContain('- englishTitle:');
+  });
+});
+
+describe('what counts as a song’s page', () => {
+  it('takes a chord chart with no staff for a song, and a page saying only 기도 for none', () => {
+    const prompt = BASE_PROMPT_LINES.join('\n');
+    expect(prompt).toContain('코드 악보');
+    expect(prompt).toContain('score입니다');
+    expect(prompt).toContain('「기도」「Prayer」처럼 제목 한두 단어만 있는 페이지');
+    expect(prompt).not.toContain('오선과 음표가 있는 악보 페이지면 "score", 아니면 "non_score"');
+  });
+
+  it('reads a 진행 written by hand, its x2 repeats and highlighter colours', () => {
+    const prompt = BASE_PROMPT_LINES.join('\n');
+    expect(prompt).toContain('손글씨(펜·태블릿)로 적혀 있을 수도');
+    expect(prompt).toContain('「C×2」「Cx2」「CX3」');
+    expect(prompt).toContain('형광펜');
+  });
+
+  it('asks every engine’s title pass for the same page kinds, writers and English title', () => {
+    const titles = TITLE_PASS_LINES.join('\n');
+    expect(titles).toContain(PAGE_TYPE_RULE);
+    expect(titles).toContain('englishTitle');
+    expect(titles).toContain('제목이 인쇄되어 있지 않은 페이지는 title을 빈 문자열');
+    const gemini = JSON.stringify(buildGeminiBatchBody(['data:image/png;base64,AAAA'], 'titles'));
+    const openRouter = JSON.stringify(buildOpenRouterBatchBody(['data:image/png;base64,AAAA'], 'titles'));
+    for (const body of [gemini, openRouter]) {
+      expect(body).toContain('코드 악보');
+      expect(body).toContain('아티스트(작사·작곡자)');
+    }
   });
 });

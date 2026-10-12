@@ -787,8 +787,88 @@ export function findCoverPages(pageTexts: string[]): number[] {
   return pages;
 }
 
+/**
+ * A 기도 heading, compared with its spaces taken out (a glyph-spaced text
+ * layer gives `기 도`): `기도`, `기도 2`, `통성기도`, `기도제목`, `Prayer`,
+ * `Corporate Prayer`, `Prayer Topic 1`, `Prayer Time`.
+ */
+const PRAYER_HEADING_RE =
+  /^(?:(?:통성|합심|중보|개인|묵상|결단|마무리)?기도(?:제목|시간)?|(?:corporate|united|intercessory|personal|silent|opening|closing)?prayer(?:topics?|time|prompts?|requests?)?)\d{0,2}$/i;
+/** How much a 기도 page may hold beyond its heading: a few typed topics, no more. */
+const PRAYER_PAGE_MAX_LINES = 8;
+const PRAYER_PAGE_MAX_CHARS = 400;
+/** What only a song's own page prints: a chord sheet's header and footer. */
+const SONG_SHEET_MARK_RE = /\bKey\s*[-:]\s*[A-G]|\bTempo\b|\bCCLI\b/i;
+
+/** `기도 / Prayer`, `Prayer Topic 2` — a line that is a 기도 heading and nothing else. */
+function isPrayerHeading(text: string): boolean {
+  const parts = text
+    .split(/[/|｜·]/)
+    .map((part) => part.replace(/\s+/g, ''))
+    .filter(Boolean);
+  return parts.length > 0 && parts.every((part) => PRAYER_HEADING_RE.test(part));
+}
+
+/**
+ * A page of the conti that only says it is time to pray.
+ *
+ * A conti with no cover marks its 기도 with a page of its own between the
+ * songs — `기도` and nothing else, or `Prayer Topic 2: Returning our hearts
+ * back to God` with the topics under it. Such a page is no song, and it says
+ * where the 기도 goes: after the song just before it.
+ *
+ * The heading must open the page and the page must stay short. A score whose
+ * text layer holds a handwritten `→ Prayer topic` starts with something else,
+ * and a typed lyric page of a song titled 기도 runs far longer. Returns the
+ * topics typed under the heading ('' when there are none), or null when the
+ * page is not a 기도 page.
+ */
+export function readPrayerPage(text: string): { topics: string } | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0 || lines.length > PRAYER_PAGE_MAX_LINES) return null;
+  if (lines.join(' ').length > PRAYER_PAGE_MAX_CHARS) return null;
+  if (lines.some((line) => SONG_SHEET_MARK_RE.test(line))) return null;
+  const [first, ...rest] = lines;
+  const colon = first.search(/[:：]/);
+  if (!isPrayerHeading(colon >= 0 ? first.slice(0, colon) : first)) return null;
+  const topics = [colon >= 0 ? first.slice(colon + 1).trim() : '', ...rest].filter(
+    (line) => line && !isPrayerHeading(line),
+  );
+  return { topics: joinWrappedTopics(topics).join('\n') };
+}
+
+/** `- 교회 연합`, `• 다음 세대`, `1. 회복` — a line that opens a topic of its own. */
+const TOPIC_MARK_RE = /^(?:[-–—•·∙●○▪■*]|\d{1,2}\s*[.)])\s*/;
+
+/**
+ * A topic the page wrapped onto the next line is one topic again: when the
+ * topics are bulleted, a line with no bullet carries on the one before; when
+ * they are not, an English line that starts in lower case does.
+ */
+function joinWrappedTopics(lines: string[]): string[] {
+  const bulleted = lines.some((line) => TOPIC_MARK_RE.test(line));
+  const topics: string[] = [];
+  for (const line of lines) {
+    const carriesOn = bulleted ? !TOPIC_MARK_RE.test(line) : /^[a-z]/.test(line);
+    if (carriesOn && topics.length > 0) topics[topics.length - 1] += ` ${line}`;
+    else topics.push(line);
+  }
+  return topics;
+}
+
 /** Classify PDF pages (1-based): cover, session-notes, and sheet-music pages. */
-export function classifyPages(pageTexts: string[]): {
+export function classifyPages(
+  pageTexts: string[],
+  /**
+   * Which pages are 기도 pages (see readPrayerPage) — told by the caller,
+   * which can also check that the page draws no picture. Without it no page
+   * is taken for one.
+   */
+  isPrayerPage: (page: number) => boolean = () => false,
+): {
   /** Every page the cover spans, in order; empty when there is no cover. */
   coverPages: number[];
   /** First cover page, or null. Kept for callers that only need the one. */
@@ -796,6 +876,8 @@ export function classifyPages(pageTexts: string[]): {
   notesIndex: number | null;
   /** Typed information pages beyond the cover that carry no score. */
   infoPages: number[];
+  /** 기도 pages between the songs: no song's, and each puts a 기도 after the song before it. */
+  prayerPages: number[];
   musicPages: number[];
 } {
   const coverPages = findCoverPages(pageTexts);
@@ -811,13 +893,15 @@ export function classifyPages(pageTexts: string[]): {
   }
 
   const infoPages: number[] = [];
+  const prayerPages: number[] = [];
   const musicPages: number[] = [];
   for (let page = 1; page <= pageTexts.length; page++) {
     if (cover.has(page) || page === notesIndex) continue;
     if (looksLikeInfoPage(pageTexts[page - 1])) infoPages.push(page);
+    else if (isPrayerPage(page)) prayerPages.push(page);
     else musicPages.push(page);
   }
-  return { coverPages, coverIndex: coverPages[0] ?? null, notesIndex, infoPages, musicPages };
+  return { coverPages, coverIndex: coverPages[0] ?? null, notesIndex, infoPages, prayerPages, musicPages };
 }
 
 /**
