@@ -769,3 +769,62 @@ test.describe('찬양집회 conti printing a song in Korean and again in English
     await expect(read).toContainText('Made up chorus line number one');
   });
 });
+
+test.describe('찬양집회 song a past night projected', () => {
+  // p.1 of the fixture is read as the English chord chart of Our God, which
+  // this year's deck (in the seed) projected as 크신 내 주님 | Our God.
+  const OUR_GOD = {
+    pageType: 'score',
+    sermonTitle: '',
+    scripture: '',
+    title: 'Our God',
+    artist: 'Chris Tomlin',
+    key: 'E',
+    order: ['V', 'C'],
+    lyricRowCount: 1,
+    sections: [
+      { label: 'V', lines: ['Water You turned into wine', 'Opened the eyes of the blind'] },
+      { label: 'C', lines: ['Our God is greater, our God is stronger'] },
+    ],
+  };
+
+  test('comes back under that night’s title, with its Korean and English, from the 악보’s English title', async ({ page }) => {
+    await page.route(`${PROXY}/settings`, (route) => route.fulfill({ json: {} }));
+    await page.route(`${PROXY}/learning/models`, (route) => route.fulfill({ json: { models: [] } }));
+    const answer = (images: number) =>
+      JSON.stringify({ results: Array.from({ length: Math.max(1, images) }, (_, imageIndex) => ({ imageIndex, ...OUR_GOD })) });
+    await page.route(`${PROXY}/gemini/**`, async (route) => {
+      const payload = route.request().postDataJSON() as { contents?: { parts?: unknown[] }[] };
+      const images = (payload.contents?.[0]?.parts ?? []).filter((part) => !!(part as { inline_data?: unknown }).inline_data);
+      await route.fulfill({ json: { candidates: [{ content: { parts: [{ text: answer(images.length) }] } }] } });
+    });
+    await page.route(`${PROXY}/openrouter`, async (route) => {
+      const payload = route.request().postDataJSON() as { messages?: { content?: unknown[] }[] };
+      const images = (payload.messages?.[0]?.content ?? []).filter((part) => (part as { type?: string }).type === 'image_url');
+      await route.fulfill({ json: { choices: [{ message: { content: answer(images.length) } }] } });
+    });
+    await page.route(`${PROXY}/lyrics*`, (route) => route.fulfill({ json: { candidates: [], links: [] } }));
+    await page.route('**/__proxy/praise/english**', (route) => route.fulfill({ json: { candidates: [] } }));
+
+    await page.goto('praise.html');
+    await page.getByTestId('pdf-input').setInputFiles(PRAYER_PAGES_PDF);
+    const card = page.getByTestId('song-card').first();
+    await expect(card).toBeVisible({ timeout: PARSE_TIMEOUT });
+    // Automatic recognition is skipped under browser automation: press the button a user could.
+    await card.getByTestId('recognize-btn').click();
+    await expect(card.getByTestId('recog-running')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+    await expect(card.getByTestId('song-title-input')).toHaveValue('크신 내 주님');
+    const texts = await card
+      .getByTestId('section-textarea')
+      .evaluateAll((boxes) => boxes.map((box) => (box as HTMLTextAreaElement).value));
+    expect(texts[0]).toBe('물이 포도주 되고\n눈먼 자 눈을 뜨네');
+    expect(texts.join('\n')).not.toContain('Water You turned into wine');
+
+    await page.getByTestId('praise-next-songs').click();
+    const english = page.getByTestId('praise-english-song').first();
+    await expect(english.getByTestId('praise-english-title')).toHaveValue('Our God');
+    await expect(english.getByTestId('praise-slide-english').first()).toHaveValue(
+      'Water You turned into wine\nOpened the eyes of the blind',
+    );
+  });
+});

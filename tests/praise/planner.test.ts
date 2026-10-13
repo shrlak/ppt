@@ -105,6 +105,10 @@ describe('missingEnglishCount', () => {
     const praise = song({ id: 'p', title: 'Praise', sections: [{ label: 'C', lines: ['Praise the Lord, oh my soul'] }] });
     expect(missingEnglishCount(praise, undefined)).toBe(0);
   });
+
+  it('never counts a song the last night sang in Korean', () => {
+    expect(missingEnglishCount(goodness, { english: { title: '', slides: {} }, koreanOnly: true })).toBe(0);
+  });
 });
 
 describe('distributeEnglish', () => {

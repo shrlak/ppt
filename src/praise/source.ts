@@ -162,6 +162,7 @@ function extrasOf(value: unknown): Record<string, PraiseSongExtras> {
     result[id] = {
       english: englishOf(entry.english),
       ...(entry.prayerAfter === true ? { prayerAfter: true } : {}),
+      ...(entry.koreanOnly === true ? { koreanOnly: true } : {}),
       ...(source === 'memory' ||
       source === 'sheet' ||
       source === 'score' ||

@@ -61,7 +61,9 @@ import { recognizeAdaptiveBatch } from '../lib/ai/adaptiveRecognition';
 import {
   CORRECTOR_WAIT_MS,
   MIN_ATTEMPT_MS,
+  RESCUE_CONCURRENCY,
   createRecognitionDeadline,
+  eachWithLimit,
   rescueAttemptMs,
 } from '../lib/ai/recognitionBudget';
 import { fetchLearningMemory, fetchModelReliabilities } from '../lib/learning/learningClient';
@@ -94,7 +96,7 @@ import { mergeRankedWebLyrics, mergeWebLyrics, type WebReviewState } from '../li
 import { hasSlideNumberParts, lacksParts, organizeSavedEntry, savedWordsInParts } from '../lib/lyrics/savedLyrics';
 import { planScoreBatch } from '../lib/ai/scoreBatchPlan';
 import { findSection, sortSectionsByOrder } from '../lib/utils/slidePlanner';
-import { recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
+import { RECOGNITION_PHASES, recognitionProgress, type RecognitionPhase } from '../lib/ai/recognitionProgress';
 import { isExcludedTitle } from '../lib/utils/excludedTitles';
 import { showToast } from '../lib/utils/toast';
 import { dragCarriesFiles, readContiDrop } from '../lib/utils/fileDrop';
@@ -121,17 +123,33 @@ const RESCUE_RENDER_WIDTH = 2200;
  * slow, not wrong, and the same page read again on its own usually comes
  * back.
  */
-function rescueFailureMessage(error: unknown): string {
+function rescueFailureMessage(error: unknown, retried = false): string {
   const category = classifyRecognitionError(error);
   if (category === 'timeout') {
-    return 'AI 모델이 제한 시간 안에 답하지 않았습니다. 이 곡만 다시 인식하면 대개 읽힙니다.';
+    return retried
+      ? 'AI 모델이 제한 시간 안에 답하지 않아, 이 곡만 한 번 더 읽었지만 이번에도 답이 없었습니다. 잠시 뒤 가사 자동 인식을 눌러 주세요.'
+      : 'AI 모델이 제한 시간 안에 답하지 않았습니다. 이 곡만 다시 인식하면 대개 읽힙니다.';
   }
   // Free-tier models turn calls away in spikes ("high demand"); they pass.
   if (category === 'server' || category === 'rate-limit') {
-    return 'AI 모델에 요청이 몰려 악보를 읽지 못했습니다. 잠시 뒤 이 곡만 다시 인식하면 대개 읽힙니다.';
+    return retried
+      ? 'AI 모델에 요청이 몰려, 이 곡만 한 번 더 읽었지만 이번에도 읽지 못했습니다. 잠시 뒤 가사 자동 인식을 눌러 주세요.'
+      : 'AI 모델에 요청이 몰려 악보를 읽지 못했습니다. 잠시 뒤 이 곡만 다시 인식하면 대개 읽힙니다.';
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * The models were slow or busy — or the connection dropped — rather than
+ * wrong: the same page read again on its own usually comes back.
+ */
+function isSlowModelError(error: unknown): boolean {
+  const category = classifyRecognitionError(error);
+  return category === 'timeout' || category === 'server' || category === 'rate-limit' || category === 'network';
+}
+
+/** Where a card waiting to be read again on its own sits: at the retry stage. */
+const RETRY_PROGRESS = RECOGNITION_PHASES.rescue.start;
 
 /** How often the recognition progress percentage refreshes on screen. */
 const PROGRESS_TICK_MS = 400;
@@ -264,6 +282,12 @@ interface StandIn {
   contiOrder?: string[];
   /** Somebody confirmed the saved words: they are kept over a web page's. */
   trusted: boolean;
+  /**
+   * Lines a slide, as the 찬양집회 deck it was saved from split them — the
+   * parts its 악보 gives are split the same way, rather than by the page's
+   * default.
+   */
+  slideSize?: number;
 }
 
 /** Vision engines may identify a non-score page explicitly or by returning
@@ -386,6 +410,23 @@ interface Props {
    * list, what tells the song's English 악보 from the next English song.
    */
   englishTitleOf?: (title: string) => string | undefined;
+  /**
+   * A song a past 찬양집회 projected, by any of the names a page prints (its
+   * title, the English title beside it): on a conti with no song list, a
+   * card whose page names one takes that night's words, as a listed song does.
+   */
+  findProjectedSong?: (names: (string | undefined)[]) => LibraryEntry | undefined;
+}
+
+/**
+ * How many lines a saved song put on a slide: its longest saved slide. Kept
+ * as the song's 슬라이드당 줄 수, it leaves every saved slide whole, and the
+ * parts its 악보 gives come out split the way that night split them (two
+ * Korean lines under their English, four lines of a song sung in one
+ * language).
+ */
+function savedSlideSize(entry: LibraryEntry): number {
+  return Math.min(6, Math.max(1, ...entry.sections.map((section) => section.lines.length)));
 }
 
 /** Korean lines whose word spacing can be trusted, to space a chord sheet's lyrics by. */
@@ -410,6 +451,7 @@ export default function LyricsGenerator({
   onChordSheetLoaded,
   onScoreEnglish,
   englishTitleOf,
+  findProjectedSong,
 }: Props) {
   const linesPerSlide = defaultLinesPerSlide(service);
   // Latest English handlers, for the recognition callback that must stay stable.
@@ -417,6 +459,8 @@ export default function LyricsGenerator({
   onScoreEnglishRef.current = onScoreEnglish;
   const englishTitleOfRef = useRef(englishTitleOf);
   englishTitleOfRef.current = englishTitleOf;
+  const findProjectedSongRef = useRef(findProjectedSong);
+  findProjectedSongRef.current = findProjectedSong;
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [librarySync, setLibrarySync] = useState<'syncing' | 'synced' | 'local' | 'error'>(
     hasCloudLibrary() ? 'syncing' : 'local',
@@ -430,6 +474,8 @@ export default function LyricsGenerator({
   // The notice text the song cards were last made final with.
   const [appliedNotice, setAppliedNotice] = useState<string | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
+  const latestSongsRef = useRef(songs);
+  latestSongsRef.current = songs;
   const [pageImages, setPageImages] = useState<Record<number, string>>({});
   const [parsing, setParsing] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -505,6 +551,14 @@ export default function LyricsGenerator({
   const [autoSaved, setAutoSaved] = useState<Record<string, AutoSavedLyrics>>({});
   // Songs whose scan result should be discarded (library lyrics arrived first).
   const scanCancelledRef = useRef<Set<string>>(new Set());
+  /**
+   * Songs read again on their own after the models were too slow for them in
+   * a whole conti's job — once each, so a page the models never answer does
+   * not loop.
+   */
+  const autoRetriedRef = useRef<Set<string>>(new Set());
+  /** recognizeSongsBatch itself, for the read-again pass it starts when it is done. */
+  const recognizeAgainRef = useRef<((targets: Song[], retry?: boolean) => Promise<void>) | null>(null);
   const libraryPromiseRef = useRef<Promise<LibraryEntry[]> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -824,7 +878,7 @@ export default function LyricsGenerator({
    *    individually, so one bad page can't blank out the whole conti.
    */
   const recognizeSongsBatch = useCallback(
-    async (targets: Song[]) => {
+    async (targets: Song[], retry = false): Promise<void> => {
       const doc = docRef.current;
       let active = targets.filter((song) => song.pageIndex != null);
       if (!doc || active.length === 0) return;
@@ -924,6 +978,35 @@ export default function LyricsGenerator({
         return true;
       };
 
+      /** Songs a past 찬양집회 projected that stood in this run, said once. */
+      const projectedTitles: string[] = [];
+      /** Put a projected song's saved slides on the card, to stand in until its 악보 gives the parts. */
+      const standInProjected = (song: Song, entry: LibraryEntry) => {
+        standInRef.current.set(song.id, {
+          entry,
+          contiOrder: song.orderFromConti ? [...song.order] : undefined,
+          trusted: true,
+          slideSize: savedSlideSize(entry),
+        });
+        const loaded = songFromLibrary(entry, song.pageIndex, undefined, linesPerSlide);
+        setSongs((list) =>
+          list.map((s) =>
+            s.id === song.id && !songHasLyrics(s)
+              ? {
+                  ...s,
+                  title: entry.title,
+                  sections: loaded.sections,
+                  order: s.orderFromConti ? s.order : loaded.order,
+                  // The slides as that night split them — and the parts the
+                  // 악보 gives are split the same way.
+                  linesPerSlide: savedSlideSize(entry),
+                }
+              : s,
+          ),
+        );
+        projectedTitles.push(entry.title);
+      };
+
       /**
        * A stand-in's page read as no score at all, or as a song left out of
        * the service: the reading is not this song's, and its card keeps the
@@ -993,12 +1076,62 @@ export default function LyricsGenerator({
 
       /** Songs neither the models nor the web could fill, with the reason. */
       const failures = new Map<string, string>();
+      /** Songs the models were too slow or too busy to read (not ones they read wrong). */
+      const slow = new Set<string>();
+      /** Songs to read again on their own once this job is over. */
+      const readAgain: string[] = [];
+      /**
+       * Read each of them again, on its own — what the card would otherwise
+       * ask a person to do — two at a time, like the rescue pass. A song the
+       * person has since stopped, typed into or taken off is left as it is.
+       */
+      const readSlowSongsAgain = async (ids: string[]) => {
+        for (const id of ids) autoRetriedRef.current.add(id);
+        await eachWithLimit(ids, RESCUE_CONCURRENCY, async (id) => {
+          const song = latestSongsRef.current.find((candidate) => candidate.id === id);
+          const settledMeanwhile =
+            !song ||
+            song.pageIndex == null ||
+            scanCancelledRef.current.has(id) ||
+            userEditedRef.current.has(id) ||
+            (songHasLyrics(song) && !standInRef.current.has(id));
+          if (settledMeanwhile) {
+            setRecog((current) => {
+              if (current[id]?.status !== 'running') return current;
+              const { [id]: _waiting, ...rest } = current;
+              return rest;
+            });
+            return;
+          }
+          await recognizeAgainRef.current?.([song], true);
+        });
+      };
       const reportFailures = () => {
         // A stand-in has not failed: it keeps the slides it was saved with.
         for (const id of [...failures.keys()]) {
           if (!standInRef.current.has(id)) continue;
           failures.delete(id);
           keepStandIn(id);
+        }
+        // The models ran out of time on a crowded job: the page read again
+        // on its own usually comes back, so it is — before anybody is told
+        // to press the button that does just that.
+        if (!retry) {
+          for (const id of [...failures.keys()]) {
+            if (!slow.has(id) || autoRetriedRef.current.has(id)) continue;
+            failures.delete(id);
+            resolvedIds.add(id);
+            readAgain.push(id);
+          }
+          if (readAgain.length > 0) {
+            setRecog((current) => {
+              const next = { ...current };
+              for (const id of readAgain) {
+                if (!isCancelled(id)) next[id] = { status: 'running', phase: 'rescue', progress: RETRY_PROGRESS };
+              }
+              return next;
+            });
+          }
         }
         if (failures.size === 0) return;
         for (const id of failures.keys()) resolvedIds.add(id);
@@ -1038,7 +1171,7 @@ export default function LyricsGenerator({
                   sections: [],
                   order: standIn.contiOrder ? [...standIn.contiOrder] : ['I'],
                   orderFromConti: standIn.contiOrder ? true : undefined,
-                  linesPerSlide,
+                  linesPerSlide: standIn.slideSize ?? linesPerSlide,
                 }
               : song;
             const next = applyScoreToSong(base, score);
@@ -1071,7 +1204,11 @@ export default function LyricsGenerator({
         const normalized = mergeWebLyrics(score, null).score;
         const standIn = standInRef.current.get(id);
         if (standIn) {
-          const laid = savedWordsInParts(normalized.sections, standIn.entry.sections);
+          const laid = savedWordsInParts(
+            normalized.sections,
+            standIn.entry.sections,
+            hasSlideNumberParts(standIn.entry.sections),
+          );
           if (laid.matched === 0) {
             keepStandIn(id);
             return;
@@ -1177,7 +1314,11 @@ export default function LyricsGenerator({
             // the parts, and each part takes its own saved lines.
             const held = standInRef.current.get(id);
             if (held?.trusted) {
-              const laid = savedWordsInParts(merged.score.sections, held.entry.sections);
+              const laid = savedWordsInParts(
+                merged.score.sections,
+                held.entry.sections,
+                hasSlideNumberParts(held.entry.sections),
+              );
               if (laid.matched > 0) {
                 applyRecognizedScore(id, { ...merged.score, sections: laid.sections }, engine, {
                   source: 'library',
@@ -1553,10 +1694,22 @@ export default function LyricsGenerator({
             settled(song);
             return;
           }
+          // A song a past 찬양집회 projected, named by this page: its words
+          // stand in while the 악보 is read for the parts, as for a song the
+          // conti lists (see handleFile) — under the title that night gave it.
+          if (!match && !standInRef.current.has(song.id) && !userEditedRef.current.has(song.id)) {
+            const projected = findProjectedSongRef.current?.([identity.title, identity.englishTitle]);
+            if (projected) standInProjected(song, projected);
+          }
           identityById.set(song.id, identity);
           unmatched.push({ song, image: images[index], identity });
         });
 
+        if (projectedTitles.length > 0) {
+          showToast(
+            `${projectedTitles.map((title) => `'${title}'`).join(', ')}은(는) 지난 찬양집회에서 띄운 가사로 채우고, 악보에서 파트를 읽습니다.`,
+          );
+        }
         // Show the recognized title/key while the remaining pages move into the
         // full lyric pass. applyScoreToSong preserves anything the user edited.
         if (identityById.size > 0) {
@@ -1798,8 +1951,10 @@ export default function LyricsGenerator({
         }
 
         enterPhase('rescue', needRescue.map(({ song }) => song.id));
-        await Promise.all(
-          needRescue.map(async ({ song, image, identity }) => {
+        await eachWithLimit(
+          needRescue,
+          RESCUE_CONCURRENCY,
+          async ({ song, image, identity }) => {
             // What the batch passes already read off this page.
             const known: ParsedScore = scoreById.get(song.id) ?? { ...identity, order: [], sections: [] };
             // No lyrics off the page: a title — the conti's, or the one read
@@ -1815,6 +1970,7 @@ export default function LyricsGenerator({
             // Out of time for another model call: hand the title straight on.
             if (deadline.remainingTotal() < MIN_ATTEMPT_MS) {
               const late = '인식 시간이 초과되어 가사를 읽지 못했습니다.';
+              slow.add(song.id);
               toWebOrFail(known, lyricEngine, late, late);
               return;
             }
@@ -1890,10 +2046,11 @@ export default function LyricsGenerator({
               // The retry failed too — most often every model was too slow
               // to answer. A song whose title is known still gets its lyrics
               // from the web rather than a failed card.
-              const why = rescueFailureMessage(error);
+              const why = rescueFailureMessage(error, retry);
+              if (isSlowModelError(error)) slow.add(song.id);
               toWebOrFail(known, lyricEngine, why, why);
             }
-          }),
+          },
         );
 
         await runWebLyricsPass();
@@ -1924,9 +2081,12 @@ export default function LyricsGenerator({
           showToast(`${ERROR_CATEGORY_LABELS.quota}: ${exhausted.size}개 모델의 오늘 무료 한도가 끝났습니다.`);
         }
       }
+      if (readAgain.length > 0) await readSlowSongsAgain(readAgain);
     },
     [fillFromLibrary, excludeRecognizedSong, discardNonScorePage, linesPerSlide, service],
   );
+
+  recognizeAgainRef.current = recognizeSongsBatch;
 
   const handleRecognizeClick = useCallback(
     (song: Song) => {
@@ -2313,6 +2473,7 @@ export default function LyricsGenerator({
       sparePagesRef.current = [];
       pagesListedRef.current = false;
       reportedUnclaimedRef.current = '';
+      autoRetriedRef.current.clear();
       standInRef.current.clear();
       contiEnglishTitlesRef.current.clear();
       const parsed = doc.parsed;
@@ -2468,8 +2629,9 @@ export default function LyricsGenerator({
           ? songFromLibrary(hit, entry.pageIndex, orderFits ? entry.order : undefined, linesPerSlide)
           : blankSong(entry.title, linesPerSlide);
         if (preferred && loaded && hasSlideNumberParts(loaded.sections)) {
-          // Split as it was saved: one saved slide per part, never re-chunked.
-          song.linesPerSlide = Math.max(linesPerSlide, ...preferred.sections.map((section) => section.lines.length));
+          // Split as it was saved: one saved slide per part, never re-chunked —
+          // and parts read off the 악보 later are split the same way.
+          song.linesPerSlide = savedSlideSize(preferred);
         }
         // Saved without parts (slide by slide, or in one block), the song has
         // its words but not its parts. With its 악보 in the conti it is read
@@ -2480,6 +2642,7 @@ export default function LyricsGenerator({
             entry: hit,
             contiOrder: entry.order && entry.order.length > 0 ? [...entry.order] : undefined,
             trusted: isGroundTruth(hit),
+            ...(hit === preferred ? { slideSize: savedSlideSize(hit) } : {}),
           });
         }
         song.title = entry.title;

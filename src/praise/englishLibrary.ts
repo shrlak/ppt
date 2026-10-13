@@ -13,7 +13,7 @@
 // on sync.
 import { cloudLibraryJson, hasCloudLibrary } from '../lib/storage/cloudLibrary';
 import { normalizeTitle } from '../lib/storage/library';
-import type { Song } from '../lib/utils/types';
+import type { LibraryEntry, Song } from '../lib/utils/types';
 import { isBilingualSheetSong, type ChordSheetSong, type SheetSlide } from '../lib/utils/chordSheet';
 import { normalizeLyricLine, planPraiseSong, slideKey } from './planner';
 import type { PraiseEnglish } from './types';
@@ -36,6 +36,11 @@ export interface EnglishSongEntry {
   title: string;
   englishTitle: string;
   slides: EnglishSlide[];
+  /**
+   * Other names a 악보 prints the song under — the 2026 deck projects
+   * `마음의 예배`, whose 악보 is titled `찬양의 열기`.
+   */
+  aliases?: string[];
   updatedAt?: string;
 }
 
@@ -69,6 +74,11 @@ export function sanitizeEnglishEntry(raw: unknown): EnglishSongEntry | null {
       return entry.ko.length > 0 || entry.en.length > 0 ? [entry] : [];
     });
   const entry: EnglishSongEntry = { title, englishTitle, slides };
+  const aliases = (Array.isArray(value.aliases) ? value.aliases : [])
+    .filter((alias): alias is string => typeof alias === 'string' && !!normalizeTitle(alias))
+    .map((alias) => alias.trim().slice(0, 200))
+    .slice(0, 8);
+  if (aliases.length > 0) entry.aliases = aliases;
   if (typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt))) {
     entry.updatedAt = value.updatedAt;
   }
@@ -80,13 +90,40 @@ export function sanitizeEnglishEntries(raw: unknown): EnglishSongEntry[] {
   return raw.flatMap((item) => sanitizeEnglishEntry(item) ?? []);
 }
 
-/** A song is looked up by either of its titles. */
+/** A song is looked up by either of its titles, or another name it is printed under. */
 export function findEnglishEntry(entries: EnglishSongEntry[], title: string): EnglishSongEntry | undefined {
   const key = normalizeTitle(title);
   if (!key) return undefined;
-  return entries.find(
-    (entry) => normalizeTitle(entry.title) === key || (entry.englishTitle && normalizeTitle(entry.englishTitle) === key),
+  const names = (entry: EnglishSongEntry) => [entry.title, entry.englishTitle, ...(entry.aliases ?? [])];
+  // Its own Korean title first: an English title or alias another song shares never wins over it.
+  return (
+    entries.find((entry) => normalizeTitle(entry.title) === key) ??
+    entries.find((entry) => names(entry).some((name) => name && normalizeTitle(name) === key))
   );
+}
+
+/** The song's own saved entry projected Korean and no English at all: that night sang it in Korean. */
+export function savedAsKoreanOnly(entries: EnglishSongEntry[], title: string): boolean {
+  const own = findEnglishEntry(entries, title);
+  if (!own || normalizeTitle(own.title) !== normalizeTitle(title)) return false;
+  return own.slides.some((slide) => slide.ko.length > 0) && !own.slides.some((slide) => slide.en.length > 0);
+}
+
+/**
+ * A song a past 찬양집회 projected, named by any of `names` — the title a
+ * 악보 prints, the English title beside it, or another name the deck gave it
+ * — as a 찬양 라이브러리 entry laid out slide by slide, under the title that
+ * night gave it (`Our God` → 크신 내 주님, `찬양의 열기` → 마음의 예배).
+ */
+export function projectedSong(entries: EnglishSongEntry[], names: (string | undefined)[]): LibraryEntry | undefined {
+  for (const name of names) {
+    if (!name?.trim()) continue;
+    const entry = findEnglishEntry(entries, name);
+    if (!entry || entry.slides.length === 0) continue;
+    const { song } = songFromEnglishEntry(entry, 'projected');
+    return { title: entry.title, sections: song.sections, order: song.order, verification: 'verified' };
+  }
+  return undefined;
 }
 
 /** Replace-by-title; later entries (a user's save) win over earlier ones (the seed). */
@@ -97,10 +134,21 @@ export function upsertEnglishEntry(entries: EnglishSongEntry[], entry: EnglishSo
   );
 }
 
-/** Seed first, then this church's own saves on top (they win on the same title). */
+/**
+ * Seed first, then this church's own saves on top: they win on the same
+ * title — unless the seed's copy is the newer one. A deck added to the seed
+ * (this year's night, as projected) carries the date it was made, and a copy
+ * the page saved before that — read off the 악보 while the night was being
+ * prepared — must not hide it; a save made after it still wins.
+ */
 export function mergeEnglishLibraries(seed: EnglishSongEntry[], saved: EnglishSongEntry[]): EnglishSongEntry[] {
   let merged = [...seed];
-  for (const entry of saved) merged = upsertEnglishEntry(merged, entry);
+  const time = (entry: EnglishSongEntry | undefined) => (entry?.updatedAt ? Date.parse(entry.updatedAt) : NaN);
+  for (const entry of saved) {
+    const seeded = seed.find((candidate) => normalizeTitle(candidate.title) === normalizeTitle(entry.title));
+    if (seeded && time(seeded) > time(entry)) continue;
+    merged = upsertEnglishEntry(merged, entry);
+  }
   return merged;
 }
 

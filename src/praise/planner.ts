@@ -306,6 +306,7 @@ export function planPraiseDeck(
 /** Korean slides of a song still waiting for their English. */
 export function missingEnglishCount(song: Song, extras: PraiseSongExtras | undefined): number {
   const plan = planPraiseSong(song, extras);
-  if (plan.englishOnly) return 0;
+  // Sung in Korean (or in English only): no slide is waiting for English.
+  if (plan.englishOnly || extras?.koreanOnly) return 0;
   return plan.slides.filter((slide) => slide.english.length === 0).length;
 }

@@ -20,6 +20,11 @@
 //
 //   node scripts/prepare-praise-template.mjs <찬양집회.pptx>
 //
+// A later year's deck adds its songs to the seed (replacing the same titles)
+// and leaves the template as it is:
+//
+//   node scripts/prepare-praise-template.mjs --add-to-seed <찬양집회.pptx> [--alias 제목=다른 제목]
+//
 // The source deck itself is not committed: it is a real service file.
 import { readFile, writeFile } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
@@ -350,11 +355,20 @@ async function writeDeck(zip, slides, outputPath) {
 
 const HANGUL = /[가-힣ㄱ-ㆎ]/;
 
-/** Every text shape on a slide: whether it is the title placeholder, and its paragraphs. */
+/**
+ * A paragraph's lines: a line break inside it (`<a:br/>`) starts a new one.
+ * The 2026 deck writes a song's title slide as one paragraph, the Korean
+ * title, a break, then the English.
+ */
+function paragraphLines(paragraphXml) {
+  return paragraphXml.split(/<a:br\b[^>]*\/>|<a:br\b[^>]*>[\s\S]*?<\/a:br>/).map((part) => paragraphText(part).replace(/\s+$/, ''));
+}
+
+/** Every text shape on a slide: whether it is the title placeholder, and its lines. */
 function slideShapes(xml) {
   return [...xml.matchAll(SHAPE)].map((shape) => ({
     isTitle: /<p:ph type="(?:title|ctrTitle)"/.test(shape[0]),
-    paragraphs: [...shape[0].matchAll(PARAGRAPH)].map((p) => paragraphText(p[0]).replace(/\s+$/, '')),
+    paragraphs: [...shape[0].matchAll(PARAGRAPH)].flatMap((p) => paragraphLines(p[0])),
   }));
 }
 
@@ -422,8 +436,58 @@ async function buildSeed(zip, order) {
   return [...byTitle.values()];
 }
 
+/**
+ * A later night's deck, added to the seed without touching the template:
+ * its songs replace the ones already seeded under the same title — this
+ * year's slides are how the song is sung now — and every other song stays.
+ * A song can be listed under another title too (`--alias 마음의 예배=찬양의 열기`),
+ * for a 악보 that prints the song under a name the deck does not use.
+ */
+async function addToSeed(deckPath, aliases) {
+  const zip = await JSZip.loadAsync(await readFile(deckPath));
+  const added = await buildSeed(zip, await slideOrderOf(zip));
+  // When the deck was made: a copy saved on the page before then is older
+  // than the deck and does not hide it (mergeEnglishLibraries).
+  const core = (await zip.file('docProps/core.xml')?.async('string')) ?? '';
+  const modified = core.match(/<dcterms:modified[^>]*>([^<]+)</)?.[1];
+  const updatedAt = modified && Number.isFinite(Date.parse(modified)) ? new Date(modified).toISOString() : undefined;
+  for (const song of added) {
+    const extra = aliases.get(song.title);
+    if (extra) song.aliases = extra;
+    if (updatedAt) song.updatedAt = updatedAt;
+  }
+  const seedPath = resolve('public/praise-english.json');
+  const existing = JSON.parse(await readFile(seedPath, 'utf8'));
+  const titles = new Set(added.map((song) => collapse(song.title)));
+  const kept = existing.filter((song) => !titles.has(collapse(song.title)));
+  const seed = [...kept, ...added];
+  await writeFile(seedPath, `${JSON.stringify(seed, null, 2)}\n`);
+  console.log(`${seedPath}: ${seed.length}곡 (${added.length}곡 추가·교체)`);
+  for (const song of added) {
+    const also = song.aliases ? ` (또는 ${song.aliases.join(', ')})` : '';
+    console.log(`  ${song.title}${song.englishTitle ? ` | ${song.englishTitle}` : ''}${also} (${song.slides.length}장)`);
+  }
+}
+
 async function main() {
-  const [sourcePath] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args[0] === '--add-to-seed') {
+    const aliases = new Map();
+    const decks = [];
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--alias') {
+        const [title, ...others] = (args[++i] ?? '').split('=');
+        if (!title || others.length === 0) throw new Error('--alias 는 "제목=다른 제목" 꼴입니다.');
+        aliases.set(title, [...(aliases.get(title) ?? []), ...others.join('=').split(',').map((t) => t.trim())]);
+      } else decks.push(args[i]);
+    }
+    if (decks.length === 0) {
+      throw new Error('사용법: node scripts/prepare-praise-template.mjs --add-to-seed <찬양집회.pptx> [--alias 제목=다른 제목]');
+    }
+    for (const deck of decks) await addToSeed(deck, aliases);
+    return;
+  }
+  const [sourcePath] = args;
   if (!sourcePath) throw new Error('사용법: node scripts/prepare-praise-template.mjs <찬양집회.pptx>');
   const source = await readFile(sourcePath);
 

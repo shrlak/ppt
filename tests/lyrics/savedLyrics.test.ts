@@ -159,3 +159,20 @@ describe('organizeSavedEntry', () => {
     expect(organizeSavedEntry(slides)).toBe(slides);
   });
 });
+
+describe('savedWordsInParts — the slides as a deck split them', () => {
+  it('breaks a part where the deck moved to its next slide', () => {
+    const deck = [
+      { label: '1', lines: ['아버지여 고쳐 주소서', '이 나라 주의 것 되게 하소서'] },
+      { label: '2', lines: ['주 하나님 간절히 기도하오니', '상한 이 땅 새롭게 하소서'] },
+    ];
+    const parts = [
+      { label: 'C', lines: ['아버지여 고쳐 주소서', '이 나라 주의 것 되게 하소서', '주 하나님 간절히 기도하오니', '상한 이 땅 새롭게 하소서'] },
+    ];
+    expect(savedWordsInParts(parts, deck, true).sections).toEqual([
+      { label: 'C', lines: ['아버지여 고쳐 주소서', '이 나라 주의 것 되게 하소서', '', '주 하나님 간절히 기도하오니', '상한 이 땅 새롭게 하소서'] },
+    ]);
+    // Without a deck's slides to go by, the lines run on.
+    expect(savedWordsInParts(parts, deck).sections[0].lines).toHaveLength(4);
+  });
+});

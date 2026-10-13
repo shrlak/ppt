@@ -32,6 +32,13 @@ export interface PraiseSongExtras {
    * AI, or the operator's own typing.
    */
   englishSource?: 'memory' | 'sheet' | 'score' | 'web' | 'ai' | 'manual';
+  /**
+   * The last 찬양집회 that projected this song sang it in Korean only (its
+   * saved slides carry no English): no English is looked up for it, and its
+   * slides are not counted as missing English. English typed or found by
+   * hand still goes in.
+   */
+  koreanOnly?: boolean;
   /** The post the web English came from, for the card to link to. */
   englishSourceUrl?: string;
 }
