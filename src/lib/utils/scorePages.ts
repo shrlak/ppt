@@ -16,6 +16,7 @@
 import type { ParsedScore } from '../ai/scoreParser';
 import type { Section } from './types';
 import { SAME_TITLE_THRESHOLD, isPlaceholderTitle, titleSimilarity } from './contiAlignment';
+import { findSection } from './slidePlanner';
 
 const HANGUL = /[가-힣]/;
 
@@ -310,6 +311,19 @@ export function mergeReadings(readings: ParsedScore[]): ParsedScore {
     }
   }
   const first = <K extends keyof ParsedScore>(key: K) => readings.find((reading) => reading[key])?.[key];
+  // The 진행 is the first page's — a part only a later page prints (the
+  // bridge on page 2 of a SongSelect sheet) is sung all the same, so it is
+  // added after the parts the 진행 names rather than left off the slides.
+  const order = [...(readings.find((reading) => reading.order.length > 0)?.order ?? [])];
+  if (order.length > 0) {
+    const named = new Set(order.map((token) => findSection(sections, token)).filter(Boolean));
+    const fromLater = new Set(readings.slice(1).flatMap((reading) => reading.sections.map((section) => section.label)));
+    for (const section of sections) {
+      if (!named.has(section) && fromLater.has(section.label) && !readings[0]?.sections.some((s) => s.label === section.label)) {
+        order.push(section.label);
+      }
+    }
+  }
   return {
     pageType: readings.some((reading) => reading.pageType === 'score') ? 'score' : readings[0]?.pageType,
     sermonTitle: first('sermonTitle'),
@@ -317,7 +331,7 @@ export function mergeReadings(readings: ParsedScore[]): ParsedScore {
     title: first('title'),
     artist: first('artist'),
     key: first('key'),
-    order: readings.find((reading) => reading.order.length > 0)?.order ?? [],
+    order,
     lyricRowCount: readings[0]?.lyricRowCount,
     sections,
   };

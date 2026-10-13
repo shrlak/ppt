@@ -90,3 +90,22 @@ export function rescueAttemptMs(deadline: RecognitionDeadline): number {
 export function msUntil(deadlineAt: number, now: number = Date.now()): number {
   return Math.max(0, deadlineAt - now);
 }
+
+/**
+ * How many pages the rescue pass reads at once. Each one goes to every model
+ * in the pool, so a conti with a dozen unread pages sent all at once is a
+ * burst the free tiers answer with 429s and timeouts — every page then fails
+ * together, where two at a time come back. A page the clock runs out on is
+ * read again on its own once the job is over.
+ */
+export const RESCUE_CONCURRENCY = 2;
+
+/** Run `run` over `items`, at most `limit` at a time, starting them in order. */
+export async function eachWithLimit<T>(items: T[], limit: number, run: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+      while (next < items.length) await run(items[next++]);
+    }),
+  );
+}

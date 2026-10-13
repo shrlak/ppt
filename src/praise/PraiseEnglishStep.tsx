@@ -194,14 +194,16 @@ function SongEnglishCard({
           )}
         </div>
         <span
-          className={`praise-song-status${plan.englishOnly || (plan.slides.length > 0 && done === plan.slides.length) ? ' is-done' : ''}`}
+          className={`praise-song-status${plan.englishOnly || extras.koreanOnly || (plan.slides.length > 0 && done === plan.slides.length) ? ' is-done' : ''}`}
           data-testid="praise-english-status"
         >
           {plan.englishOnly
             ? '영어 곡'
             : plan.slides.length === 0
               ? '가사 없음'
-              : `영어 ${done}/${plan.slides.length}장`}
+              : extras.koreanOnly && done === 0
+                ? '한국어로 부르는 곡'
+                : `영어 ${done}/${plan.slides.length}장`}
           {!plan.englishOnly && extras.englishSource ? ` · ${SOURCE_LABEL[extras.englishSource]}` : ''}
           {!plan.englishOnly && extras.englishSource === 'score' && scoreGuessed ? ' · 확인 필요' : ''}
         </span>
@@ -238,6 +240,16 @@ function SongEnglishCard({
             ))}
           </div>
         </details>
+      )}
+
+      {!plan.englishOnly && extras.koreanOnly && done === 0 && !webLookup && (
+        <p className="praise-web-status" data-testid="praise-korean-only" role="status">
+          <Icon name="info" />
+          <span>
+            지난 찬양집회에서 한국어로만 띄운 곡이라 영어 가사를 찾지 않았습니다. 영어도 띄우려면 아래 칸에 적거나
+            웹에서 영어 가사 찾기를 누르세요.
+          </span>
+        </p>
       )}
 
       {!plan.englishOnly && webLookup && (

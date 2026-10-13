@@ -5,6 +5,7 @@ import {
   planAllSlides,
   unmatchedTokens,
   sortSectionsByOrder,
+  sectionsInOrder,
 } from '../../src/lib/utils/slidePlanner';
 import type { Song } from '../../src/lib/utils/types';
 
@@ -226,5 +227,47 @@ describe('planAllSlides', () => {
     expect(plans).toHaveLength(4);
     expect(plans[0].title).toBe('A');
     expect(plans[2].title).toBe('B');
+  });
+});
+
+describe('a sung intro and a 진행 that writes one token for every verse', () => {
+  it('projects an intro that carries words, once, and an instrumental one not at all', () => {
+    const sung = song({
+      sections: [
+        { label: 'I', lines: ['Let ev’rything that has breath', 'Praise the Lord'] },
+        { label: 'V', lines: ['I’ll praise in the valley'] },
+      ],
+      order: ['I', 'V', 'I', 'V'],
+    });
+    expect(planSlides(sung).filter((plan) => plan.kind === 'lyrics').map((plan) => plan.lines)).toEqual([
+      ['Let ev’rything that has breath', 'Praise the Lord'],
+      ['I’ll praise in the valley'],
+    ]);
+    const instrumental = song({ sections: [{ label: 'I', lines: [] }, { label: 'V', lines: ['절'] }], order: ['I', 'V'] });
+    expect(planSlides(instrumental).filter((plan) => plan.kind === 'lyrics')).toHaveLength(1);
+  });
+
+  it('takes the second V (or PC) of a handwritten 진행 for the 악보’s second verse', () => {
+    const sections = [
+      { label: 'V1', lines: ['나의 백성이 다 겸비하여'] },
+      { label: 'PC', lines: ['하늘에서 듣고 죄를 사하며'] },
+      { label: 'C', lines: ['아버지여 고쳐 주소서'] },
+      { label: 'V2', lines: ['무릎 꿇고 다 겸비하여'] },
+      { label: 'PC2', lines: ['주님의 자비로'] },
+    ];
+    const labels = sectionsInOrder(sections, ['I', 'V1', 'PC', 'C', 'V2', 'PC', 'C', 'C']).map((s) => s?.label);
+    expect(labels).toEqual([undefined, 'V1', 'PC', 'C', 'V2', 'PC2', 'C', 'C']);
+    // `V` written twice over V and V2.
+    expect(sectionsInOrder([sections[0], sections[3]], ['V', 'C', 'V']).map((s) => s?.label)).toEqual(['V1', undefined, 'V2']);
+    // A numbered part the 진행 names itself is left where it names it.
+    expect(sectionsInOrder(sections, ['V1', 'PC', 'V2', 'PC2', 'PC']).map((s) => s?.label)).toEqual(['V1', 'PC', 'V2', 'PC2', 'PC']);
+    const plan = planSlides(song({ sections, order: ['I', 'V1', 'PC', 'C', 'V2', 'PC', 'C', 'C'] }));
+    expect(plan.filter((p) => p.kind === 'lyrics').map((p) => p.lines?.[0])).toEqual([
+      '나의 백성이 다 겸비하여',
+      '하늘에서 듣고 죄를 사하며',
+      '아버지여 고쳐 주소서',
+      '무릎 꿇고 다 겸비하여',
+      '주님의 자비로',
+    ]);
   });
 });

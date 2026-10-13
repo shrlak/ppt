@@ -19,6 +19,31 @@ export function findSection(sections: Section[], token: string): Section | undef
 }
 
 /**
+ * The section each order token stands for, in order. A token without a
+ * number that comes again (`V` in `I-V-C-V-C`, `PC` in `V1-PC-C-V2-PC`)
+ * means the next part of that kind when the score has one the order never
+ * names itself — a handwritten 진행 writes `V` for every verse, while the
+ * 악보's stacked rows are read as V and V2. A sung intro (`I` over words) is
+ * its own part; an instrumental `I` stands for none.
+ */
+export function sectionsInOrder(sections: Section[], order: string[]): (Section | undefined)[] {
+  const named = new Set(order.map((token) => token.trim().toUpperCase()));
+  const seen = new Map<string, number>();
+  const byLabel = (label: string) => sections.find((s) => s.label.trim().toUpperCase() === label);
+  return order.map((raw) => {
+    const token = raw.trim().toUpperCase();
+    if (token === 'I') return sections.find((s) => s.label.trim().toUpperCase() === 'I' && s.lines.some((line) => line.trim()));
+    const count = (seen.get(token) ?? 0) + 1;
+    seen.set(token, count);
+    if (count > 1 && !/\d/.test(token) && !named.has(`${token}${count}`)) {
+      const next = byLabel(`${token}${count}`);
+      if (next) return next;
+    }
+    return findSection(sections, token);
+  });
+}
+
+/**
  * Reorder recognized sections to match the first-appearance sequence of the
  * score's printed 진행 순서 (order tokens), so the editable section list —
  * and anything later saved into the library — reads in the same Verse →
@@ -31,9 +56,7 @@ export function findSection(sections: Section[], token: string): Section | undef
 export function sortSectionsByOrder(sections: Section[], order: string[]): Section[] {
   const placed = new Set<Section>();
   const sorted: Section[] = [];
-  for (const token of order) {
-    if (token === 'I') continue; // intro has no lyrics section to place
-    const section = findSection(sections, token);
+  for (const section of sectionsInOrder(sections, order)) {
     if (!section || placed.has(section)) continue;
     placed.add(section);
     sorted.push(section);
@@ -137,9 +160,10 @@ export function planSectionSlides(song: Song): { label: string; slides: string[]
   const tokens = song.order.length > 0 ? song.order : song.sections.map((s) => s.label);
   const parts: { label: string; slides: string[][] }[] = [];
   const seen = new Set<Section>();
-  for (const token of tokens) {
-    if (token === 'I') continue; // the leading title slide covers intro/간주
-    const section = findSection(song.sections, token);
+  // The leading title slide covers intro/간주 — unless the intro is sung
+  // (`INTRO` on a SongSelect sheet with "Let ev'rything that has breath"
+  // under it): then its words are projected like any part, once.
+  for (const section of sectionsInOrder(song.sections, tokens)) {
     if (!section || seen.has(section)) continue;
     seen.add(section);
     // Blank lines split the section into blocks that never share a slide;

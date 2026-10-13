@@ -393,8 +393,15 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
     곡별 재인식 140초, 전체 155초 안). 곡별 재인식은 한 페이지를 읽을 시간이 늘 **최소 40초**
     남도록 따로 떼어 두어, 일괄 인식이 오래 걸렸다고 재인식이 몇 초 만에 `인식 응답 시간 초과`로
     끝나지 않습니다. 그래도 모델이 답하지 못하면, 콘티나 악보에서 **제목을 알고 있는 곡은 실패로
-    두지 않고 웹 가사로 채웁니다.** 제목도 모르는 곡만 "AI 모델이 제한 시간 안에 답하지
-    않았습니다"라고 알리며, 그 곡의 **가사 자동 인식**을 다시 누르면 그 곡만 다시 읽습니다.
+    두지 않고 웹 가사로 채웁니다.**
+  - **시간이 모자란 곡은 혼자 한 번 더 읽습니다** — 곡별 재인식은 페이지마다 모든 모델에 보내므로, 예전에는
+    못 읽은 페이지 열몇 장을 한꺼번에 보내 무료 한도가 429·시간 초과로 거절했고, 22쪽 콘티의 곡들이 함께
+    "AI 모델이 제한 시간 안에 답하지 않았습니다. 이 곡만 다시 인식하면 대개 읽힙니다"로 끝났습니다. 이제
+    곡별 재인식은 **두 장씩만** 보내고, 그래도 모델이 느려서(시간 초과·요청 몰림·연결 끊김) 못 읽은 곡은
+    실패로 두지 않고 콘티 전체 인식이 끝난 뒤 **그 곡만 따로(두 곡씩) 자동으로 다시 읽습니다** — 카드에 적혀 있던
+    "이 곡만 다시 인식"을 앱이 대신 하는 것입니다. 기다리는 동안 카드는 재시도 단계로 표시되고, 그 사이 직접
+    고치거나 멈춘 곡은 건드리지 않습니다. 자동 재시도는 곡마다 한 번이며, 그래도 읽지 못하면 그때 알려
+    드립니다(그 곡의 **가사 자동 인식**을 잠시 뒤 다시 누르면 됩니다).
   - **한국어 가사만 인식** — 악보에 영어 번역 가사 줄이 함께 인쇄되어 있어도 한국어 줄만 읽습니다.
     모델에게 영어 줄을 건너뛰고 절 개수에도 세지 말라고 지시하고, 그래도 들어온 한글 없는 줄은
     지웁니다(한글이 한 줄도 없는 영어 찬양은 그대로 둡니다). 제목도 한국어 제목을 맞춤법에 맞게
@@ -465,10 +472,12 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 | `PC` | 프리코러스 (Pre-Chorus) |
 | `C` | 후렴 (Chorus) |
 | `B` | 브릿지 (Bridge) |
-| `I` | 간주 — 곡 제목 슬라이드 표시 |
+| `I` | 간주 — 곡 제목 슬라이드 표시 (`INTRO`에 가사가 있으면 그 가사도 한 번 띄움) |
 
 `Cx2`처럼 순서에 반복이 있어도 해당 파트 슬라이드는 한 번만 생성됩니다. `기도`처럼 알 수 없는
-토큰은 무시됩니다. 코드 악보의 `VERSE 1`·`PRE-CHORUS`·`CHORUS 2`·`BRIDGE` 머리말은 `V1`·`PC`·`C2`·`B`로
+토큰은 무시됩니다. 손으로 적은 진행처럼 `I-V-C-V-C`, `V1-PC-C-V2-PC`로 같은 토큰을 다시 적었는데 악보에
+그다음 번호의 파트(V2, PC2 — 한 오선 아래 둘째 줄)가 있고 진행이 그 번호를 따로 적지 않았으면, 두 번째
+`V`·`PC`는 그 파트를 가리킵니다 (예전에는 둘째 절·둘째 프리코러스가 슬라이드에서 빠졌습니다). 코드 악보의 `VERSE 1`·`PRE-CHORUS`·`CHORUS 2`·`BRIDGE` 머리말은 `V1`·`PC`·`C2`·`B`로
 읽습니다.
 
 ## 📖 성경 말씀
@@ -607,6 +616,19 @@ Praise Night) PPT를 기준으로, 모든 곡에 **한글·영어 제목과 가�
     넣지 않고, 한글 제목으로 웹 가사를 찾습니다.
   - 라이브러리에서 한글 가사를 불러온 곡도 영어 악보는 읽어 영어 가사 단계에 넣습니다.
   - 영어 악보 페이지만 있고 한글 악보가 없는 곡(Praise처럼 영어로만 부르는 곡)은 지금처럼 영어 곡입니다.
+- **지난 찬양집회에서 띄운 곡은 그날 PPT처럼** — 찬양집회 영어 가사 라이브러리에 있는 곡(지난 찬양집회에서 띄운
+  곡)은 곡 목록 없이 악보만 있는 콘티에서도, AI가 악보의 제목(또는 함께 인쇄된 영어 제목, 다른 이름)을 읽는
+  순간 **그날 PPT의 가사와 제목**으로 채웁니다 — 영어 악보 `Our God`은 올해 PPT의 `크신 내 주님 | Our God`
+  (한글 가사까지), 악보 제목 `찬양의 열기`는 `마음의 예배 | Heart of Worship`이 됩니다. 그동안 악보에서 파트와
+  진행을 읽어, 그날 띄운 가사를 파트마다 나눠 넣고 **그날 PPT가 장을 넘긴 자리에서 슬라이드를 나눕니다**
+  (슬라이드당 줄 수도 그날 PPT의 것: 한글·영어 곡은 한글 2줄, 한 언어로 부르는 곡은 4줄). 그래서 올해 콘티를
+  올리면 13곡이 올해 PPT와 같은 제목·가사·영어·장 나눔으로 나옵니다 (찬양 라이브러리에 파트별로 있는 곡 —
+  모든 능력과 모든 권세, 부르신 곳에서, 예수 우리들의 밝은 빛 — 은 지금처럼 찬양 라이브러리의 한글 가사를
+  쓰고 영어만 올해 PPT에서 가져오며, 예배합니다처럼 악보에 적은 진행이 후렴부터인 곡(`C-V-V-C×3`)은 진행대로
+  후렴부터 띄웁니다).
+- **둘째 장에만 있는 파트도 띄웁니다** — 진행 순서는 첫 장의 것을 쓰는데, 둘째 장에만 인쇄된 파트(SongSelect
+  Praise 둘째 장의 BRIDGE 1A·1B)는 진행에 없다고 슬라이드에서 빠졌습니다. 이제 그런 파트는 진행의 파트들 뒤에
+  이어 띄웁니다.
 - **표지 없이 악보만 이어지는 콘티** — 2026 연합 찬양집회 FINAL 콘티처럼 곡 목록 표지 없이 악보만 22장
   이어지고, 한글 악보 뒤에 그 곡의 영어 SongSelect 악보가 붙고, 곡 사이에 `기도` 페이지가 있는 콘티도
   읽습니다 (위 [표지가 없어도 OK](#-찬양)).
@@ -674,7 +696,15 @@ VERSE / CHORUS / BRIDGE… 가 적힌 PDF입니다.
 
 - **자동으로 채워집니다** — 작년 찬양집회에서 부른 10곡(춤추는 세대, 주 하나님 지으신 모든 세계,
   예수 우리 왕이여, Who Else, 예수 아름다우신, 여호와께 돌아가자, 주님의 선하심, 부르신 곳에서,
-  나의 슬픔을, Praise)과 이후 저장한 곡은 영어 가사를 **빈 칸에만** 알아서 넣습니다. 올해 한글 가사의
+  나의 슬픔을, Praise)과 올해 2026 EM&KM Joint Praise Night의 13곡(하늘 위에 주님밖에, Praise, 크신 내
+  주님, 모든 능력과 모든 권세, 예배합니다, 나의 백성이, 부르신 곳에서, 예수 우리들의 밝은 빛, Hosanna,
+  마음의 예배, Call On Jesus, Washed, 좋으신 하나님 — 올해 PPT에서 뽑아 같은 제목은 올해 것으로 바꿈), 그리고
+  이후 저장한 곡은 영어 가사를 **빈 칸에만** 알아서 넣습니다. 이 라이브러리 안에서는 **더 최근 것**이
+  이깁니다 — 이 기기·서버에 저장된 곡이 올해 PPT보다 먼저(PPT를 준비하며 악보에서 읽은 채로) 저장된
+  것이면 올해 PPT의 가사를 쓰고, 그 뒤에 고친 것이면 고친 것을 씁니다.
+- **지난 찬양집회에서 한국어로만 띄운 곡** — 가장 최근 찬양집회 PPT가 영어 없이 띄운 곡(올해의 나의 백성이,
+  부르신 곳에서, 예수 우리들의 밝은 빛)은 웹에서 영어를 찾지 않고 `한국어로 부르는 곡`으로 둡니다 (영어가
+  없는 장으로 세지 않습니다). 영어도 띄우려면 칸에 적거나 **웹에서 영어 가사 찾기**를 누르면 됩니다. 올해 한글 가사의
   줄 나눔이 작년과 달라도(예: 두 줄이 한 줄로) 글자로 맞춰 보므로 제자리에 들어가고, 글자 한두 개
   차이(그려/그리어)도 맞춥니다.
 - **콘티에 영어가 없으면 웹에서 찾아 채웁니다** — 콘티(코드 악보)에도 저장된 영어 가사에도 영어가
@@ -1066,7 +1096,11 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
   상자로 직접 그립니다)와 작년 영어 가사
   `public/praise-english.json`. 둘 다 작년 찬양집회 PPT에서
   `node scripts/prepare-praise-template.mjs <찬양집회.pptx>`로 뽑아낸 파일입니다 (원본은 저장소에 두지
-  않습니다). 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
+  않습니다). 그 뒤 해의 PPT는 템플릿은 그대로 두고 곡만 더합니다:
+  `node scripts/prepare-praise-template.mjs --add-to-seed <찬양집회.pptx> [--alias 마음의 예배=찬양의 열기]` —
+  같은 제목은 그 PPT의 것으로 바꾸고, PPT를 만든 날짜(`docProps/core.xml`)를 `updatedAt`으로 적어 그보다 먼저
+  저장된 사본이 가리지 않게 하며, `--alias`로 악보가 다른 제목으로 적는 곡을 그 제목으로도 찾게 합니다. 2026
+  EM&KM Joint Praise Night PPT가 이렇게 더해져 있습니다. 찬양집회 페이지는 Vite의 세 번째 진입점 `praise.html` + `src/praise/`이고, 영어 가사
   라이브러리는 Worker의 `/libraries/praise-english` 경로가 담당합니다.
 - 수련회 슬라이드: `public/retreat-template.pptx` (13장)와 작년 수련회 곡 `public/retreat-songs.json`.
   수련회 PPT들에서 `node scripts/prepare-retreat-template.mjs <첫째날.pptx> [다른 수련회 PPT…]`로
@@ -1140,7 +1174,11 @@ the same writers or the English title is known for that song; English printed on
 itself (a second score below it, or a row under each line) is read apart as `englishTitle` /
 `englishSections` and goes the same way. Each `기도` page of the conti checks the song just before it,
 so its 기도 (with any topics the page typed) follows that song (`songsBeforeContiPrayers` /
-`applyContiPrayers` in `src/praise/prayers.ts`) — then puts the English under every Korean slide, in last year's
+`applyContiPrayers` in `src/praise/prayers.ts`). A song a past night projected (the bilingual store,
+now also seeded with the 2026 night's deck through `--add-to-seed`) is found by any name the page
+prints — its title, its English title, or an alias — once the title pass reads it, and stands in with
+that night's words and slide breaks while its 악보 gives the parts; a song that night sang in Korean
+only gets no English looked up, and the newer of a seeded and a saved copy wins — then puts the English under every Korean slide, in last year's
 praise-night design (`public/praise-template.pptx`, derived by `scripts/prepare-praise-template.mjs`).
 English is filled from a bilingual song store — seeded with last year's deck (`public/praise-english.json`)
 and matched by text, so different line breaks still line up. A saved song with no parts — slide by slide

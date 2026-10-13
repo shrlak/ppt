@@ -360,3 +360,21 @@ describe('printedEnglish', () => {
     expect(withEnglishTitle({ ...english, title: 'Above All (Live)' }, 'Above All')?.title).toBe('Above All (Live)');
   });
 });
+
+describe('mergeReadings — a part only a later page prints', () => {
+  it('is added after the parts the first page’s 진행 names, so it is not left off the slides', () => {
+    const merged = mergeReadings([
+      reading([['V1', ['I’ll praise in the valley']], ['C', ['Praise the Lord, oh my soul']]], { order: ['I', 'V1', 'C'] }),
+      reading([['B', ['I’ll praise ’cause You’re sov’reign']], ['C', ['Praise the Lord, oh my soul']]]),
+    ]);
+    expect(merged.order).toEqual(['I', 'V1', 'C', 'B']);
+  });
+
+  it('leaves out a part the first page prints but its 진행 skips', () => {
+    const merged = mergeReadings([
+      reading([['V', ['절']], ['V2', ['둘째 절']], ['C', ['후렴']]], { order: ['V', 'C'] }),
+      reading([['C', ['후렴']]]),
+    ]);
+    expect(merged.order).toEqual(['V', 'C']);
+  });
+});

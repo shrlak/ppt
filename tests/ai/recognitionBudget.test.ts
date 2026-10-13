@@ -5,6 +5,7 @@ import {
   RECOGNITION_BUDGET_MS,
   STAGE_DEADLINES_MS,
   createRecognitionDeadline,
+  eachWithLimit,
   rescueAttemptMs,
 } from '../../src/lib/ai/recognitionBudget';
 
@@ -62,5 +63,23 @@ describe('rescueAttemptMs', () => {
     expect(rescueAttemptMs(deadline)).toBe(MIN_RESCUE_ATTEMPT_MS);
     now = STAGE_DEADLINES_MS.rescue + 60_000;
     expect(rescueAttemptMs(deadline)).toBe(MIN_RESCUE_ATTEMPT_MS);
+  });
+});
+
+describe('eachWithLimit', () => {
+  it('starts every item in order, never more than the limit at once', async () => {
+    let running = 0;
+    let most = 0;
+    const started: number[] = [];
+    await eachWithLimit([1, 2, 3, 4, 5], 2, async (item) => {
+      started.push(item);
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+    });
+    expect(started).toEqual([1, 2, 3, 4, 5]);
+    expect(most).toBe(2);
+    await expect(eachWithLimit([], 2, async () => undefined)).resolves.toBeUndefined();
   });
 });

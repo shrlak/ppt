@@ -52,6 +52,8 @@ import {
   fetchSeedEnglish,
   fillEnglishFromLibrary,
   findEnglishEntry,
+  projectedSong,
+  savedAsKoreanOnly,
   loadSavedEnglish,
   mergeEnglishLibraries,
   saveEnglishEntry,
@@ -303,8 +305,20 @@ export default function PraiseApp() {
           english = result.english;
           found ||= result.filled > 0 || result.titleFilled;
         }
-        if (!found) continue;
-        next[song.id] = { ...current, english, englishSource: current.englishSource ?? 'memory' };
+        // The last night that projected it sang it in Korean: none is looked
+        // up — unless English is already in, or somebody typed some. Only a
+        // projected deck (the seed) says so: the page saves every song it
+        // holds, English or not yet, so its own copies cannot.
+        const koreanOnly =
+          !current.koreanOnly &&
+          !found &&
+          !current.englishSource &&
+          !Object.values(current.english.slides).some((lines) => lines.some((line) => line.trim())) &&
+          savedAsKoreanOnly(seedRef.current, song.title);
+        if (!found && !koreanOnly) continue;
+        next[song.id] = koreanOnly
+          ? { ...current, koreanOnly: true }
+          : { ...current, english, englishSource: current.englishSource ?? 'memory' };
         changed = true;
       }
       return changed ? next : previous;
@@ -345,6 +359,7 @@ export default function PraiseApp() {
       const wanted = songs.filter((song) => {
         const title = song.title.trim();
         if (!title || /^새 찬양/.test(title) || !slidesHaveKorean(song)) return false;
+        if (extrasFor(extrasRef.current, song.id).koreanOnly) return false;
         if (webEnglishRef.current[normalizeTitle(title)]) return false;
         return missingEnglishCount(song, extrasFor(extrasRef.current, song.id)) > 0;
       });
@@ -465,6 +480,13 @@ export default function PraiseApp() {
   // English song on a conti with no song list.
   const englishTitleOf = useCallback(
     (title: string) => findEnglishEntry(englishLibraryRef.current, title)?.englishTitle.trim() || undefined,
+    [],
+  );
+  // A song a past night projected, found by the name its 악보 prints, comes
+  // back with that night's words (and English) — on a conti with no song
+  // list too, once the page's title is read.
+  const findProjectedSong = useCallback(
+    (names: (string | undefined)[]) => projectedSong(englishLibraryRef.current, names),
     [],
   );
   const chordSheetTitle = useCallback(
@@ -1089,6 +1111,7 @@ export default function PraiseApp() {
               onChordSheetLoaded={handleChordSheetLoaded}
               onScoreEnglish={handleScoreEnglish}
               englishTitleOf={englishTitleOf}
+              findProjectedSong={findProjectedSong}
               onContiDropAnywhere={showSongsStep}
             />
             <StepNav steps={STEPS} index={0} onMove={setStep} testIdPrefix="praise" />

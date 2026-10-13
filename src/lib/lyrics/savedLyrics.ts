@@ -116,8 +116,30 @@ function stretchesFor(part: Section, index: number, saved: string[]): Stretch[] 
  * like (a verse the deck never projected) keeps its own reading. `matched`
  * counts the parts that took saved words.
  */
-export function savedWordsInParts(parts: Section[], saved: Section[]): { sections: Section[]; matched: number } {
-  const lines = saved.flatMap((section) => section.lines.map((line) => line.trim()).filter(Boolean));
+export function savedWordsInParts(
+  parts: Section[],
+  saved: Section[],
+  /**
+   * The saved sections are the slides a deck projected (1, 2, 3…): a part
+   * that takes lines from two of them gets a blank line where that deck
+   * moved to the next slide, so it is projected split the same way.
+   */
+  slideBreaks = false,
+): { sections: Section[]; matched: number } {
+  const slideOf: number[] = [];
+  const lines = saved.flatMap((section, slide) =>
+    section.lines
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        slideOf.push(slide);
+        return line;
+      }),
+  );
+  const withBreaks = (start: number, end: number) =>
+    lines.slice(start, end).flatMap((line, at) =>
+      slideBreaks && at > 0 && slideOf[start + at] !== slideOf[start + at - 1] ? ['', line] : [line],
+    );
   const candidates = parts
     .flatMap((part, index) => stretchesFor(part, index, lines))
     // Best first; between equals, the earlier part and the earlier stretch.
@@ -134,7 +156,7 @@ export function savedWordsInParts(parts: Section[], saved: Section[]): { section
   }
   const sections = parts.map((part, index) => {
     const stretch = chosen.get(index);
-    return { label: part.label, lines: stretch ? lines.slice(stretch.start, stretch.end) : [...part.lines] };
+    return { label: part.label, lines: stretch ? withBreaks(stretch.start, stretch.end) : [...part.lines] };
   });
   return { sections, matched: chosen.size };
 }

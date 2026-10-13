@@ -9,7 +9,9 @@ import {
   fillEnglishFromLibrary,
   findEnglishEntry,
   mergeEnglishLibraries,
+  projectedSong,
   sanitizeEnglishEntries,
+  savedAsKoreanOnly,
   sheetTitles,
   songFromEnglishEntry,
   type EnglishSongEntry,
@@ -202,5 +204,76 @@ describe('a chord-sheet 콘티', () => {
     ]);
     expect(refilled.filled).toBe(1);
     expect(Object.values(refilled.english.slides)[0]).toHaveLength(4);
+  });
+});
+
+describe('this year’s 찬양집회 (2026 EM&KM Joint Praise Night) in the seed', () => {
+  it('holds every song as that night projected it, under the titles it gave them', () => {
+    const titles = seed.map((song) => song.title);
+    expect(titles).toEqual(
+      expect.arrayContaining([
+        '하늘 위에 주님밖에',
+        '크신 내 주님',
+        '모든 능력과 모든 권세',
+        '예배합니다',
+        '나의 백성이',
+        '예수 우리들의 밝은 빛',
+        'Hosanna',
+        '마음의 예배',
+        'Call On Jesus',
+        'Washed',
+        '좋으신 하나님',
+      ]),
+    );
+    const strength = findEnglishEntry(seed, '하늘 위에 주님밖에')!;
+    expect(strength.englishTitle).toBe('God Is the Strength of My Heart');
+    expect(strength.slides[0]).toEqual({
+      ko: ['하늘 위에 주님밖에', '내가 사모할 자 이 세상에 없네'],
+      en: ['Whom have I in heaven but You', 'There is nothing on earth', 'I desire beside You'],
+    });
+    // A song printed in English on the 악보 is found under its English title.
+    expect(findEnglishEntry(seed, 'Our God')?.title).toBe('크신 내 주님');
+    // And one whose 악보 prints another title, by that title.
+    expect(findEnglishEntry(seed, '찬양의 열기')?.title).toBe('마음의 예배');
+    // This year’s copy replaced last year’s: 부르신 곳에서 was sung in Korean.
+    expect(savedAsKoreanOnly(seed, '부르신 곳에서')).toBe(true);
+    expect(savedAsKoreanOnly(seed, '하늘 위에 주님밖에')).toBe(false);
+    // Last year’s songs this year did not sing are still there.
+    expect(findEnglishEntry(seed, '주님의 선하심')?.englishTitle).toBe('Goodness of God');
+  });
+
+  it('gives a page’s title (or its English title) the song that night projected, slide by slide', () => {
+    const our = projectedSong(seed, [undefined, 'Our God'])!;
+    expect(our.title).toBe('크신 내 주님');
+    expect(our.sections[0]).toEqual({ label: '1', lines: ['물이 포도주 되고', '눈먼 자 눈을 뜨네'] });
+    expect(projectedSong(seed, ['찬양의 열기'])?.title).toBe('마음의 예배');
+    expect(projectedSong(seed, ['없는 곡', ''])).toBeUndefined();
+  });
+});
+
+describe('findEnglishEntry — other names', () => {
+  it('prefers a song’s own Korean title over another song’s alias or English title', () => {
+    const entries = sanitizeEnglishEntries([
+      { title: '찬양의 열기', englishTitle: '', slides: [{ ko: ['가사'], en: [] }] },
+      { title: '마음의 예배', englishTitle: 'Heart of Worship', aliases: ['찬양의 열기', ''], slides: [{ ko: ['가사'], en: ['Lyrics'] }] },
+    ]);
+    expect(entries[1].aliases).toEqual(['찬양의 열기']);
+    expect(findEnglishEntry(entries, '찬양의 열기')?.title).toBe('찬양의 열기');
+    expect(findEnglishEntry(entries, 'heart of worship')?.title).toBe('마음의 예배');
+  });
+});
+
+describe('mergeEnglishLibraries — the newer copy wins', () => {
+  const deck = { ...entry, englishTitle: 'Goodness of God', updatedAt: '2026-10-12T12:18:15.000Z' };
+  it('keeps a deck added to the seed over a copy saved on the page before it', () => {
+    const before = { ...entry, englishTitle: 'read off the 악보', updatedAt: '2026-10-06T00:00:00.000Z' };
+    expect(findEnglishEntry(mergeEnglishLibraries([deck], [before]), '주님의 선하심')?.englishTitle).toBe('Goodness of God');
+  });
+
+  it('still lets a save made after it win, and one with no date', () => {
+    const after = { ...entry, englishTitle: 'typed later', updatedAt: '2026-10-13T00:00:00.000Z' };
+    expect(findEnglishEntry(mergeEnglishLibraries([deck], [after]), '주님의 선하심')?.englishTitle).toBe('typed later');
+    const undated = { ...entry, englishTitle: 'undated' };
+    expect(findEnglishEntry(mergeEnglishLibraries([deck], [undated]), '주님의 선하심')?.englishTitle).toBe('undated');
   });
 });
