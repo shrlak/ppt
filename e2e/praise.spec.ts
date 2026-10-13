@@ -641,8 +641,9 @@ test.describe('찬양집회 songs saved slide by slide', () => {
     await recognizeFirstSong(page);
     const { labels, texts } = await sectionsOf(card);
     expect(labels).toEqual(['V', 'C']);
-    // The words last year's deck projected stay, in the 악보's parts.
-    expect(texts).toEqual([verse.join('\n'), chorus.join('\n')]);
+    // The words last year's deck projected stay, in the 악보's parts — a
+    // blank line where that deck went on to its next slide.
+    expect(texts).toEqual([verse.join('\n'), [...chorus.slice(0, 2), '', ...chorus.slice(2)].join('\n')]);
     await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
     await expect(page.getByText("'주님의 사랑'의 저장된 가사를 악보·웹의 파트 2개에 나눠 넣었습니다.")).toBeVisible();
 
@@ -669,7 +670,7 @@ test.describe('찬양집회 songs saved slide by slide', () => {
     // The misread syllable is gone: the words are the ones the deck projected.
     expect(texts).toEqual([
       SAVED_SLIDES[0].ko.join('\n'),
-      [...SAVED_SLIDES[1].ko, ...SAVED_SLIDES[2].ko].join('\n'),
+      [...SAVED_SLIDES[1].ko, '', ...SAVED_SLIDES[2].ko].join('\n'),
     ]);
     await expect(card.getByTestId('order-input')).toHaveValue('I-V-C-V');
     await expect(page.getByText("'주님의 사랑'의 저장된 가사를 악보의 파트 2개에 나눠 넣었습니다.")).toBeVisible();

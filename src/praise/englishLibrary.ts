@@ -102,7 +102,10 @@ export function findEnglishEntry(entries: EnglishSongEntry[], title: string): En
   );
 }
 
-/** The song's own saved entry projected Korean and no English at all: that night sang it in Korean. */
+/**
+ * The song's own entry in a deck a night projected (the seed) holds Korean
+ * and no English at all: that night sang it in Korean.
+ */
 export function savedAsKoreanOnly(entries: EnglishSongEntry[], title: string): boolean {
   const own = findEnglishEntry(entries, title);
   if (!own || normalizeTitle(own.title) !== normalizeTitle(title)) return false;

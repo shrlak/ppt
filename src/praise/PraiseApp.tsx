@@ -306,13 +306,15 @@ export default function PraiseApp() {
           found ||= result.filled > 0 || result.titleFilled;
         }
         // The last night that projected it sang it in Korean: none is looked
-        // up — unless English is already in, or somebody typed some.
+        // up — unless English is already in, or somebody typed some. Only a
+        // projected deck (the seed) says so: the page saves every song it
+        // holds, English or not yet, so its own copies cannot.
         const koreanOnly =
           !current.koreanOnly &&
           !found &&
           !current.englishSource &&
           !Object.values(current.english.slides).some((lines) => lines.some((line) => line.trim())) &&
-          savedAsKoreanOnly(englishLibrary, song.title);
+          savedAsKoreanOnly(seedRef.current, song.title);
         if (!found && !koreanOnly) continue;
         next[song.id] = koreanOnly
           ? { ...current, koreanOnly: true }
