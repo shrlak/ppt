@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const partsDirectory = resolve(root, 'assets/pptx/back-slides');
 const output = resolve(root, 'public/back-slides.pptx');
-const expectedSha256 = '5bc17a3dfb5bf3455fb493b97838e4b6754702903bb85f943eda47ae793acad2';
+const expectedSha256 = '1c0dffc1b38f3cbdba7accab81ae515684add49baac4ddf8970c1b8ebbe11b10';
 
 const partNames = (await readdir(partsDirectory))
   .filter((name) => /^part-\d+\.b64$/.test(name))
