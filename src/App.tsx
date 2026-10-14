@@ -8,7 +8,8 @@ import PptLibraryPanel from './components/PptLibraryPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
 import { expandDeckSegment, songOverviewItems, type DeckOverviewItem } from './lib/utils/deckOverview';
 import { planAllSlides, unmatchedTokens } from './lib/utils/slidePlanner';
-import { buildPptx, suggestFileName } from './lib/pptx/pptxBuilder';
+import { buildPptx, serviceSunday, suggestFileName } from './lib/pptx/pptxBuilder';
+import { applyFrontSlideDate } from './lib/pptx/frontSlides';
 import { extractSlideSubset } from './lib/pptx/pptxSlices';
 import { mergePptxDecks } from './lib/pptx/pptxMerge';
 import { parseAnnouncements, buildAnnouncementDeck } from './lib/utils/announcementBuilder';
@@ -318,7 +319,7 @@ function SundayApp() {
    * Shared by the download button, the 라이브러리 save action, and 편집기 view.
    */
   async function buildMergedDeck(): Promise<{ merged: Uint8Array; overview: DeckOverviewItem[] }> {
-    const [serviceTemplate, frontSlides, backSlidesSource] = await Promise.all([
+    const [serviceTemplate, frontSlidesSource, backSlidesSource] = await Promise.all([
       fetch(`${BASE}service-template.pptx`).then((r) => {
         if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
         return r.arrayBuffer();
@@ -337,6 +338,10 @@ function SundayApp() {
             return r.arrayBuffer();
           }),
     ]);
+
+    // The front deck's welcome slide prints the service date. Write that
+    // week's Sunday there — the same day the download is named after.
+    const frontSlides = (await applyFrontSlideDate(frontSlidesSource, serviceSunday(contiDate))).data;
 
     // The back deck prints the 공동체 고백송 itself. Rewrite that block to the
     // song 관리자 설정 names, so the fixed slides carry this season's

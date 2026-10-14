@@ -9,6 +9,7 @@ import { buildPptx } from '../src/lib/pptx/pptxBuilder';
 import { mergePptxDecks } from '../src/lib/pptx/pptxMerge';
 import { assertPptxIntegrity, findBrokenRelationships } from '../src/lib/pptx/pptxPackage';
 import { applyConfessionSong } from '../src/lib/pptx/confessionSlides';
+import { applyFrontSlideDate } from '../src/lib/pptx/frontSlides';
 import { extractSlideSubset } from '../src/lib/pptx/pptxSlices';
 import type { Song } from '../src/lib/utils/types';
 
@@ -112,7 +113,11 @@ describe('complete service deck', () => {
     // Matches the real download flow in App.tsx: intermediate merges pack with
     // STORE (cheap, skips re-DEFLATE on every step of the growing package) and
     // only the final merge (adding the mandatory back slides) uses DEFLATE.
-    let deck: Uint8Array<ArrayBufferLike> = new Uint8Array(frontSlides);
+    // The welcome slide is dated to the service Sunday first, exactly as
+    // App.buildMergedDeck does.
+    const frontDated = await applyFrontSlideDate(frontSlides, new Date(2026, 9, 18));
+    expect(frontDated.applied).toBe(true);
+    let deck: Uint8Array<ArrayBufferLike> = new Uint8Array(frontDated.data);
     deck = await mergePptxDecks(deck, await buildPptx(lyricsTemplate, [song, alternateSong]), 'STORE');
     deck = await mergePptxDecks(deck, await extractSlideSubset(serviceTemplate, [17]), 'STORE');
     deck = await mergePptxDecks(deck, await buildBiblePptx(bibleTemplate, biblePlan), 'STORE');
@@ -163,6 +168,7 @@ describe('complete service deck', () => {
     expect(first).toContain('showMasterSp="0"');
     const cover = await zip.file('ppt/slides/slide2.xml')!.async('string');
     expect(cover).toContain('빛주사랑');
+    expect(cover).toContain('<a:t>10/18/2026</a:t>');
     const firstLyricsSlide = await zip.file('ppt/slides/slide6.xml')!.async('string');
     expect(firstLyricsSlide).toContain('주님의 사랑');
     // The confession song is one slide shorter than the bundled Celebrate the
