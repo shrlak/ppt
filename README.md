@@ -1,12 +1,12 @@
 # KCCP PPT Generator
 
-찬양, 성경 말씀, 설교, 광고, 추가 자료를 **6단계 화면**에서 `다음`/이전 버튼으로 입력하면
+찬양, 성경 말씀, 설교, 기도제목, 광고, 추가 자료를 **7단계 화면**에서 `다음`/이전 버튼으로 입력하면
 **하나의 예배 슬라이드 PPTX**로 합쳐서 만들어 주는 웹 앱입니다.
 
 예배 종류마다 준비 방식이 달라 생성기도 따로 있습니다. <https://shrlak.github.io/ppt/>에 들어가면
 먼저 **어떤 PPT를 만들지** 고르는 화면이 나옵니다.
 
-1. **주일예배 (대청부)** — 이 페이지의 6단계 화면 (`?service=sunday`로 바로 열 수 있습니다)
+1. **주일예배 (대청부)** — 이 페이지의 7단계 화면 (`?service=sunday`로 바로 열 수 있습니다)
 2. **수요예배** — 곡 PPT·악보 사진으로 만드는 수요예배 PPT와 썸네일 (`wednesday.html`)
 3. **찬양집회** — 한글·영어 제목과 가사가 함께 들어가는 찬양집회 PPT (`praise.html`)
 4. **수련회** — 수련회 디자인으로 집회마다 한 PPT씩 (`retreat.html`)
@@ -35,7 +35,8 @@ Front slides  →  찬양  →  기도  →  성경 말씀  →  설교  →  �
 ```
 
 Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `public/front-slides.pptx`, `public/back-slides.pptx`에서 항상
-포함합니다. **설교 후 찬양**으로 지정한 곡만 찬양 자리 대신 설교 뒤 기도 슬라이드 다음으로
+포함합니다. 맨 앞 기도 준비 슬라이드에는 **기도제목** 단계에 붙여넣은 기도제목이 들어가고, 기도제목이 많거나 길면
+이 슬라이드가 필요한 만큼 이어서 늘어납니다([🙏 기도제목](#-기도제목)). **설교 후 찬양**으로 지정한 곡만 찬양 자리 대신 설교 뒤 기도 슬라이드 다음으로
 들어가고, 그 뒤에 기도 슬라이드가 한 장 더 붙습니다 (지정한 곡이 없으면 이 찬양과 기도를 함께
 건너뛰므로 기도 슬라이드가 연달아 나오지 않습니다). Back slides의 **공동체 고백** 슬라이드는
 관리자 설정에서 정한 고백송으로 자동으로 바뀝니다. 기도와 광고 서식은
@@ -107,8 +108,8 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 - 삭제 시각·시간대는 Worker의 `PURGE_TIMEZONE`/`PURGE_HOUR` 설정으로 바꿀 수 있습니다
   (`worker/README.md`의 *Weekly PPT purge* 참고).
 
-**편집**을 누르면 그 PPT를 만들 때의 입력 내용 그대로 찬양 → 성경 말씀 → 설교 → 광고 → 추가 자료 →
-다운로드 6단계가 다시 열립니다. 내용을 고치면 같은 항목이 자동으로 갱신되며, 파일명을
+**편집**을 누르면 그 PPT를 만들 때의 입력 내용 그대로 찬양 → 성경 말씀 → 설교 → 기도제목 → 광고 → 추가 자료 →
+다운로드 7단계가 다시 열립니다. 내용을 고치면 같은 항목이 자동으로 갱신되며, 파일명을
 바꿔도 항목이 새로 생기지 않고 이름만 바뀝니다. 다운로드 단계의 **새 항목으로 저장** 버튼을
 누르면 연결을 끊고, 이후 자동 저장은 별개의 항목으로 저장합니다. 입력 내용이 함께 저장되기 전에
 만들어진 항목은 콘티 PDF와 설교 PPT만 복원되고, 콘티는 새로 업로드한 것처럼 다시 분석됩니다.
@@ -500,6 +501,37 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 
 목사님께 받은 설교 PPT 파일(`.pptx`)을 업로드하면, 성경 말씀 슬라이드 다음에 그 슬라이드들이
 그대로 삽입됩니다. 업로드하지 않으면 이 순서는 건너뜁니다.
+
+## 🙏 기도제목
+
+예배 전에 띄우는 맨 앞 기도 준비 슬라이드("지금은 기도로 예배를 준비하는 시간입니다.")에 이번 주
+기도제목을 채웁니다. 대청부에서 올리는 형식 그대로 붙여넣으면 됩니다.
+
+```
+1. 회개와 마음의 정결
+- 지난 한 주간 하나님보다 앞세웠던 생각과 욕심, 불순종을 돌아보고 진심으로 회개하도록
+- 우리의 죄를 용서하신 예수 그리스도의 은혜를 기억하며, 정결하고 겸손한 마음으로 하나님 앞에 나아가도록
+
+2. 예배를 위한 기도
+- 예배에 참석하는 모든 청년이 분주한 생각과 염려를 내려놓고 하나님께 마음을 집중하도록
+- …
+```
+
+- **읽는 방법** — `1.` `2)` `(3)` `④`처럼 번호가 붙은 줄이 기도제목 하나를 시작하고, 그 아래 `-`·`•`·`*`로
+  시작하는 줄(글머리표 없는 줄도)이 그 기도제목의 내용이 됩니다. 첫 번호 줄 위의 머리말(`7/12 주일 기도제목`)은
+  넣지 않고, `**굵게**` 같은 마크다운 서식은 지웁니다. 번호가 하나도 없으면 한 줄에 기도제목 하나로 읽습니다.
+- **슬라이드 모양** — 기도제목은 `1. 회개와 마음의 정결`처럼 번호와 함께 **굵게**, 내용은 그 아래 슬라이드의
+  `●` 글머리표로 들어갑니다. 내용 없이 제목만 적으면 원래 슬라이드처럼 `●` 줄 하나씩 들어갑니다. 글자는 원래
+  슬라이드의 20pt로 쓰고, 넘치면 조금씩 줄입니다(글상자는 슬라이드 아래 0.4"까지 늘립니다).
+- **슬라이드 수는 저절로** — 한 장에 기도제목을 **3개까지** 넣고, 그보다 많으면 장마다 고르게 나눕니다:
+  1~3개는 한 장, **4개는 2개씩 두 장**, 5개는 3·2개, 6개는 3·3개. 글이 길어 16pt보다 작아져야 하면
+  기도제목을 다음 장으로 넘겨 슬라이드를 더 늘리고, 줄인 크기가 같으면 앞 장을 더 채웁니다. 기도제목 하나가
+  혼자서도 한 장에 안 들어가면 내용 줄을 나눠 다음 장에 같은 제목으로 이어 씁니다. 늘어난 장은 모두 같은
+  기도 준비 슬라이드("지금은 기도로 예배를 준비하는 시간입니다.")를 복사한 것입니다.
+- 입력란 아래에 `기도제목 4개 → 기도 준비 슬라이드 2장`과 장마다 들어갈 기도제목·글자 크기를 미리 보여 줍니다.
+- **비워 두면** 기도 준비 슬라이드는 지금처럼(`기도제목 1`, `기도제목 2`) 그대로 들어갑니다.
+- 관리자 설정에서 Front slides를 바꿨다면, 그 PPT의 기도 준비 슬라이드 글상자 이름이 `기도제목`이거나
+  글상자에 `기도제목 1`이 적혀 있어야 채웁니다. 찾지 못하면 다운로드할 때 알려 주고 그대로 둡니다.
 
 ## 📢 광고
 
@@ -1113,7 +1145,7 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 
 ## English Summary
 
-**KCCP PPT Generator** is a six-step wizard that combines five input types into one downloaded
+**KCCP PPT Generator** is a seven-step wizard that combines six input types into one downloaded
 `.pptx`, in this fixed order: **front slides → praise (찬양) → prayer → scripture (말씀) →
 sermon (설교) → prayer → post-sermon praise (설교 후 찬양) → prayer → announcements (광고) →
 back/end slides → additional files**. A week with no post-sermon praise skips that song and the
@@ -1154,13 +1186,20 @@ download filename is generated automatically from that week's Sunday in `MMDD.pp
    scripture reference and sermon title automatically populate the two scripture input steps.
 3. **Sermon** — an uploaded `.pptx` from the pastor is inserted verbatim right after the scripture
    slides.
-4. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split
+4. **Prayer topics (기도제목)** — the week's prayer topics, pasted as numbered titles with `-` points
+   under each, fill the opening 기도 준비 slide's 기도제목 box (`src/lib/utils/prayerTopics.ts`,
+   `src/lib/pptx/prayerTopicSlides.ts`): a bold "N. title" with the deck's ● bullets for its points,
+   at the slide's 20pt, shrunk as needed. Up to three topics share a slide and more are spread
+   evenly (four → two and two); a slide that would need less than 16pt hands topics on to another
+   copy of the slide, and a topic too long for a slide of its own is carried over under its title.
+   Left blank, the slide stays as the front deck has it.
+5. **Announcements** — a pasted numbered list (`1. <title>\n...body...`) is re-numbered and split
    into one slide per item. Markdown pasted from a notes app works too: bold/italic markers around
    the title (`1. **<title>**`) or inside the body are stripped, and `*`/`•` bullets become `-`.
    Links in an item's body are taken out of the text and drawn as QR codes in the slide's
    bottom-right corner, with the body box moved clear of them (`src/lib/utils/announcementLinks.ts`,
    `src/lib/pptx/qrCode.ts`); the 수련회 광고 slides do the same above their footer band.
-5. **Additional files** — ordered PDF, PPTX, PNG, and JPG/JPEG uploads are appended only after the
+6. **Additional files** — ordered PDF, PPTX, PNG, and JPG/JPEG uploads are appended only after the
    final back/end slide. PDFs become one slide per page, images are fitted without cropping, and
    uploaded PPTX slides keep their own layouts and themes.
 

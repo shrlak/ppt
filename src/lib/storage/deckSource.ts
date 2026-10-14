@@ -1,5 +1,5 @@
 // The wizard inputs a saved deck was built from, archived next to the
-// generated .pptx so 라이브러리 → 편집 can reopen the deck in the six-step
+// generated .pptx so 라이브러리 → 편집 can reopen the deck in the seven-step
 // editor instead of only offering the finished file. Kept apart from
 // pptLibrary.ts so it stays free of browser storage APIs and unit testable.
 import type { Song } from '../utils/types';
@@ -44,6 +44,11 @@ export interface DeckSource {
    * 관리자 설정's song. Absent when the deck used the setting.
    */
   confessionSong?: string;
+  /**
+   * The 기도제목 pasted for the 기도 준비 slide, as typed. Absent when none
+   * were, which leaves that slide as the front deck has it.
+   */
+  prayerTopicsText?: string;
 }
 
 function sectionsOf(value: unknown): Song['sections'] {
@@ -126,6 +131,9 @@ export function decodeDeckSource(file: DeckSourceFile | null | undefined): DeckS
     announcementText: typeof raw.announcementText === 'string' ? raw.announcementText : '',
     ...(typeof raw.confessionSong === 'string' && raw.confessionSong.trim()
       ? { confessionSong: raw.confessionSong.trim() }
+      : {}),
+    ...(typeof raw.prayerTopicsText === 'string' && raw.prayerTopicsText.trim()
+      ? { prayerTopicsText: raw.prayerTopicsText }
       : {}),
   };
 }

@@ -9,6 +9,8 @@ import { planSlides } from './slidePlanner';
 
 export type DeckOverviewKind =
   | 'front'
+  /** A 기도 준비 slide the 기도제목 step filled in. */
+  | 'prayer-topics'
   | 'lyrics-title'
   | 'lyrics'
   | 'prayer'

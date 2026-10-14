@@ -908,7 +908,7 @@ a.btn {
    Steps — on the folded rail, a row of bars
    Each step is a bar with its numeral under it; the bars fill as you go.
    Only the step you are on keeps its name, and it takes a double column
-   for it, so six steps still fit a 320px screen.
+   for it, so seven steps still fit a 320px screen.
    -------------------------------------------------------------------------- */
 
 .wizard-progress {

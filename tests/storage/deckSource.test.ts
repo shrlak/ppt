@@ -55,6 +55,16 @@ describe('deck source snapshots', () => {
     expect(decodeDeckSource(encodeDeckSource(source))).not.toHaveProperty('confessionSong');
   });
 
+  it('keeps the 기도제목 typed for the 기도 준비 slide, and leaves blank ones out', () => {
+    const prayerTopicsText = '1. 회개와 마음의 정결\n- 진심으로 회개하도록';
+    expect(decodeDeckSource(encodeDeckSource({ ...source, prayerTopicsText }))?.prayerTopicsText).toBe(
+      prayerTopicsText,
+    );
+    expect(decodeDeckSource(encodeDeckSource({ ...source, prayerTopicsText: ' \n ' }))).not.toHaveProperty(
+      'prayerTopicsText',
+    );
+  });
+
   it('treats a missing snapshot as "nothing to restore"', () => {
     expect(decodeDeckSource(null)).toBeNull();
     expect(decodeDeckSource(undefined)).toBeNull();
