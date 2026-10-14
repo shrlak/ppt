@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LyricsGenerator from './components/LyricsGenerator';
 import BibleSlideGenerator, { type BibleGeneratorState } from './components/BibleSlideGenerator';
 import SermonUploadSection, { type SermonFile } from './components/SermonUploadSection';
 import AnnouncementSection from './components/AnnouncementSection';
+import PrayerTopicsSection from './components/PrayerTopicsSection';
 import SlideOverviewList from './components/SlideOverviewList';
 import PptLibraryPanel from './components/PptLibraryPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
@@ -13,6 +14,8 @@ import { applyFrontSlideDate } from './lib/pptx/frontSlides';
 import { extractSlideSubset } from './lib/pptx/pptxSlices';
 import { mergePptxDecks } from './lib/pptx/pptxMerge';
 import { parseAnnouncements, buildAnnouncementDeck } from './lib/utils/announcementBuilder';
+import { parsePrayerTopics, planPrayerTopicPages } from './lib/utils/prayerTopics';
+import { applyPrayerTopics } from './lib/pptx/prayerTopicSlides';
 import { loadTranslation } from './bible/bibleData';
 import { normalizeContiScripture, parseVerseInput } from './bible/refParser';
 import { buildVerseSlidePlan } from './bible/versePlanner';
@@ -111,6 +114,7 @@ const WIZARD_STEPS = [
   { id: 'lyrics', label: '찬양' },
   { id: 'bible', label: '성경 말씀' },
   { id: 'sermon', label: '설교' },
+  { id: 'prayer', label: '기도제목' },
   { id: 'announcement', label: '광고' },
   { id: 'additional', label: '추가 자료' },
   { id: 'download', label: '다운로드' },
@@ -134,6 +138,8 @@ function SundayApp() {
   const [sermonFile, setSermonFile] = useState<SermonFile | null>(null);
   const [contiFile, setContiFile] = useState<{ name: string; data: ArrayBuffer } | null>(null);
   const [announcementText, setAnnouncementText] = useState('');
+  // The week's 기도제목, written into the 기도 준비 slide that opens the deck.
+  const [prayerTopicsText, setPrayerTopicsText] = useState('');
   const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
   const [generating, setGenerating] = useState(false);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
@@ -242,6 +248,11 @@ function SundayApp() {
 
   const bibleRefs = bibleState.verseInput.trim() ? parseVerseInput(bibleState.verseInput).refs : [];
   const announcementItems = announcementText.trim() ? parseAnnouncements(announcementText) : [];
+  const prayerTopics = useMemo(
+    () => (prayerTopicsText.trim() ? parsePrayerTopics(prayerTopicsText) : []),
+    [prayerTopicsText],
+  );
+  const prayerTopicPageCount = useMemo(() => planPrayerTopicPages(prayerTopics).length, [prayerTopics]);
   const fileName = nameOverride ?? suggestFileName(contiDate);
 
   // 편집기 view: 찬양 가사, 성경 말씀(설교 제목·본문), 설교 PPT 업로드, and 광고 all stay
@@ -255,6 +266,7 @@ function SundayApp() {
         ? stepId === 'lyrics' ||
           stepId === 'bible' ||
           stepId === 'sermon' ||
+          stepId === 'prayer' ||
           stepId === 'announcement' ||
           stepId === 'additional'
         : WIZARD_STEPS[activeStep].id === stepId,
@@ -273,6 +285,11 @@ function SundayApp() {
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el?.focus();
   }
+  function scrollToPrayerTopics() {
+    const el = document.querySelector<HTMLTextAreaElement>('[data-testid="prayer-topics-input"]');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el?.focus();
+  }
   function scrollToSermon() {
     document.querySelector('[data-testid="sermon-upload-section"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -286,6 +303,7 @@ function SundayApp() {
     songs.length > 0 ||
     bibleRefs.length > 0 ||
     sermonFile !== null ||
+    prayerTopics.length > 0 ||
     announcementItems.length > 0 ||
     additionalFiles.length > 0;
 
@@ -303,6 +321,7 @@ function SundayApp() {
     },
     bibleTemplate: bibleState.customTemplate,
     announcementText,
+    prayerTopicsText,
     sermonFile,
     contiFile,
     additionalFiles,
@@ -318,7 +337,12 @@ function SundayApp() {
    * left panel stays aligned 1:1 with what renderPptxSlides() will show.
    * Shared by the download button, the 라이브러리 save action, and 편집기 view.
    */
-  async function buildMergedDeck(): Promise<{ merged: Uint8Array; overview: DeckOverviewItem[] }> {
+  async function buildMergedDeck(): Promise<{
+    merged: Uint8Array;
+    overview: DeckOverviewItem[];
+    /** True when 기도제목 were typed but the front deck has no 기도제목 box for them. */
+    prayerTopicsSkipped: boolean;
+  }> {
     const [serviceTemplate, frontSlidesSource, backSlidesSource] = await Promise.all([
       fetch(`${BASE}service-template.pptx`).then((r) => {
         if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
@@ -341,7 +365,7 @@ function SundayApp() {
 
     // The front deck's welcome slide prints the service date. Write that
     // week's Sunday there — the same day the download is named after.
-    const frontSlides = (await applyFrontSlideDate(frontSlidesSource, serviceSunday(contiDate))).data;
+    const datedFront = (await applyFrontSlideDate(frontSlidesSource, serviceSunday(contiDate))).data;
 
     // The back deck prints the 공동체 고백송 itself. Rewrite that block to the
     // song 관리자 설정 names, so the fixed slides carry this season's
@@ -357,11 +381,21 @@ function SundayApp() {
         )
       : backSlidesSource;
 
+    // The 기도 준비 slide takes this week's 기도제목, copied as many times as
+    // they need; with none typed the front deck goes in as it is.
+    const prayerFront = await applyPrayerTopics(datedFront, prayerTopics);
+    const frontSlides = prayerFront.data;
+
     const overview: DeckOverviewItem[] = [];
     let merged: Uint8Array = new Uint8Array(frontSlides);
     const frontCount = (await inspectDeckBytes(frontSlides)).slideCount;
     overview.push(
-      ...expandDeckSegment({ kind: 'front', count: frontCount, labelAt: (i, count) => `Front ${i + 1}/${count}` }),
+      ...Array.from({ length: frontCount }, (_, i): DeckOverviewItem => {
+        const page = i - (prayerFront.firstSlide - 1);
+        return prayerFront.applied && page >= 0 && page < prayerFront.pages
+          ? { id: `prayer-topics-${page}`, kind: 'prayer-topics', label: '기도제목', subtitle: `${page + 1}/${prayerFront.pages}` }
+          : { id: `front-${i}`, kind: 'front', label: `Front ${i + 1}/${frontCount}` };
+      }),
     );
 
     // 설교 후 찬양 is sung after the sermon, so its slides are built from the
@@ -480,7 +514,7 @@ function SundayApp() {
     }
 
     await assertPptxIntegrity(merged);
-    return { merged, overview };
+    return { merged, overview, prayerTopicsSkipped: prayerTopics.length > 0 && !prayerFront.applied };
   }
 
   function downloadDeck(merged: Uint8Array) {
@@ -499,13 +533,19 @@ function SundayApp() {
 
   async function generate() {
     if (!hasAnyContent) {
-      showToast('찬양, 성경 말씀, 설교, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
+      showToast('찬양, 성경 말씀, 설교, 기도제목, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
     setGenerating(true);
     try {
-      const { merged } = await buildMergedDeck();
+      const { merged, prayerTopicsSkipped } = await buildMergedDeck();
       downloadDeck(merged);
+      if (prayerTopicsSkipped) {
+        showToast(
+          '관리자 설정에서 바꾼 Front slides에 기도제목 칸이 없어 기도제목은 넣지 못했습니다. 기도 준비 슬라이드의 글상자 이름을 ‘기도제목’으로 해 주세요.',
+          'warn',
+        );
+      }
       // The PPT just made goes into the 라이브러리 at once — these bytes —
       // rather than waiting for the auto-save's pause, so a download followed
       // by closing the tab is never lost.
@@ -547,6 +587,7 @@ function SundayApp() {
           },
           announcementText,
           ...(noticeConfession ? { confessionSong: noticeConfession } : {}),
+          ...(prayerTopicsText.trim() ? { prayerTopicsText } : {}),
         }),
         additionalFiles: await encodeAdditionalFiles(additionalFiles),
         slideCount,
@@ -558,7 +599,7 @@ function SundayApp() {
 
   async function saveCurrentToLibrary() {
     if (!hasAnyContent) {
-      showToast('찬양, 성경 말씀, 설교, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
+      showToast('찬양, 성경 말씀, 설교, 기도제목, 광고, 추가 자료 중 최소 하나 이상 입력해 주세요.', 'error');
       return;
     }
     if (savingRef.current) return;
@@ -679,7 +720,7 @@ function SundayApp() {
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, songs, bibleState, sermonFile, announcementText, additionalFiles, customDecks, hasAnyContent]);
+  }, [viewMode, songs, bibleState, sermonFile, prayerTopics, announcementText, additionalFiles, customDecks, hasAnyContent]);
 
   // Release any still-live thumbnail object URLs when the app itself unmounts.
   useEffect(() => () => revokeRenderedSlides(editorSlidesRef.current), []);
@@ -750,7 +791,10 @@ function SundayApp() {
     SERVICE_SLIDES.prayer1.length +
     SERVICE_SLIDES.prayer2.length +
     (songs.some((song) => song.postSermon) ? SERVICE_SLIDES.prayer3.length : 0) +
-    (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0);
+    (announcementItems.length > 0 ? SERVICE_SLIDES.announcementTitle.length : 0) +
+    // The front deck's one 기도 준비 slide is already counted; more 기도제목
+    // pages are copies of it.
+    Math.max(0, prayerTopicPageCount - 1);
   // Bible slide count isn't known until generation (it depends on how many
   // verses each reference expands to, which needs the full translation
   // data loaded) — shown as a "+" lower bound instead of a false-precise number.
@@ -837,6 +881,7 @@ function SundayApp() {
     setContiFile(deck.contiPdf);
     setSermonFile(deck.sermonPptx);
     setAnnouncementText(source?.announcementText ?? '');
+    setPrayerTopicsText(source?.prayerTopicsText ?? '');
     setContiDate(source?.contiDate);
     setNoticeConfession(source?.confessionSong);
     setRestore((previous) => ({
@@ -932,6 +977,7 @@ function SundayApp() {
             onSelectSong={scrollToSong}
             onSelectBible={scrollToBible}
             onSelectSermon={scrollToSermon}
+            onSelectPrayerTopics={scrollToPrayerTopics}
             onSelectAnnouncement={scrollToAnnouncement}
             onSelectAdditional={scrollToAdditional}
             onDownload={() => void generate()}
@@ -948,7 +994,7 @@ function SundayApp() {
             data-testid="wizard-panel-lyrics"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">1 / 6</p>
+              <p className="wizard-kicker">1 / 7</p>
               <h2>찬양</h2>
               <p>찬양 콘티를 올리고 각 곡의 가사와 순서를 확인하세요.</p>
             </div>
@@ -974,7 +1020,7 @@ function SundayApp() {
             data-testid="wizard-panel-bible"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">2 / 6</p>
+              <p className="wizard-kicker">2 / 7</p>
               <h2>성경 말씀</h2>
               <p>콘티에서 읽은 본문과 설교 제목을 확인하고 번역본을 선택하세요.</p>
             </div>
@@ -997,7 +1043,7 @@ function SundayApp() {
             data-testid="wizard-panel-sermon"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">3 / 6</p>
+              <p className="wizard-kicker">3 / 7</p>
               <h2>설교</h2>
               <p>목사님의 설교 PPT가 있다면 업로드하세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
             </div>
@@ -1008,18 +1054,34 @@ function SundayApp() {
           </section>
 
           <section
+            className={`wizard-panel${isPanelActive('prayer') ? ' active' : ''}`}
+            aria-hidden={!isPanelActive('prayer')}
+            data-testid="wizard-panel-prayer"
+          >
+            <div className="wizard-page-header">
+              <p className="wizard-kicker">4 / 7</p>
+              <h2>기도제목</h2>
+              <p>예배 전 기도 준비 슬라이드에 띄울 이번 주 기도제목을 붙여넣으세요. 없으면 바로 다음 단계로 이동해도 됩니다.</p>
+            </div>
+            <PrayerTopicsSection value={prayerTopicsText} onChange={setPrayerTopicsText} />
+            {viewMode === 'wizard' && (
+              <StepNav steps={WIZARD_STEPS} index={3} onMove={moveToStep} testIdPrefix="wizard" />
+            )}
+          </section>
+
+          <section
             className={`wizard-panel${isPanelActive('announcement') ? ' active' : ''}`}
             aria-hidden={!isPanelActive('announcement')}
             data-testid="wizard-panel-announcement"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">4 / 6</p>
+              <p className="wizard-kicker">5 / 7</p>
               <h2>광고</h2>
               <p>예배 광고를 입력하세요. 입력한 항목만 광고 슬라이드로 추가됩니다.</p>
             </div>
             <AnnouncementSection value={announcementText} onChange={setAnnouncementText} />
             {viewMode === 'wizard' && (
-              <StepNav steps={WIZARD_STEPS} index={3} onMove={moveToStep} testIdPrefix="wizard" />
+              <StepNav steps={WIZARD_STEPS} index={4} onMove={moveToStep} testIdPrefix="wizard" />
             )}
           </section>
 
@@ -1029,13 +1091,13 @@ function SundayApp() {
             data-testid="wizard-panel-additional"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">5 / 6</p>
+              <p className="wizard-kicker">6 / 7</p>
               <h2>추가 자료</h2>
               <p>예배 End 슬라이드 뒤에 이어서 보여줄 파일과 순서를 정하세요.</p>
             </div>
             <AdditionalFilesSection value={additionalFiles} onChange={setAdditionalFiles} />
             {viewMode === 'wizard' && (
-              <StepNav steps={WIZARD_STEPS} index={4} onMove={moveToStep} testIdPrefix="wizard" />
+              <StepNav steps={WIZARD_STEPS} index={5} onMove={moveToStep} testIdPrefix="wizard" />
             )}
           </section>
 
@@ -1045,7 +1107,7 @@ function SundayApp() {
             data-testid="wizard-panel-download"
           >
             <div className="wizard-page-header">
-              <p className="wizard-kicker">6 / 6</p>
+              <p className="wizard-kicker">7 / 7</p>
               <h2>확인 및 다운로드</h2>
               <p>입력한 내용을 확인한 뒤 하나의 PPTX 파일로 다운로드하세요.</p>
             </div>
@@ -1087,7 +1149,7 @@ function SundayApp() {
                 </div>
               )}
               <p className="deck-order">
-                슬라이드 순서: Front slides → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back/End → 추가 자료
+                슬라이드 순서: Front slides(기도 준비·기도제목) → 찬양 → 기도 → 말씀 → 설교 → 기도 → 광고 → Back/End → 추가 자료
               </p>
               <div className="generate-row">
                 <label htmlFor="filename-input">
@@ -1108,6 +1170,7 @@ function SundayApp() {
                   총 {totalSlideCount}장{bibleRefs.length > 0 ? ' 이상' : ''} · 찬양 {songs.length}곡 · 말씀{' '}
                   {bibleRefs.length}구절
                   {sermonFile ? ' · 설교 첨부' : ''}
+                  {prayerTopics.length > 0 ? ` · 기도제목 ${prayerTopics.length}개 (${prayerTopicPageCount}장)` : ''}
                   {announcementItems.length > 0 ? ` · 광고 ${announcementItems.length}건` : ''}
                   {additionalFiles.length > 0 ? ` · 추가 자료 ${additionalFiles.length}개 (${additionalSlideCount}장)` : ''}
                 </div>
@@ -1137,7 +1200,7 @@ function SundayApp() {
               </div>
               <AutoSaveIndicator status={autoSaveStatus} testId="auto-save-status" />
             </section>
-            <StepNav steps={WIZARD_STEPS} index={5} onMove={moveToStep} testIdPrefix="wizard" />
+            <StepNav steps={WIZARD_STEPS} index={6} onMove={moveToStep} testIdPrefix="wizard" />
           </section>
         </main>
       </div>

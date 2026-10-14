@@ -114,6 +114,7 @@ async function moveFromLyricsToDownload(page: Page): Promise<void> {
   await page.getByTestId('wizard-next-lyrics').click();
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-prayer').click();
   await page.getByTestId('wizard-next-announcement').click();
   await page.getByTestId('wizard-next-additional').click();
   await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
@@ -122,6 +123,7 @@ async function moveFromLyricsToDownload(page: Page): Promise<void> {
 async function moveFromBibleToDownload(page: Page): Promise<void> {
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-prayer').click();
   await page.getByTestId('wizard-next-announcement').click();
   await page.getByTestId('wizard-next-additional').click();
   await expect(page.getByTestId('wizard-panel-download')).toBeVisible();
@@ -291,7 +293,7 @@ async function recognizeFirstSong(page: Page) {
   return card;
 }
 
-test('moves through the six-step wizard with next and back buttons', async ({ page }) => {
+test('moves through the seven-step wizard with next and back buttons', async ({ page }) => {
   await page.goto('./?service=sunday');
   await expect(page.getByText('KCCP PPT Generator').first()).toBeVisible();
   await expect(page.getByTestId('wizard-panel-lyrics')).toBeVisible();
@@ -388,6 +390,8 @@ test('editor view shows slides and all five content editors together', async ({ 
   // the wizard uses, not a duplicate.
   await expect(page.getByTestId('wizard-panel-sermon')).toBeVisible();
   await expect(page.getByTestId('sermon-upload-section')).toBeVisible();
+  await expect(page.getByTestId('wizard-panel-prayer')).toBeVisible();
+  await expect(page.getByTestId('prayer-topics-input')).toBeVisible();
   await expect(page.getByTestId('wizard-panel-announcement')).toBeVisible();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/새가족 환영/);
   await expect(page.getByTestId('wizard-panel-additional')).toBeVisible();
@@ -714,7 +718,7 @@ test('every edit auto-saves into the library, always updating the same entry', a
   await expect(page.getByTestId('library-entry')).toHaveCount(1);
 });
 
-test('library 편집 reopens a saved deck in the six-step wizard and re-saves over the same entry', async ({ page }) => {
+test('library 편집 reopens a saved deck in the seven-step wizard and re-saves over the same entry', async ({ page }) => {
   await page.goto('./?service=sunday');
   await uploadExamplePdf(page);
   const savedSongTitle = await page
@@ -727,6 +731,8 @@ test('library 편집 reopens a saved deck in the six-step wizard and re-saves ov
   await page.getByTestId('bible-verse-input').fill('요3:16');
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('prayer-topics-input').fill('1. 저장 전 기도제목\n- 예배에 집중하도록');
+  await page.getByTestId('wizard-next-prayer').click();
   await page.getByTestId('announcement-input').fill('1. <저장 전 광고>\n첫 번째 내용입니다.');
   await page.getByTestId('wizard-next-announcement').click();
   const fixtureImages = await makeImageFixtures(page);
@@ -763,6 +769,8 @@ test('library 편집 reopens a saved deck in the six-step wizard and re-saves ov
 
   await page.getByTestId('wizard-tab-bible').click();
   await expect(page.getByTestId('bible-verse-input')).toHaveValue('요3:16');
+  await page.getByTestId('wizard-tab-prayer').click();
+  await expect(page.getByTestId('prayer-topics-input')).toHaveValue(/저장 전 기도제목/);
   await page.getByTestId('wizard-tab-announcement').click();
   await expect(page.getByTestId('announcement-input')).toHaveValue(/저장 전 광고/);
   await page.getByTestId('wizard-tab-additional').click();
@@ -1249,6 +1257,61 @@ async function slideTexts(zip: JSZip): Promise<string[]> {
   );
 }
 
+const SUNDAY_PRAYER_TOPICS = `1. 회개와 마음의 정결
+- 지난 한 주간 하나님보다 앞세웠던 생각과 욕심, 불순종을 돌아보고 진심으로 회개하도록
+- 우리의 죄를 용서하신 예수 그리스도의 은혜를 기억하며, 정결하고 겸손한 마음으로 하나님 앞에 나아가도록
+
+2. 예배를 위한 기도
+- 예배에 참석하는 모든 청년이 분주한 생각과 염려를 내려놓고 하나님께 마음을 집중하도록
+- 찬양과 기도, 말씀 가운데 성령께서 역사하셔서 하나님을 깊이 만나고 믿음으로 응답하는 예배가 되도록
+
+3. 설교자와 예배 봉사자를 위한 기도
+- 설교자가 성령의 도우심 가운데 하나님의 말씀을 바르고 담대하게 선포하며, 그 말씀을 통해 청년들의 믿음이 자라도록
+- 예배를 위해 섬기는 모든 봉사자가 기쁜 마음으로 맡겨진 일을 감당하고, 서로 협력하며 하나님께 영광 돌리도록
+
+4. 새가족을 위한 기도
+- 처음 예배에 참석하는 새가족들이 낯선 환경 속에서도 따뜻한 환대와 사랑을 경험하도록
+- 말씀과 예배를 통해 복음을 알아 가고, 공동체 안에서 믿음이 자라며 함께 신앙생활을 이어 갈 수 있도록`;
+
+test('기도제목 fill the 기도 준비 slides, two topics to a slide when there are four', async ({ page }, testInfo) => {
+  await page.goto('./?service=sunday');
+  await page.getByTestId('wizard-tab-prayer').click();
+  await expect(page.getByTestId('wizard-panel-prayer')).toBeVisible();
+
+  // Three topics fit one slide…
+  const three = SUNDAY_PRAYER_TOPICS.split('\n\n4.')[0];
+  await page.getByTestId('prayer-topics-input').fill(three);
+  await expect(page.getByTestId('prayer-topics-summary')).toContainText('기도제목 3개 → 기도 준비 슬라이드 1장');
+  // …four go two to a slide.
+  await page.getByTestId('prayer-topics-input').fill(SUNDAY_PRAYER_TOPICS);
+  await expect(page.getByTestId('prayer-topics-summary')).toContainText('기도제목 4개 → 기도 준비 슬라이드 2장');
+  await expect(page.getByTestId('prayer-topics-page')).toHaveCount(2);
+  await expect(page.getByTestId('prayer-topics-page').nth(1)).toContainText('3. 설교자와 예배 봉사자를 위한 기도');
+
+  await page.getByTestId('wizard-tab-download').click();
+  await expect(page.getByTestId('slide-count')).toContainText('기도제목 4개 (2장)');
+
+  const dlPromise = page.waitForEvent('download');
+  await page.getByTestId('generate-pptx').click();
+  const zip = await loadPptx(await dlPromise, testInfo.outputPath('prayer-topics.pptx'));
+  const slides = await slideTexts(zip);
+  expect(slides[0]).toContain('지금은 기도로 예배를 준비하는');
+  expect(slides[0]).toContain('1. 회개와 마음의 정결');
+  expect(slides[0]).toContain('2. 예배를 위한 기도');
+  expect(slides[0]).not.toContain('기도제목 1');
+  expect(slides[1]).toContain('지금은 기도로 예배를 준비하는');
+  expect(slides[1]).toContain('3. 설교자와 예배 봉사자를 위한 기도');
+  expect(slides[1]).toContain('4. 새가족을 위한 기도');
+  expect(slides[2]).toContain('빛주사랑');
+
+  // In 편집기 the two filled slides are their own rows, and clicking one goes to the 기도제목.
+  await page.getByTestId('view-mode-toggle').click();
+  await expect(page.getByTestId('slide-overview-loading')).toHaveCount(0, { timeout: PARSE_TIMEOUT });
+  await expect(page.getByTestId('slide-overview-row-prayer-topics')).toHaveCount(2);
+  await page.getByTestId('slide-overview-row-prayer-topics').first().getByRole('button').click();
+  await expect(page.getByTestId('prayer-topics-input')).toBeFocused();
+});
+
 test('설교 후 찬양 lands after the sermon prayer instead of in the opening set', async ({
   page,
 }, testInfo) => {
@@ -1412,6 +1475,7 @@ test('generates one combined deck from lyrics, bible verses, and announcements t
 
   await page.getByTestId('wizard-next-bible').click();
   await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-prayer').click();
   const announcementsText = await fs.readFile(ANNOUNCEMENTS_TEXT, 'utf-8');
   await page.getByTestId('announcement-input').fill(announcementsText);
   await expect(page.getByTestId('announcement-preview')).toContainText('새가족 환영');
@@ -1455,6 +1519,7 @@ test('keeps PowerPoint ids valid with a parsed conti and an uploaded sermon deck
   await page.getByTestId('sermon-input').setInputFiles(SERMON_PPTX);
   await expect(page.getByText('업로드됨: bible-template.pptx')).toBeVisible();
   await page.getByTestId('wizard-next-sermon').click();
+  await page.getByTestId('wizard-next-prayer').click();
   await page.getByTestId('wizard-next-announcement').click();
   await page.getByTestId('wizard-next-additional').click();
 

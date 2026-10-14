@@ -15,6 +15,7 @@ import Icon, { type IconName } from './Icon';
 
 const KIND_ICON: Record<DeckOverviewItem['kind'], IconName> = {
   front: 'slide',
+  'prayer-topics': 'prayer',
   'lyrics-title': 'music',
   lyrics: 'lyrics',
   prayer: 'prayer',
@@ -27,6 +28,7 @@ const KIND_ICON: Record<DeckOverviewItem['kind'], IconName> = {
 };
 
 const CLICKABLE_KINDS: ReadonlySet<DeckOverviewItem['kind']> = new Set([
+  'prayer-topics',
   'lyrics-title',
   'lyrics',
   'bible',
@@ -45,6 +47,7 @@ interface Props {
   onSelectSong: (songId: string) => void;
   onSelectBible: () => void;
   onSelectSermon: () => void;
+  onSelectPrayerTopics: () => void;
   onSelectAnnouncement: () => void;
   onSelectAdditional: () => void;
   onDownload: () => void;
@@ -62,6 +65,7 @@ export default function SlideOverviewList({
   onSelectSong,
   onSelectBible,
   onSelectSermon,
+  onSelectPrayerTopics,
   onSelectAnnouncement,
   onSelectAdditional,
   onDownload,
@@ -141,6 +145,7 @@ export default function SlideOverviewList({
                       else if (item.kind === 'additional') onSelectAdditional();
                       else if (item.kind === 'bible') onSelectBible();
                       else if (item.kind === 'sermon') onSelectSermon();
+                      else if (item.kind === 'prayer-topics') onSelectPrayerTopics();
                       else onSelectSong(item.songId!);
                     }}
                   >

@@ -64,6 +64,12 @@ describe('auto-save change detection', () => {
     expect(deckFingerprint({ ...inputs, confessionSong: '  ' })).toBe(base);
   });
 
+  it('changes with the 기도제목, which rewrite the 기도 준비 slide', () => {
+    const base = deckFingerprint(inputs);
+    expect(deckFingerprint({ ...inputs, prayerTopicsText: '1. 회개' })).not.toBe(base);
+    expect(deckFingerprint({ ...inputs, prayerTopicsText: '' })).toBe(base);
+  });
+
   it('changes with every archived song field, however small', () => {
     const base = deckFingerprint(inputs);
     expect(deckFingerprint(withSong({ pageIndex: 9 }))).not.toBe(base);

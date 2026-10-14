@@ -11,7 +11,7 @@ export type ServiceChoice = 'sunday';
 const DETAILS: Record<ServiceId, { description: string; steps: string }> = {
   sunday: {
     description: '콘티 PDF 하나로 찬양·성경 말씀·설교·광고·추가 자료까지 한 번에 만듭니다.',
-    steps: '6단계 · 매주 일요일',
+    steps: '7단계 · 매주 일요일',
   },
   wednesday: {
     description: '예배 정보와 찬양만 넣으면 수요예배 PPT와 썸네일을 함께 만듭니다.',

@@ -45,7 +45,7 @@ const BODY_MIN_SZ = 1200;
 const ITEM_MARKER = /(\d+)\s*\.\s*[*_~`]*\s*<\s*([\s\S]+?)\s*>[*_~`]*/g;
 
 /** Remove Markdown emphasis/code delimiters, keeping the text they wrap. */
-function stripEmphasis(text: string): string {
+export function stripEmphasis(text: string): string {
   return text
     .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')

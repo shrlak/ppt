@@ -33,6 +33,8 @@ export interface AutoSaveInputs {
   /** A per-session 성경 template override still changes the built deck. */
   bibleTemplate: AutoSaveFile | null;
   announcementText: string;
+  /** The 기도제목 written into the 기도 준비 slide. */
+  prayerTopicsText?: string;
   sermonFile: AutoSaveFile | null;
   contiFile: AutoSaveFile | null;
   /** Ordered raw files appended after Back/End. Order changes the generated deck. */
@@ -92,6 +94,7 @@ export function deckFingerprint(inputs: AutoSaveInputs): string {
       template: fileKey(inputs.bibleTemplate),
     },
     announcementText: inputs.announcementText,
+    prayerTopicsText: inputs.prayerTopicsText ?? '',
     sermon: fileKey(inputs.sermonFile),
     conti: fileKey(inputs.contiFile),
     additional: inputs.additionalFiles.map((file) => fileKey(file)),
