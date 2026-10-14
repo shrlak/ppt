@@ -9,7 +9,8 @@ import PptLibraryPanel from './components/PptLibraryPanel';
 import type { ContiInfo, Song } from './lib/utils/types';
 import { expandDeckSegment, songOverviewItems, type DeckOverviewItem } from './lib/utils/deckOverview';
 import { planAllSlides, unmatchedTokens } from './lib/utils/slidePlanner';
-import { buildPptx, suggestFileName } from './lib/pptx/pptxBuilder';
+import { buildPptx, serviceSunday, suggestFileName } from './lib/pptx/pptxBuilder';
+import { applyFrontSlideDate } from './lib/pptx/frontSlides';
 import { extractSlideSubset } from './lib/pptx/pptxSlices';
 import { mergePptxDecks } from './lib/pptx/pptxMerge';
 import { parseAnnouncements, buildAnnouncementDeck } from './lib/utils/announcementBuilder';
@@ -342,7 +343,7 @@ function SundayApp() {
     /** True when 기도제목 were typed but the front deck has no 기도제목 box for them. */
     prayerTopicsSkipped: boolean;
   }> {
-    const [serviceTemplate, frontSource, backSlidesSource] = await Promise.all([
+    const [serviceTemplate, frontSlidesSource, backSlidesSource] = await Promise.all([
       fetch(`${BASE}service-template.pptx`).then((r) => {
         if (!r.ok) throw new Error('서비스 템플릿 파일을 불러오지 못했습니다.');
         return r.arrayBuffer();
@@ -362,6 +363,10 @@ function SundayApp() {
           }),
     ]);
 
+    // The front deck's welcome slide prints the service date. Write that
+    // week's Sunday there — the same day the download is named after.
+    const datedFront = (await applyFrontSlideDate(frontSlidesSource, serviceSunday(contiDate))).data;
+
     // The back deck prints the 공동체 고백송 itself. Rewrite that block to the
     // song 관리자 설정 names, so the fixed slides carry this season's
     // confession song without anyone editing the .pptx by hand. Nothing is
@@ -378,7 +383,7 @@ function SundayApp() {
 
     // The 기도 준비 slide takes this week's 기도제목, copied as many times as
     // they need; with none typed the front deck goes in as it is.
-    const prayerFront = await applyPrayerTopics(frontSource, prayerTopics);
+    const prayerFront = await applyPrayerTopics(datedFront, prayerTopics);
     const frontSlides = prayerFront.data;
 
     const overview: DeckOverviewItem[] = [];
