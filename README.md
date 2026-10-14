@@ -42,7 +42,9 @@ Front 5장(맨 앞 기도 준비 슬라이드 포함)과 Back 21장은 각각 `p
 `public/service-template.pptx`에서 가져오며, 나머지 입력을
 고정 순서에 맞춰 하나의 `.pptx`로 내려받습니다. 추가 자료가 있으면 Back/End의 마지막 장 뒤에
 사용자가 정한 순서대로 이어집니다. 다운로드 파일명은 콘티 날짜가 속한
-주의 일요일을 기준으로 `MMDD.pptx`(예: `0712.pptx`)로 자동 생성됩니다.
+주의 일요일을 기준으로 `MMDD.pptx`(예: `0712.pptx`)로 자동 생성됩니다. Front **2번째 슬라이드**(welcome ·
+Happy Lord's Day)의 `빛주사랑 대학청년부` 아래 날짜도 같은 일요일로 `MM/DD/YYYY`(예: `07/12/2026`)가
+자동으로 들어갑니다. 콘티(또는 카톡 공지)에 날짜가 없으면 파일명처럼 오늘 기준 다가오는 일요일입니다.
 
 ## 🖥 편집기 보기
 
@@ -1049,7 +1051,9 @@ GitHub Actions로 GitHub Pages에 자동 배포됩니다.
 ## 참고
 
 - 기도·광고 제목·광고 항목 서식: `public/service-template.pptx`
-- 필수 Front slides: `public/front-slides.pptx`
+- 필수 Front slides: `public/front-slides.pptx` (2번째 슬라이드의 날짜는 `src/lib/pptx/frontSlides.ts`가
+  그 주 일요일로 바꿔 씁니다 — 슬라이드 번호가 아니라 `07/12/2026`처럼 **날짜만 있는 줄**로 찾으므로,
+  관리자 설정에서 다른 Front slides로 교체해도 날짜를 한 줄로 적어 두면 그대로 동작합니다)
 - 필수 Back slides: `public/back-slides.pptx` (공동체 고백 슬라이드는
   `src/lib/pptx/confessionSlides.ts`가 관리자 설정의 고백송으로 바꿔 씁니다 — 슬라이드 번호가
   아니라 '공동체 고백'이라는 글자와 그 아래 곡 이름으로 찾으므로, 다른 Back slides로 교체해도

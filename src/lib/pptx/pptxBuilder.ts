@@ -72,10 +72,18 @@ function sundayOnOrAfter(date: Date): Date {
   return sunday;
 }
 
+/**
+ * The Sunday a conti's date belongs to: "7/11/26" (Saturday) → 2026-07-12.
+ * No readable date means the coming Sunday from `today`. The download name
+ * and the date printed on the front slides both come from this one day.
+ */
+export function serviceSunday(date?: string, today = new Date()): Date {
+  return sundayOnOrAfter(parseLocalDate(date) ?? today);
+}
+
 /** "7/11/26" (Saturday) → "0712.pptx" (that week's Sunday). */
 export function suggestFileName(date?: string, today = new Date()): string {
-  const sourceDate = parseLocalDate(date) ?? today;
-  const sunday = sundayOnOrAfter(sourceDate);
+  const sunday = serviceSunday(date, today);
   const month = String(sunday.getMonth() + 1).padStart(2, '0');
   const day = String(sunday.getDate()).padStart(2, '0');
   return `${month}${day}.pptx`;
