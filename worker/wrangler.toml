@@ -79,6 +79,15 @@ class_name = "UsageTracker"
 tag = "v1"
 new_sqlite_classes = ["UsageTracker"]
 
+# FreeCast cloud library (accounts, slides, media) — its own SQLite Durable Object.
+[[durable_objects.bindings]]
+name = "FREECAST_STORE"
+class_name = "FreeCastStore"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FreeCastStore"]
+
 # API keys are NOT set here (this file is committed to git). Set them with:
 #   npx wrangler secret put GEMINI_API_KEY
 #   npx wrangler secret put OPENROUTER_API_KEY
