@@ -123,6 +123,9 @@ import {
   isAllowedSheetImageUrl,
 } from './songSheet.js';
 import { bugsScrapingAllowed } from './lyricsSources.js';
+import { handleFreecast } from './freecast.js';
+
+export { FreeCastStore } from './freecast.js';
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -1062,6 +1065,9 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // FreeCast (desktop presentation app): accounts + shared slide library. See freecast.js.
+    if (url.pathname.startsWith('/freecast/')) return handleFreecast(request, env, headers);
 
     // Cross-device libraries share the same strongly consistent Durable
     // Object already used by recognition settings. Reads are available to the
