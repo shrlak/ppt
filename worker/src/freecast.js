@@ -14,8 +14,10 @@
 //   GET    /freecast/media/<id>    raw bytes
 //   DELETE /freecast/media/<id>
 //   GET    /freecast/users         admin: list accounts   DELETE /freecast/users/<name>  admin
-//   POST   /freecast/feedback      {message, name?, version?, platform?} — no login; saved here and
-//                                  emailed to FEEDBACK_EMAIL (Worker secret) through formsubmit.co
+//   POST   /freecast/feedback      {message, name?, version?, platform?} — no login; saved here →
+//                                  {id, relay: {url, body}}: the app sends that formsubmit.co email
+//                                  to FEEDBACK_EMAIL (Worker secret) from its own connection
+//   POST   /freecast/feedback/<id>/emailed  {error?} — the app reports whether that email went out
 //   GET    /freecast/feedback      admin: every saved feedback, newest first
 import { DurableObject } from 'cloudflare:workers';
 import { adminPassword } from './config.js';
@@ -45,6 +47,20 @@ function sameString(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+/** The formsubmit.co fields for one feedback email (subject "[FreeCast 피드백] #<id> v<version>"). */
+function feedbackEmail(id, { message, name, version, platform }) {
+  return {
+    _subject: `[FreeCast 피드백] #${id}${version ? ` v${version}` : ''}`,
+    _template: 'box',
+    _captcha: 'false',
+    번호: `#${id}`,
+    보낸사람: name || '(이름 없음)',
+    버전: version || '-',
+    운영체제: platform || '-',
+    내용: message,
+  };
 }
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
@@ -86,6 +102,8 @@ export class FreeCastStore extends DurableObject {
       if (path === '/register' && method === 'POST') return await this.register(request);
       if (path === '/login' && method === 'POST') return await this.login(request);
       if (path === '/feedback' && method === 'POST') return await this.addFeedback(request);
+      const emailed = path.match(/^\/feedback\/(\d+)\/emailed$/);
+      if (emailed && method === 'POST') return this.markEmailed(Number(emailed[1]), (await request.json().catch(() => ({}))).error);
       if (path === '/feedback' && method === 'GET') {
         if (request.headers.get('x-fc-admin') !== '1') return fail('관리자 비밀번호가 필요합니다.', 403);
         return json({ items: this.sql.exec('SELECT * FROM feedback ORDER BY id DESC LIMIT 500').toArray() });
@@ -181,36 +199,15 @@ export class FreeCastStore extends DurableObject {
       'INSERT INTO feedback (created, message, name, version, platform) VALUES (?, ?, ?, ?, ?) RETURNING id',
       Date.now(), entry.message, entry.name, entry.version, entry.platform,
     );
-    const error = await this.emailFeedback(id, entry);
-    this.sql.exec('UPDATE feedback SET emailed = ?, email_error = ? WHERE id = ?', error ? 0 : 1, error, id);
-    // Saved either way: an email hiccup must not lose what someone wrote.
-    return json({ ok: true, id, emailed: !error });
+    // Hand the email back for the app to send: formsubmit.co rate-limits Cloudflare's shared
+    // addresses, while each church computer's own connection gets through.
+    const relay = this.env.FEEDBACK_EMAIL ? { url: `https://formsubmit.co/ajax/${encodeURIComponent(this.env.FEEDBACK_EMAIL)}`, body: feedbackEmail(id, entry) } : null;
+    return json({ ok: true, id, relay });
   }
 
-  /** Email one feedback through formsubmit.co (no account; the first message asks the owner to activate). */
-  async emailFeedback(id, { message, name, version, platform }) {
-    const to = this.env.FEEDBACK_EMAIL;
-    if (!to) return 'FEEDBACK_EMAIL is not set';
-    try {
-      const res = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(to)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: 'https://shrlak.github.io', Referer: 'https://shrlak.github.io/freecast/' },
-        body: JSON.stringify({
-          _subject: `[FreeCast 피드백] #${id}${version ? ` v${version}` : ''}`,
-          _template: 'box',
-          _captcha: 'false',
-          번호: `#${id}`,
-          보낸사람: name || '(이름 없음)',
-          버전: version || '-',
-          운영체제: platform || '-',
-          내용: message,
-        }),
-      });
-      const out = await res.json().catch(() => ({}));
-      return res.ok && String(out.success) !== 'false' ? null : String(out.message || `formsubmit ${res.status}`).slice(0, 300);
-    } catch (e) {
-      return String(e?.message || e).slice(0, 300);
-    }
+  markEmailed(id, error) {
+    this.sql.exec('UPDATE feedback SET emailed = ?, email_error = ? WHERE id = ?', error ? 0 : 1, error ? String(error).slice(0, 300) : null, id);
+    return json({ ok: true });
   }
 
   getLibrary(url) {
