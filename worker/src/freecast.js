@@ -14,6 +14,9 @@
 //   GET    /freecast/media/<id>    raw bytes
 //   DELETE /freecast/media/<id>
 //   GET    /freecast/users         admin: list accounts   DELETE /freecast/users/<name>  admin
+//   POST   /freecast/feedback      {message, name?, version?, platform?} — no login; saved here and
+//                                  emailed to FEEDBACK_EMAIL (Worker secret) through formsubmit.co
+//   GET    /freecast/feedback      admin: every saved feedback, newest first
 import { DurableObject } from 'cloudflare:workers';
 import { adminPassword } from './config.js';
 
@@ -24,6 +27,8 @@ const MAX_LIBRARY = 30 * 1024 * 1024;
 const PBKDF2_ITERATIONS = 100_000;
 const USERNAME = /^[\w가-힣.@-]{2,40}$/;
 const MEDIA_ID = /^[\w:-]{1,80}$/;
+const MAX_FEEDBACK = 5000;
+const FEEDBACK_PER_HOUR = 30;
 
 const enc = new TextEncoder();
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -56,7 +61,9 @@ export class FreeCastStore extends DurableObject {
       CREATE TABLE IF NOT EXISTS library_chunks (idx INTEGER PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS media_meta (id TEXT PRIMARY KEY, type TEXT NOT NULL, size INTEGER NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media_chunks (id TEXT NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (id, idx));
+      CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL, message TEXT NOT NULL, name TEXT, version TEXT, platform TEXT, emailed INTEGER NOT NULL DEFAULT 0, email_error TEXT);
     `);
+    this.env = env;
   }
 
   one(query, ...args) {
@@ -78,6 +85,11 @@ export class FreeCastStore extends DurableObject {
     try {
       if (path === '/register' && method === 'POST') return await this.register(request);
       if (path === '/login' && method === 'POST') return await this.login(request);
+      if (path === '/feedback' && method === 'POST') return await this.addFeedback(request);
+      if (path === '/feedback' && method === 'GET') {
+        if (request.headers.get('x-fc-admin') !== '1') return fail('관리자 비밀번호가 필요합니다.', 403);
+        return json({ items: this.sql.exec('SELECT * FROM feedback ORDER BY id DESC LIMIT 500').toArray() });
+      }
       if (path === '/users' && method === 'GET') {
         if (request.headers.get('x-fc-admin') !== '1') return fail('관리자 비밀번호가 필요합니다.', 403);
         return json({ users: this.sql.exec('SELECT username, created FROM users ORDER BY username').toArray() });
@@ -154,6 +166,51 @@ export class FreeCastStore extends DurableObject {
     const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
     this.sql.exec('INSERT INTO sessions (token, username, expires) VALUES (?, ?, ?)', token, name, Date.now() + SESSION_DAYS * 86_400_000);
     return json({ token, username: name });
+  }
+
+  async addFeedback(request) {
+    const body = await request.json().catch(() => ({}));
+    const clip = (v, n) => String(v ?? '').trim().slice(0, n);
+    const message = clip(body.message, MAX_FEEDBACK + 1);
+    if (!message) return fail('내용을 적어 주세요.', 400);
+    if (message.length > MAX_FEEDBACK) return fail(`피드백은 ${MAX_FEEDBACK}자까지 보낼 수 있습니다.`, 400);
+    const recent = this.one('SELECT COUNT(*) AS n FROM feedback WHERE created > ?', Date.now() - 3_600_000);
+    if (recent.n >= FEEDBACK_PER_HOUR) return fail('피드백이 너무 많이 들어왔습니다. 잠시 뒤에 다시 보내 주세요.', 429);
+    const entry = { message, name: clip(body.name, 80), version: clip(body.version, 40), platform: clip(body.platform, 80) };
+    const { id } = this.one(
+      'INSERT INTO feedback (created, message, name, version, platform) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      Date.now(), entry.message, entry.name, entry.version, entry.platform,
+    );
+    const error = await this.emailFeedback(id, entry);
+    this.sql.exec('UPDATE feedback SET emailed = ?, email_error = ? WHERE id = ?', error ? 0 : 1, error, id);
+    // Saved either way: an email hiccup must not lose what someone wrote.
+    return json({ ok: true, id, emailed: !error });
+  }
+
+  /** Email one feedback through formsubmit.co (no account; the first message asks the owner to activate). */
+  async emailFeedback(id, { message, name, version, platform }) {
+    const to = this.env.FEEDBACK_EMAIL;
+    if (!to) return 'FEEDBACK_EMAIL is not set';
+    try {
+      const res = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(to)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: 'https://shrlak.github.io', Referer: 'https://shrlak.github.io/freecast/' },
+        body: JSON.stringify({
+          _subject: `[FreeCast 피드백] #${id}${version ? ` v${version}` : ''}`,
+          _template: 'box',
+          _captcha: 'false',
+          번호: `#${id}`,
+          보낸사람: name || '(이름 없음)',
+          버전: version || '-',
+          운영체제: platform || '-',
+          내용: message,
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      return res.ok && String(out.success) !== 'false' ? null : String(out.message || `formsubmit ${res.status}`).slice(0, 300);
+    } catch (e) {
+      return String(e?.message || e).slice(0, 300);
+    }
   }
 
   getLibrary(url) {

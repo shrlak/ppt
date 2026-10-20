@@ -41,10 +41,11 @@ jobs:
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          FEEDBACK_EMAIL: ${{ secrets.FEEDBACK_EMAIL }}
         run: |
           {
             echo 'list<<LIST'
-            for name in GEMINI_API_KEY HUGGINGFACE_API_KEY OPENROUTER_API_KEY SERPAPI_API_KEY; do
+            for name in GEMINI_API_KEY HUGGINGFACE_API_KEY OPENROUTER_API_KEY SERPAPI_API_KEY FEEDBACK_EMAIL; do
               if [ -n "${!name}" ]; then
                 echo "$name"
               else
@@ -75,3 +76,4 @@ jobs:
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          FEEDBACK_EMAIL: ${{ secrets.FEEDBACK_EMAIL }}
