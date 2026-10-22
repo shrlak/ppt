@@ -1,11 +1,5 @@
 name: FreeCast media maintenance
 on:
-  push:
-    branches: [maintenance/freecast-media-inventory]
-    paths:
-      - 'scripts/freecast-media-maintenance.mjs'
-      - 'scripts/freecast-media-cleanup.mjs'
-      - '.github/workflows/freecast-media-maintenance.yml'
   workflow_dispatch:
     inputs:
       fingerprint:
@@ -16,7 +10,7 @@ permissions:
   contents: read
 jobs:
   inventory:
-    if: github.repository == 'shrlak/ppt' && (github.ref_name == github.event.repository.default_branch || github.ref_name == 'maintenance/freecast-media-inventory')
+    if: github.repository == 'shrlak/ppt' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,7 +19,7 @@ jobs:
           node-version: '24'
       - name: Read authenticated server inventory
         env:
-          APPLY_FINGERPRINT: b2ce18ea89803b94cf052d30ff4c24d129c7371fe2e60b0f05ad754c5490ffe4
+          APPLY_FINGERPRINT: ${{ inputs.fingerprint }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
           node --test scripts/freecast-media-cleanup.test.mjs
