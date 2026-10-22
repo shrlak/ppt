@@ -7,6 +7,11 @@ on:
       - 'scripts/freecast-media-cleanup.mjs'
       - '.github/workflows/freecast-media-maintenance.yml'
   workflow_dispatch:
+    inputs:
+      fingerprint:
+        description: 'Exact reviewed inventory SHA-256; blank performs inventory only'
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -20,8 +25,11 @@ jobs:
           node-version: '24'
       - name: Read authenticated server inventory
         env:
+          APPLY_FINGERPRINT: 9aedbbc4b2341c9826db18c752d0fd4d46f370a7fa718e0871fb8bef0efb0d3d
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-        run: node scripts/freecast-media-maintenance.mjs
+        run: |
+          node --test scripts/freecast-media-cleanup.test.mjs
+          node scripts/freecast-media-maintenance.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: freecast-media-inventory

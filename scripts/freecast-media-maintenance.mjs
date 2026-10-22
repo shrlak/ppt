@@ -36,6 +36,36 @@ try {
     if (JSON.stringify(cleaned.presentations.find((p) => p.id === id)) !== JSON.stringify(library.data.presentations.find((p) => p.id === id))) throw new Error('Protected service changed during planning');
   }
   console.log(`::notice title=FreeCast cleanup plan::${JSON.stringify({ ...plan, remove: plan.remove.length, keep: plan.keep.map((id) => ({ id, name: library.data.media.find((m) => m.id === id)?.name ?? id })) })}`);
+  const expected = process.env.APPLY_FINGERPRINT || '';
+  if (expected) {
+    if (expected !== plan.fingerprint) throw new Error('Inventory changed since review; refusing deletion');
+    const entry = { id: randomBytes(16).toString('hex'), at: Date.now(), action: 'media/remove', detail: `1025 주일예배·필수 미디어 보존, 나머지 ${plan.remove.length}개 삭제`, device: { id: 'church-cloud-maintenance', name: '교회 클라우드 관리', userName: '', platform: 'server' }, account: 'administrator' };
+    cleaned.activity = [...(cleaned.activity ?? []), entry].slice(-2000);
+    cleaned.lastModified = entry;
+    // Optimistic version check occurs on the server before changing metadata.
+    const saved = await request('library', { method: 'PUT', headers, body: JSON.stringify({ baseVersion: library.version, data: cleaned }) });
+    if (saved.conflict || saved.version !== library.version + 1) throw new Error('Concurrent library edit; no files deleted');
+    let deletedCount = 0;
+    for (const id of plan.remove) {
+      if (deletedCount % 10 === 0) {
+        const latest = await request('library', { headers });
+        if (latest.version !== saved.version) throw new Error(`Library changed; stopped after ${deletedCount} files`);
+      }
+      await request(`media/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      deletedCount++;
+    }
+    const [afterLibrary, afterMedia, afterStorage] = await Promise.all([request('library', { headers }), request('media', { headers }), request('storage', { headers })]);
+    if (afterMedia.items.some((m) => plan.remove.includes(m.id))) throw new Error('Some deleted media is still present');
+    for (const id of plan.keep) {
+      const before = media.items.find((m) => m.id === id);
+      if (before && !afterMedia.items.some((m) => m.id === id && m.size === before.size)) throw new Error('Protected media verification failed');
+    }
+    for (const id of plan.protectedPresentationIds) {
+      if (JSON.stringify(afterLibrary.data.presentations.find((p) => p.id === id)) !== JSON.stringify(library.data.presentations.find((p) => p.id === id))) throw new Error('Protected presentation verification failed');
+    }
+    const result = { deletedCount, deletedBytes: plan.bytesToDelete, remainingMediaCount: afterMedia.items.length, remainingMediaBytes: afterStorage.mediaBytes, beforeDatabaseBytes: storage.freecastBytes, afterDatabaseBytes: afterStorage.freecastBytes, protectedPresentationsVerified: plan.protectedPresentationIds.length, version: afterLibrary.version };
+    console.log(`::notice title=FreeCast cleanup result::${JSON.stringify(result)}`);
+  }
   await mkdir('maintenance-output', { recursive: true });
   await writeFile('maintenance-output/inventory.json', JSON.stringify({ library, media, storage }, null, 2));
   const report = { version: library.version, playlists: library.data?.playlists, presentations: library.data?.presentations?.map(({ id, title, folder }) => ({ id, title, folder })), mediaCount: media.items?.length, storedMediaBytes: storage.mediaBytes, files: library.data?.media };
