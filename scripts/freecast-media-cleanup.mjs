@@ -36,7 +36,7 @@ export function planCleanup(library, inventory) {
   for (const m of lib.media) if (essentialName(m.name)) visit(m.id);
   const remove = [...ids].filter((id) => !keep.has(id)).sort();
   const kept = [...keep].sort();
-  const fingerprint = createHash('sha256').update(JSON.stringify({ library, inventory: [...inventory].sort((a, b) => a.id.localeCompare(b.id)), remove, kept })).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify({ playlistId: playlists[0].id, protectedPresentationIds: [...protectedPresentationIds].sort(), inventory: inventory.map(({ id, size, type }) => ({ id, size, type })).sort((a, b) => a.id.localeCompare(b.id)), remove, kept })).digest('hex');
   return { fingerprint, remove, keep: kept, protectedPresentationIds: [...protectedPresentationIds], playlistId: playlists[0].id, bytesToDelete: inventory.filter((m) => remove.includes(m.id)).reduce((sum, m) => sum + m.size, 0) };
 }
 

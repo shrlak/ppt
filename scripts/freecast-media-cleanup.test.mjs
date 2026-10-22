@@ -30,11 +30,21 @@ test('refuse missing/ambiguous service, incomplete playlist and corrupt sizes', 
   assert.throws(() => planCleanup({ data: { ...library.data, presentations: [] } }, inventory));
   assert.throws(() => planCleanup(library, [{ id: 'keep', size: -1 }]));
 });
-test('fingerprint changes for edits and protects exact preset names', () => {
+test('fingerprint changes for file selection and protects exact preset names', () => {
   const { library, inventory } = fixture();
   const before = planCleanup(library, inventory);
   library.data.media.push({ id: 'sky', name: '별이 있는 밤하늘' });
   const after = planCleanup(library, inventory);
   assert(after.keep.includes('sky'));
   assert.notEqual(before.fingerprint, after.fingerprint);
+});
+
+test('unrelated activity and text edits do not change a reviewed deletion scope', () => {
+  const { library, inventory } = fixture();
+  const before = planCleanup(library, inventory).fingerprint;
+  library.version++; library.data.presentations[0].title = 'Updated title';
+  library.data.activity = [{ id: 'event', at: Date.now() }];
+  assert.equal(planCleanup(library, inventory).fingerprint, before);
+  library.data.presentations[0].slides[0].elements.push({ kind: 'image', mediaId: 'delete' });
+  assert.notEqual(planCleanup(library, inventory).fingerprint, before);
 });
