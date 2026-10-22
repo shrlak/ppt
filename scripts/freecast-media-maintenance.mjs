@@ -30,7 +30,9 @@ try {
   ]);
   await mkdir('maintenance-output', { recursive: true });
   await writeFile('maintenance-output/inventory.json', JSON.stringify({ library, media, storage }, null, 2));
-  console.log(JSON.stringify({ version: library.version, playlists: library.data?.playlists?.map(({ id, name }) => ({ id, name })), presentations: library.data?.presentations?.map(({ id, title, folder }) => ({ id, title, folder })), mediaCount: media.items?.length, storedMediaBytes: storage.mediaBytes }, null, 2));
+  const report = { version: library.version, playlists: library.data?.playlists, presentations: library.data?.presentations?.map(({ id, title, folder }) => ({ id, title, folder })), mediaCount: media.items?.length, storedMediaBytes: storage.mediaBytes, files: library.data?.media };
+  console.log(`::notice title=FreeCast inventory::${JSON.stringify(report).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+
 } finally {
   // Revoke the session before deleting the temporary administrator-created account.
   if (token) await request('logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
