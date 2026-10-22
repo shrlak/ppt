@@ -1,4 +1,5 @@
 import { measureStorage, storagePlan } from './storage.js';
+import { reconcileDeletedMedia } from './mediaCleanup.js';
 // FreeCast cloud library: accounts, login and one shared church library (presentations,
 // themes, playlists… as JSON) plus media files, so FreeCast on any computer can open the same
 // slides after signing in. Stored in its own SQLite-backed Durable Object.
@@ -234,9 +235,16 @@ export class FreeCastStore extends DurableObject {
       const body = await latest.json();
       return json({ conflict: true, ...body }, 409);
     }
-    const text = JSON.stringify(data);
+    const previousText = this.sql.exec('SELECT data FROM library_chunks ORDER BY idx').toArray().map((r) => r.data).join('');
+    const previous = previousText ? JSON.parse(previousText) : null;
+    const reconciled = reconcileDeletedMedia(previous, data);
+    const text = JSON.stringify(reconciled.data);
     const version = current + 1;
     this.ctx.storage.transactionSync(() => {
+      for (const id of reconciled.deletedIds) {
+        this.sql.exec('DELETE FROM media_chunks WHERE id = ?', id);
+        this.sql.exec('DELETE FROM media_meta WHERE id = ?', id);
+      }
       this.sql.exec('DELETE FROM library_chunks');
       for (let i = 0; i * CHUNK < text.length; i++) this.sql.exec('INSERT INTO library_chunks (idx, data) VALUES (?, ?)', i, text.slice(i * CHUNK, (i + 1) * CHUNK));
       this.sql.exec(
@@ -244,7 +252,7 @@ export class FreeCastStore extends DurableObject {
         version, Date.now(), user, Math.ceil(text.length / CHUNK),
       );
     });
-    return json({ version });
+    return json({ version, ...(text !== JSON.stringify(data) ? { data: reconciled.data } : {}) });
   }
 
   getMedia(id) {
