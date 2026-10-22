@@ -521,3 +521,9 @@ copyrighted 악보 and are far too large for git.
   **category** (`quota`, `rate-limit`, `timeout`, …) and nothing else.
 - No third-party lyric text: a web candidate is stored as provenance (which
   page was offered, how it scored), never as its lines.
+
+## FreeCast server storage
+
+Authenticated `GET /freecast/storage` returns the live SQLite `databaseSize` of the church's FreeCastStore and shared UsageTracker, combined `usedBytes`, `usedPercent`, and the Workers Free account quota (`limitBytes: 5000000000`, decimal GB). The account quota is shared: other Workers' Durable Objects are outside this church-Worker measurement. KV and R2 use separate quotas. A missing measurement is an error, never zero. `GET /freecast/storage-plan` returns the public plan/limit without storage contents.
+
+The deploy workflow resolves the existing REMOTE_LINKS KV namespace before deployment and stops if it cannot unambiguously preserve it. It uses the same namespace for the remote-link handler, which runs before Origin validation, and retains dashboard variables with `--keep-vars`. No token values are written to configuration files.

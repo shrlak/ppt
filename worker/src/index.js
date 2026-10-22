@@ -1,3 +1,4 @@
+import { handleRemoteLink } from './remoteLink.js';
 // Shared recognition proxy for the lyrics app's score-recognition feature.
 //
 // Holds the site owner's Gemini / OpenRouter API keys as Worker
@@ -170,6 +171,12 @@ function jsonResponse(obj, status, headers) {
  * excluded titles) every device reads.
  */
 export class UsageTracker extends DurableObject {
+  async storageMetrics() {
+    const databaseBytes = this.ctx.storage.sql.databaseSize;
+    if (!Number.isSafeInteger(databaseBytes) || databaseBytes < 0) throw new Error('Shared storage measurement is unavailable');
+    return { databaseBytes };
+  }
+
   async record(rawEvent) {
     const event = sanitizeUsageEvent(rawEvent);
     const key = usageStorageKey(event);
@@ -1054,6 +1061,8 @@ export default {
   },
 
   async fetch(request, env) {
+    const remoteLink = await handleRemoteLink(request, env);
+    if (remoteLink) return remoteLink;
     const headers = corsHeaders(request, env);
 
     if (request.method === 'OPTIONS') {
