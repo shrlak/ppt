@@ -1,5 +1,6 @@
 // Manual administration of the church's shared FreeCast library.
 // Authenticate through the existing administrator flow; never save credentials.
+import { gzipSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { adminPassword } from '../worker/src/config.js';
@@ -31,7 +32,8 @@ try {
   await mkdir('maintenance-output', { recursive: true });
   await writeFile('maintenance-output/inventory.json', JSON.stringify({ library, media, storage }, null, 2));
   const report = { version: library.version, playlists: library.data?.playlists, presentations: library.data?.presentations?.map(({ id, title, folder }) => ({ id, title, folder })), mediaCount: media.items?.length, storedMediaBytes: storage.mediaBytes, files: library.data?.media };
-  console.log(`::notice title=FreeCast inventory::${JSON.stringify(report).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+  const reportBytes = gzipSync(Buffer.from(JSON.stringify(report))).toString('base64');
+  for (let i = 0; i < reportBytes.length; i += 2000) console.log(`::notice title=FreeCast inventory ${String(i / 2000).padStart(3, '0')}::${reportBytes.slice(i, i + 2000)}`);
 
 } finally {
   // Revoke the session before deleting the temporary administrator-created account.
