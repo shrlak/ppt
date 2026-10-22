@@ -1,11 +1,17 @@
 name: FreeCast media maintenance
 on:
+  push:
+    branches: [maintenance/freecast-media-inventory]
+    paths:
+      - 'scripts/freecast-media-maintenance.mjs'
+      - 'scripts/freecast-media-cleanup.mjs'
+      - '.github/workflows/freecast-media-maintenance.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   inventory:
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.repository == 'shrlak/ppt' && (github.ref_name == github.event.repository.default_branch || github.ref_name == 'maintenance/freecast-media-inventory')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
