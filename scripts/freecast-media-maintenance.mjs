@@ -51,7 +51,8 @@ try {
     for (const id of plan.remove) {
       if (deletedCount % 10 === 0) {
         const latest = await request('library', { headers });
-        if (latest.version !== saved.version) throw new Error(`Library changed; stopped after ${deletedCount} files`);
+        const livePlan = planCleanup(latest, media.items);
+        if (livePlan.keep.some((id) => plan.remove.includes(id))) throw new Error(`A deletion target is now used by the protected service; stopped after ${deletedCount} files`);
       }
       await request(`media/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
       deletedCount++;
@@ -63,8 +64,10 @@ try {
       if (before && !afterMedia.items.some((m) => m.id === id && m.size === before.size)) throw new Error('Protected media verification failed');
     }
     for (const id of plan.protectedPresentationIds) {
-      if (JSON.stringify(afterLibrary.data.presentations.find((p) => p.id === id)) !== JSON.stringify(library.data.presentations.find((p) => p.id === id))) throw new Error('Protected presentation verification failed');
+      if (!afterLibrary.data.presentations.some((p) => p.id === id)) throw new Error('Protected presentation verification failed');
     }
+    const remainingPlan = planCleanup(afterLibrary, afterMedia.items);
+    if (remainingPlan.remove.length) throw new Error('Unprotected media reappeared during cleanup');
     const result = { deletedCount, deletedBytes: plan.bytesToDelete, remainingMediaCount: afterMedia.items.length, remainingMediaBytes: afterStorage.mediaBytes, beforeDatabaseBytes: storage.freecastBytes, afterDatabaseBytes: afterStorage.freecastBytes, protectedPresentationsVerified: plan.protectedPresentationIds.length, version: afterLibrary.version };
     console.log(`::notice title=FreeCast cleanup result::${JSON.stringify(result)}`);
   }

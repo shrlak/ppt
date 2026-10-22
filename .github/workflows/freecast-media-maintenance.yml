@@ -25,7 +25,7 @@ jobs:
           node-version: '24'
       - name: Read authenticated server inventory
         env:
-          APPLY_FINGERPRINT: 9aedbbc4b2341c9826db18c752d0fd4d46f370a7fa718e0871fb8bef0efb0d3d
+          APPLY_FINGERPRINT: 0d9941be271e5916d6994be653c4bd4878cc78204dc196c0f4d4180392590446
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
           node --test scripts/freecast-media-cleanup.test.mjs
