@@ -1,3 +1,4 @@
+import { measureStorage, storagePlan } from './storage.js';
 // FreeCast cloud library: accounts, login and one shared church library (presentations,
 // themes, playlists… as JSON) plus media files, so FreeCast on any computer can open the same
 // slides after signing in. Stored in its own SQLite-backed Durable Object.
@@ -121,8 +122,10 @@ export class FreeCastStore extends DurableObject {
         return json({ ok: true });
       }
 
+      if (path === '/storage-plan' && method === 'GET') return json(storagePlan());
       const user = this.sessionUser(request);
       if (!user) return fail('로그인이 필요합니다.', 401);
+      if (path === '/storage' && method === 'GET') return json(await measureStorage(this.sql, this.env));
       if (path === '/me') return json({ username: user });
       if (path === '/logout' && method === 'POST') {
         this.sql.exec('DELETE FROM sessions WHERE token = ?', (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));

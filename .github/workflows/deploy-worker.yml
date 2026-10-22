@@ -18,6 +18,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Preserve phone remote-link namespace
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/prepare-deploy.mjs
+
       # Cloudflare rejects `secret bulk` when the latest Worker version has
       # never been deployed (API error 10215). Bootstrap the current script
       # first; the next step can then update its secrets safely.
@@ -28,7 +35,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
           wranglerVersion: '4.110.0'
-          command: deploy
+          command: deploy --config .wrangler.deploy.toml --keep-vars
 
       # wrangler-action fails outright when a listed secret has no value
       # ("Value for secret X not found in environment"), so build the list
@@ -66,7 +73,7 @@ jobs:
           # worker/package.json, and that stale version's `secret bulk`
           # command fails to upload secrets.
           wranglerVersion: '4.110.0'
-          command: deploy
+          command: deploy --config .wrangler.deploy.toml --keep-vars
           # Pushes each listed env var into the Worker as a secret before
           # deploying. The list comes from the step above, so only keys with
           # a non-empty repo secret are attempted.
@@ -77,3 +84,24 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
           FEEDBACK_EMAIL: ${{ secrets.FEEDBACK_EMAIL }}
+
+      - name: Verify storage plan and phone redirect route
+        run: |
+          node --input-type=module <<'JS'
+          const base = 'https://lyrics-ai-proxy.spencerkim1235.workers.dev';
+          let failure;
+          for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+              const plan = await fetch(`${base}/freecast/storage-plan`, { headers: { Origin: 'https://shrlak.github.io' } });
+              if (!plan.ok) throw new Error(`Storage plan returned ${plan.status}`);
+              const data = await plan.json();
+              if (data.limitBytes !== 5000000000 || data.plan !== 'workers-free') throw new Error('Unexpected storage quota');
+              const phone = await fetch(`${base}/freecast/remote/deploy-smoke-${process.env.GITHUB_RUN_ID}`, { redirect: 'manual' });
+              if (phone.status !== 404) throw new Error(`Phone route returned ${phone.status}; expected unregistered link`);
+              console.log('Storage quota and phone route verified');
+              failure = null;
+              break;
+            } catch (e) { failure = e; await new Promise((r) => setTimeout(r, 5000)); }
+          }
+          if (failure) throw failure;
+          JS
