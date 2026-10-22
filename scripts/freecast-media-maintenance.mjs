@@ -6,6 +6,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { planCleanup, withoutMedia } from './freecast-media-cleanup.mjs';
 import { adminPassword } from '../worker/src/config.js';
 
+process.on('uncaughtExceptionMonitor', (error) => console.log(`::error title=FreeCast maintenance failure::${error.message.replaceAll('%', '%25').replaceAll('\n', '%0A').replaceAll('\r', '%0D')}`));
+
 const base = 'https://lyrics-ai-proxy.spencerkim1235.workers.dev/freecast';
 const admin = adminPassword(process.env);
 const name = `maintenance_${randomBytes(8).toString('hex')}`;
@@ -18,7 +20,7 @@ async function request(path, options = {}) {
     headers: { Origin: 'https://shrlak.github.io', 'Content-Type': 'application/json', ...options.headers },
     signal: AbortSignal.timeout(120_000),
   });
-  if (!response.ok) throw new Error(`FreeCast ${path.split('/')[0]} HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`FreeCast ${path.split('/')[0]} HTTP ${response.status}: ${String((await response.json().catch(() => ({}))).error ?? 'request failed').slice(0, 200)}`);
   return response.json();
 }
 try {
