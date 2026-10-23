@@ -111,6 +111,12 @@ jobs:
               if (manifest.id !== '/freecast/remote/' || manifest.display !== 'standalone') throw new Error('Unexpected web app identity');
               const offline = await fetch(`${root}sw.js`);
               if (!offline.ok || !(await offline.text()).includes('freecast-remote-shell-')) throw new Error('Offline shell unavailable');
+              const lyrics = `${base}/libraries/lyrics`;
+              const register = await fetch(lyrics, { method: 'PUT', headers: { Origin: 'https://shrlak.github.io', 'content-type': 'application/json' }, body: JSON.stringify({ entry: { title: '', sections: [] } }) });
+              if (register.status !== 400) throw new Error(`Password-free registration validation returned ${register.status}`);
+              const remove = await fetch(lyrics, { method: 'DELETE', headers: { Origin: 'https://shrlak.github.io', 'content-type': 'application/json' }, body: '{}' });
+              if (remove.status !== 403) throw new Error(`Song deletion without administrator returned ${remove.status}`);
+              console.log('Password-free song registration validation and protected deletion verified without writing library data');
               console.log('Storage quota, fixed remote web app and phone route verified');
               failure = null;
               break;

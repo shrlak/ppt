@@ -1080,7 +1080,7 @@ export default {
 
     // Cross-device libraries share the same strongly consistent Durable
     // Object already used by recognition settings. Reads are available to the
-    // app; writes use the same administrator password as 관리자 설정.
+    // app. Song registration is password-free; deletion and migration stay admin-only.
     if (url.pathname === '/libraries/lyrics') {
       const tracker = usageTracker(env);
       if (!tracker) return libraryError('shared library storage is not configured', headers, 503);
@@ -1088,7 +1088,7 @@ export default {
         if (request.method === 'GET') {
           return jsonResponse(await tracker.lyricsLibrary(), 200, { ...headers, 'Cache-Control': 'no-store' });
         }
-        if (!isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
+        if (request.method !== 'PUT' && !isAdminRequest(request, env)) return libraryError('관리자 비밀번호가 올바르지 않습니다.', headers, 403);
         const body = JSON.parse(await request.text());
         if (request.method === 'POST') {
           return jsonResponse(await tracker.mergeLyricsLibrary(body.entries), 200, {
