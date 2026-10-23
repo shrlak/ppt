@@ -18,9 +18,10 @@ export async function checkRemoteLauncher(script) {
     return elements.get(id);
   };
   let paired = null;
+  const saved = new Map();
   const context = {
-    document: { getElementById: element, createElement: () => ({ addEventListener() {} }), querySelector: () => ({}) },
-    localStorage: { getItem: () => null, setItem() {} },
+    document: { documentElement: { dataset: {} }, getElementById: element, createElement: () => ({ addEventListener() {} }), querySelector: () => ({}) },
+    localStorage: { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) },
     navigator: { onLine: true }, window: { addEventListener() {} },
     history: { replaceState() {} }, location: { hash: '', origin: 'https://remote.example' },
     matchMedia: () => ({ matches: false }), setInterval() {}, URL,
@@ -34,6 +35,12 @@ export async function checkRemoteLauncher(script) {
   };
   vm.runInNewContext(script, context, { timeout: 1000 });
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.document.documentElement.dataset.remoteAppearance, 'dark');
+  element('appearance').events.click();
+  assert.equal(context.document.documentElement.dataset.remoteAppearance, 'light');
+  assert.equal(saved.get('freecast.remote.appearance'), 'light');
+  element('appearance').events.click();
+  assert.equal(context.document.documentElement.dataset.remoteAppearance, 'dark');
   element('link').value = 'test-computer12345';
   element('name').value = 'Test computer';
   assert.equal(typeof element('pair').events.submit, 'function', 'Connection button was never initialized');
