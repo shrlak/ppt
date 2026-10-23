@@ -17,19 +17,23 @@ export async function checkRemoteLauncher(script) {
     });
     return elements.get(id);
   };
-  let paired = null;
+  let paired = null, selected = null, allowCookie = true;
+  const listeners = {};
+  const requests = [];
   const saved = new Map();
   const context = {
-    document: { documentElement: { dataset: {} }, getElementById: element, createElement: () => ({ addEventListener() {} }), querySelector: () => ({}) },
+    document: { documentElement: { dataset: {} }, getElementById: element, createElement: () => ({ addEventListener() {} }), querySelector: () => ({}), addEventListener() {} },
     localStorage: { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) },
-    navigator: { onLine: true }, window: { addEventListener() {} },
+    navigator: { onLine: true }, window: { addEventListener(type, listener) { listeners[type] = listener; } },
     history: { replaceState() {} }, location: { hash: '', origin: 'https://remote.example' },
-    matchMedia: () => ({ matches: false }), setInterval() {}, URL,
+    matchMedia: () => ({ matches: false }), setInterval() {}, setTimeout, clearTimeout, AbortController, URL,
     fetch: async (path, options) => {
-      if (path === '/freecast/remote/session') return { ok: false };
+      requests.push(path);
+      if (path === '/freecast/remote/session') return { ok: !!selected, json: async () => ({ id: selected }) };
       assert.equal(path, '/freecast/remote/connect');
       assert.equal(options.method, 'POST');
       paired = JSON.parse(options.body);
+      if (allowCookie) selected = paired.id;
       return { ok: true };
     },
   };
@@ -50,6 +54,30 @@ export async function checkRemoteLauncher(script) {
   assert.equal(element('setup').hidden, true, element('status').textContent);
   assert.equal(element('remote').hidden, false);
   assert.equal(element('remote').src, '/freecast/remote/app?view=remote');
+  // Reproduce iOS retaining a saved computer while the HttpOnly cookie disappears.
+  selected = null;
+  const frame = element('remote');
+  frame.contentDocument = { querySelector: () => ({ getAttribute: () => 'not-paired' }) };
+  frame.events.load();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(selected, 'test-computer12345', 'An expired cookie was never repaired');
+  assert.equal(frame.hidden, false);
+  assert.equal(element('setup').hidden, true);
+  assert.equal(paired.id, 'test-computer12345', 'Recovery must keep the permanent computer ID');
+  const count = requests.length;
+  frame.contentDocument = { querySelector: () => ({ getAttribute: () => 'not-registered' }) };
+  frame.events.load();
+  assert.equal(element('setup').hidden, false);
+  assert.match(element('status').textContent, /R02/);
+  assert.equal(requests.length, count, 'Removed links must show pairing instead of looping');
+  // A browser that refuses cookies must get a useful error, not another failed iframe.
+  selected = null; allowCookie = false;
+  element('pair').events.submit({ preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(element('setup').hidden, false);
+  assert.equal(frame.hidden, true);
+  assert.match(element('status').textContent, /R01/);
+  assert.equal(typeof listeners.message, 'function');
 }
 
 if (process.argv.includes('--live')) {

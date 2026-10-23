@@ -36,6 +36,26 @@ describe('permanent remote web app', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('set-cookie')).toContain(`${cookie}; Path=/; Secure; HttpOnly; SameSite=Strict;`);
   });
+  it('checks that a remembered session still has a registered computer', async () => {
+    expect((await handleRemoteWebApp(req(root + 'session'), env())).status).toBe(401);
+    const state = env();
+    expect(await (await handleRemoteWebApp(req(root + 'session', { cookie }), state)).json()).toEqual({ id });
+    state.records.delete('remote:' + id);
+    expect((await handleRemoteWebApp(req(root + 'session', { cookie }), state)).status).toBe(404);
+  });
+  it('distinguishes lost pairing, a removed link and an unreachable computer', async () => {
+    const missing = await handleRemoteWebApp(req(root + 'app?view=remote'), env());
+    expect(missing.status).toBe(401);
+    expect(await missing.text()).toContain('data-remote-error="not-paired"');
+    const state = env(); state.records.clear();
+    expect(await (await handleRemoteWebApp(req(root + 'app?view=remote', { cookie }), state)).text()).toContain('data-remote-error="not-registered"');
+    const unavailable = await handleRemoteWebApp(req(root + 'app?view=remote', { cookie }), env(), async () => new Response('bad gateway', { status: 502 }));
+    const html = await unavailable.text();
+    expect(html).toContain('data-remote-error="unreachable"');
+    expect(html).toContain('HTTP 502');
+    expect(html).toContain('다시 연결');
+    expect(html).not.toContain('trycloudflare.com');
+  });
   it('re-resolves the tunnel while keeping the same public app and WebSocket paths', async () => {
     expect((await handleRemoteWebApp(req(root + 'app?view=operator', { cookie }), env())).headers.get('location')).toBe(root + 'app?view=remote');
     const state = env(); const targets: string[] = [];
