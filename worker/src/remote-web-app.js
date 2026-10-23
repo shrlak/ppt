@@ -81,6 +81,10 @@ function launcher() {
   const incoming = location.hash.slice(1);
   const validIncoming = /^[A-Za-z0-9_-]{8,64}$/.test(incoming);
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  window.addEventListener('hashchange', () => {
+    const value = location.hash.slice(1); history.replaceState(null, '', root);
+    if (!standalone && /^[A-Za-z0-9_-]{8,64}$/.test(value)) { $('link').value = value; connect(value, ''); }
+  });
   history.replaceState(null, '', root);
   if (validIncoming) $('link').value = incoming;
   if (validIncoming && !standalone) connect(incoming, '');
