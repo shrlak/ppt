@@ -36,6 +36,18 @@ describe('permanent remote web app', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('set-cookie')).toContain(`${cookie}; Path=/; Secure; HttpOnly; SameSite=Strict;`);
   });
+  it('forgets only this browser selection and preserves shared computer registrations', async () => {
+    const state = env();
+    const forget = (from: string, value: string) => new Request(origin + root + 'forget', { method: 'POST', headers: { origin: from, cookie }, body: JSON.stringify({ id: value }) });
+    expect((await handleRemoteWebApp(forget('https://other.example', id), state)).status).toBe(403);
+    expect((await handleRemoteWebApp(forget(origin, 'invalid'), state)).status).toBe(400);
+    expect((await handleRemoteWebApp(req(root + 'forget', { cookie }), state)).status).toBe(405);
+    expect((await handleRemoteWebApp(forget(origin, 'otherComputer123'), state)).headers.get('set-cookie')).toBeNull();
+    const response = await handleRemoteWebApp(forget(origin, id), state);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('set-cookie')).toContain('__Host-freecast-remote=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0');
+    expect(state.records.has('remote:' + id)).toBe(true);
+  });
   it('checks that a remembered session still has a registered computer', async () => {
     expect((await handleRemoteWebApp(req(root + 'session'), env())).status).toBe(401);
     const state = env();
@@ -88,7 +100,7 @@ describe('permanent remote web app', () => {
     const handlers: Record<string, (e: unknown) => void> = {};
     const context = vm.createContext({ URL, Response, fetch: async () => new Response('shell'), caches: { open: async () => ({ put: async () => undefined }) }, self: { location: { origin }, addEventListener: (name: string, fn: (e: unknown) => void) => { handlers[name] = fn; } } });
     vm.runInContext(script, context);
-    for (const path of [root + 'app?view=remote', root + 'connect', root + 'session', '/freecast-ws', '/remote-media/m_one']) {
+    for (const path of [root + 'app?view=remote', root + 'connect', root + 'forget', root + 'session', '/freecast-ws', '/remote-media/m_one']) {
       let intercepted = false;
       handlers.fetch({ request: req(path), respondWith: () => { intercepted = true; } });
       expect(intercepted).toBe(false);
