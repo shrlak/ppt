@@ -5,11 +5,13 @@ function strings(value, out = new Set()) {
   return out;
 }
 
-/** Cascade deck deletion only for assets not used anywhere in the new library. */
+/** Cascade deck deletion and trash purges only for assets unused in the new library. */
 export function reconcileDeletedMedia(previous, next) {
   if (!Array.isArray(previous?.presentations) || !Array.isArray(previous?.media) || !Array.isArray(next?.presentations) || !Array.isArray(next?.media)) return { data: next, deletedIds: [] };
   const keptDecks = new Set(next.presentations.map((p) => p.id));
-  const candidates = strings(previous.presentations.filter((p) => !keptDecks.has(p.id)));
+  const keptTrash = new Set((Array.isArray(next.trash) ? next.trash : []).map((e) => e?.id));
+  const released = (Array.isArray(previous.trash) ? previous.trash : []).filter((e) => !keptTrash.has(e?.id)).map((e) => e?.presentation);
+  const candidates = strings([previous.presentations.filter((p) => !keptDecks.has(p.id)), released]);
   const used = strings({ ...next, media: [] });
   const deletedIds = previous.media.filter((m) => candidates.has(m.id) && !used.has(m.id)).map((m) => m.id);
   const gone = new Set(deletedIds);
