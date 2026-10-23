@@ -1,0 +1,24 @@
+name: Live FreeCast remote web app check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-transport:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install locked Worker test tools
+        working-directory: worker
+        run: npm ci --ignore-scripts
+      - name: Check actual HTTP and WebSocket transport
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node worker/scripts/smoke-remote-web-app.mjs

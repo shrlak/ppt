@@ -98,7 +98,14 @@ jobs:
               if (data.limitBytes !== 5000000000 || data.plan !== 'workers-free') throw new Error('Unexpected storage quota');
               const phone = await fetch(`${base}/freecast/remote/deploy-smoke-${process.env.GITHUB_RUN_ID}`, { redirect: 'manual' });
               if (phone.status !== 404) throw new Error(`Phone route returned ${phone.status}; expected unregistered link`);
-              console.log('Storage quota and phone route verified');
+              const root = `${base}/freecast/remote/`;
+              const home = await fetch(root, { redirect: 'manual' });
+              if (home.status !== 200 || !(await home.text()).includes('apple-mobile-web-app-capable')) throw new Error('Permanent remote web app unavailable');
+              const manifest = await (await fetch(`${root}manifest.webmanifest`)).json();
+              if (manifest.id !== '/freecast/remote/' || manifest.display !== 'standalone') throw new Error('Unexpected web app identity');
+              const offline = await fetch(`${root}sw.js`);
+              if (!offline.ok || !(await offline.text()).includes('freecast-remote-shell-')) throw new Error('Offline shell unavailable');
+              console.log('Storage quota, fixed remote web app and phone route verified');
               failure = null;
               break;
             } catch (e) { failure = e; await new Promise((r) => setTimeout(r, 5000)); }
