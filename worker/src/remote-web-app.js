@@ -13,9 +13,9 @@ function selected(request) {
   return value && ID.test(value) ? value : null;
 }
 
-const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#13161e"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="FreeCast Remote"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="referrer" content="no-referrer"><title>FreeCast Remote</title><link rel="manifest" href="${ROOT}manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="${ROOT}apple-touch-icon.png?v=remote-2"><link rel="icon" type="image/png" href="${ROOT}icon-192.png?v=remote-2"><link rel="stylesheet" href="${ROOT}style.css"></head><body><header><strong>FreeCast Remote</strong><div class="header-actions"><button id="appearance" aria-label="밝은 화면으로 전환">☀ 밝게</button><button id="devices" hidden>컴퓨터 변경</button></div></header><p id="status" role="status" aria-live="polite"></p><main><section id="setup"><h1>예배 컴퓨터 연결</h1><p>컴퓨터의 FreeCast → 설정 → 인터넷 리모컨에서 QR 코드를 스캔하거나 연결 링크를 붙여 넣으세요.</p><form id="pair"><label>연결 링크 또는 연결 코드<input id="link" required autocomplete="off" autocapitalize="off" spellcheck="false"></label><label>컴퓨터 이름<input id="name" maxlength="60" placeholder="예: 교회 Mac · 방송실 Windows"></label><button type="submit">이 컴퓨터 연결</button></form><div id="saved"></div><h2>iPhone에 설치</h2><p>Safari에서 공유 버튼 → <b>홈 화면에 추가</b>를 선택하세요. 이후 홈 화면의 FreeCast Remote를 열면 됩니다.</p><p>이 웹앱 주소는 고정입니다. 컴퓨터의 터널 주소가 바뀌어도 다시 설치할 필요가 없습니다.</p><button id="install" hidden>리모컨 앱 설치</button><button id="resume" hidden>리모컨으로 돌아가기</button></section><iframe id="remote" title="FreeCast 리모컨" hidden allow="autoplay; fullscreen"></iframe><div id="offline" hidden role="alert">인터넷 연결이 끊겼습니다. 연결되면 자동으로 다시 시도합니다.</div></main><script src="${ROOT}launcher.js" defer></script></body></html>`;
+const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#13161e"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="FreeCast Remote"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="referrer" content="no-referrer"><title>FreeCast Remote</title><link rel="manifest" href="${ROOT}manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="${ROOT}apple-touch-icon.png?v=remote-2"><link rel="icon" type="image/png" href="${ROOT}icon-192.png?v=remote-2"><link rel="stylesheet" href="${ROOT}style.css"></head><body><header><strong>FreeCast Remote</strong><div class="header-actions"><button id="appearance" aria-label="밝은 화면으로 전환">☀ 밝게</button><button id="devices" hidden>컴퓨터 변경</button></div></header><p id="status" role="status" aria-live="polite"></p><main><section id="setup"><h1>예배 컴퓨터 연결</h1><p>컴퓨터의 FreeCast → 설정 → 인터넷 리모컨에서 QR 코드를 스캔하거나 연결 링크를 붙여 넣으세요.</p><section id="saved-list" hidden><h2>저장된 컴퓨터</h2><p>이름과 목록은 이 휴대폰에 저장됩니다.</p><div id="saved"></div></section><form id="pair"><label>연결 링크 또는 연결 코드<input id="link" required autocomplete="off" autocapitalize="off" spellcheck="false"></label><label>컴퓨터 이름<input id="name" maxlength="60" placeholder="예: 교회 Mac · 방송실 Windows"></label><button type="submit">이 컴퓨터 연결</button></form><h2>iPhone에 설치</h2><p>Safari에서 공유 버튼 → <b>홈 화면에 추가</b>를 선택하세요. 이후 홈 화면의 FreeCast Remote를 열면 됩니다.</p><p>이 웹앱 주소는 고정입니다. 컴퓨터의 터널 주소가 바뀌어도 다시 설치할 필요가 없습니다.</p><button id="install" hidden>리모컨 앱 설치</button><button id="resume" hidden>리모컨으로 돌아가기</button></section><iframe id="remote" title="FreeCast 리모컨" hidden allow="autoplay; fullscreen"></iframe><div id="offline" hidden role="alert">인터넷 연결이 끊겼습니다. 연결되면 자동으로 다시 시도합니다.</div></main><script src="${ROOT}launcher.js" defer></script></body></html>`;
 
-const css = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);color-scheme:dark;--bg:#13161e;--text:#eee;--muted:#c4c6cc;--control:#252830;--line:#444;--overlay:rgba(19,22,30,.96)}:root[data-remote-appearance="light"]{color-scheme:light;--bg:#f5f6f8;--text:#202b3a;--muted:#566477;--control:#fff;--line:#cbd2dc;--overlay:rgba(245,246,248,.96)}*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none}body{position:fixed;inset:0;height:100vh;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}header{position:relative;isolation:isolate;min-height:44px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:6px 12px;gap:12px;flex:none}header strong{font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}button,input{font:inherit;color:inherit;border:1px solid var(--line);border-radius:7px;padding:9px;background:var(--control)}button{cursor:pointer}button:disabled{opacity:.5}#status{margin:0;padding:0 12px;font-size:13px}#status:empty{display:none}main{position:relative;flex:1;min-height:0}#setup{height:100%;overflow:auto;max-width:560px;margin:auto;padding:16px}h1{font-size:22px}h2{font-size:17px;margin-top:28px}p{line-height:1.6;color:var(--muted)}form,label{display:grid;gap:8px}form{gap:16px;margin:24px 0}input{min-width:0;width:100%;font-size:16px}form button{background:#28764d;color:#fff}#saved{display:flex;flex-wrap:wrap;gap:8px}iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}#offline{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:28px;background:var(--overlay)}.header-actions{display:flex;align-items:center;gap:6px;flex:none}header{gap:8px}header button{flex-shrink:0;font-size:12px;padding:5px 8px}`;
+const css = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);color-scheme:dark;--bg:#13161e;--text:#eee;--muted:#c4c6cc;--control:#252830;--line:#444;--overlay:rgba(19,22,30,.96)}:root[data-remote-appearance="light"]{color-scheme:light;--bg:#f5f6f8;--text:#202b3a;--muted:#566477;--control:#fff;--line:#cbd2dc;--overlay:rgba(245,246,248,.96)}*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none}body{position:fixed;inset:0;height:100vh;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}header{position:relative;isolation:isolate;min-height:44px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:6px 12px;gap:12px;flex:none}header strong{font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}button,input{font:inherit;color:inherit;border:1px solid var(--line);border-radius:7px;padding:9px;background:var(--control)}button{cursor:pointer}button:disabled{opacity:.5}#status{margin:0;padding:0 12px;font-size:13px}#status:empty{display:none}main{position:relative;flex:1;min-height:0}#setup{height:100%;overflow:auto;max-width:560px;margin:auto;padding:16px}h1{font-size:22px}h2{font-size:17px;margin-top:28px}p{line-height:1.6;color:var(--muted)}form,label{display:grid;gap:8px}form{gap:16px;margin:24px 0}input{min-width:0;width:100%;font-size:16px}form button{background:#28764d;color:#fff}#saved{display:grid;gap:12px}.computer-row{min-width:0;border:1px solid var(--line);border-radius:12px;padding:10px}.computer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.computer-row button{min-height:44px}.computer-connect{flex:1;min-width:100px;overflow-wrap:anywhere;text-align:left}.computer-row form{margin:0}.computer-row p{margin:0 0 12px;overflow-wrap:anywhere}.computer-delete{color:#ffabab}:root[data-remote-appearance="light"] .computer-delete{color:#a02020}iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}#offline{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:28px;background:var(--overlay)}.header-actions{display:flex;align-items:center;gap:6px;flex:none}header{gap:8px}header button{flex-shrink:0;font-size:12px;padding:5px 8px}`;
 
 // Keep browser code as source text: bundlers add server-only helpers to function.toString().
 const js = String.raw`(function launcher() {
@@ -50,12 +50,73 @@ const js = String.raw`(function launcher() {
   }
   let profiles = [];
   try { profiles = JSON.parse(localStorage.getItem('freecast.remote.computers') || '[]').filter((p) => p && /^[A-Za-z0-9_-]{8,64}$/.test(p.id) && typeof p.name === 'string').slice(0, 20); } catch { /* private mode */ }
+  let forgotten = new Set();
+  try { forgotten = new Set(JSON.parse(localStorage.getItem('freecast.remote.forgottenComputers') || '[]').filter((id) => /^[A-Za-z0-9_-]{8,64}$/.test(id))); } catch { /* private mode */ }
+  profiles = profiles.filter((p) => !forgotten.has(p.id));
   const status = (text) => { $('status').textContent = text; };
+  function persistProfiles() {
+    try {
+      localStorage.setItem('freecast.remote.computers', JSON.stringify(profiles));
+      localStorage.setItem('freecast.remote.forgottenComputers', JSON.stringify([...forgotten]));
+    } catch { /* keep changes usable for this session */ }
+  }
+  function button(text, action, label = text) {
+    const node = document.createElement('button'); node.type = 'button'; node.textContent = text; node.ariaLabel = label;
+    node.addEventListener('click', action); return node;
+  }
+  function editProfile(profile, row) {
+    if (pending) return;
+    const form = document.createElement('form');
+    const label = document.createElement('label'); label.textContent = '컴퓨터 이름';
+    const input = document.createElement('input'); input.value = profile.name; input.maxLength = 60; input.required = true; input.autocomplete = 'off';
+    label.append(input);
+    const actions = document.createElement('div'); actions.className = 'computer-actions';
+    const save = button('저장', () => {}); save.type = 'submit';
+    actions.append(save, button('취소', saved)); form.append(label, actions);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const name = input.value.trim().slice(0, 60);
+      if (!name) { status('컴퓨터 이름을 입력해 주세요.'); input.focus(); return; }
+      profiles = profiles.map((p) => p.id === profile.id ? { ...p, name } : p);
+      persistProfiles(); saved(); status('컴퓨터 이름을 변경했습니다.');
+    });
+    row.replaceChildren(form); input.focus(); input.select();
+  }
+  async function removeProfile(profile) {
+    if (pending) return;
+    pending = true;
+    forgotten.add(profile.id);
+    profiles = profiles.filter((p) => p.id !== profile.id); persistProfiles();
+    if (current === profile.id) {
+      clearTimeout(retry); current = null;
+      frame.hidden = true; frame.removeAttribute('src');
+      $('setup').hidden = false; $('devices').hidden = true; $('resume').hidden = true;
+    }
+    if ($('link').value === profile.id) $('link').value = '';
+    saved(); status('컴퓨터를 목록에서 삭제하고 있습니다…');
+    try { await request('forget', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: profile.id }) }); }
+    catch { /* a forgotten ID also prevents an old offline cookie from restoring it */ }
+    finally { pending = false; }
+    document.querySelector('link[rel="manifest"]').href = root + 'manifest.webmanifest?paired=' + Date.now();
+    status('이 휴대폰의 목록에서 컴퓨터를 삭제했습니다.');
+  }
+  function confirmRemove(profile, row) {
+    if (pending) return;
+    const text = document.createElement('p'); text.textContent = '“' + profile.name + '”을 이 휴대폰의 목록에서 삭제할까요?';
+    const actions = document.createElement('div'); actions.className = 'computer-actions';
+    const remove = button('삭제 확인', () => removeProfile(profile)); remove.className = 'computer-delete';
+    actions.append(remove, button('취소', saved)); row.replaceChildren(text, actions); remove.focus();
+  }
   function saved() {
+    $('saved-list').hidden = profiles.length === 0;
     $('saved').replaceChildren();
     for (const p of profiles) {
-      const button = document.createElement('button'); button.textContent = p.name || '저장한 컴퓨터';
-      button.addEventListener('click', () => connect(p.id, p.name)); $('saved').append(button);
+      const row = document.createElement('div'); row.className = 'computer-row';
+      const actions = document.createElement('div'); actions.className = 'computer-actions';
+      const connectButton = button(p.name || '저장한 컴퓨터', () => connect(p.id, p.name), p.name + '에 연결'); connectButton.className = 'computer-connect';
+      const remove = button('삭제', () => confirmRemove(p, row), p.name + ' 목록에서 삭제'); remove.className = 'computer-delete';
+      actions.append(connectButton, button('편집', () => editProfile(p, row), p.name + ' 이름 편집'), remove);
+      row.append(actions); $('saved').append(row);
     }
   }
   function showRemote() {
@@ -65,8 +126,9 @@ const js = String.raw`(function launcher() {
     if (!frame.getAttribute('src')) frame.src = root + 'app?view=remote';
     status('');
   }
-  async function connect(id, name) {
-    if (pending) return;
+  async function connect(id, name, explicit = false) {
+    if (pending || (!explicit && forgotten.has(id))) return;
+    if (explicit) { forgotten.delete(id); persistProfiles(); }
     clearTimeout(retry); pending = true; status('컴퓨터 연결을 확인하고 있습니다…');
     try {
       const res = await request('connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) });
@@ -77,9 +139,10 @@ const js = String.raw`(function launcher() {
       if (!res.ok) throw new Error('컴퓨터 연결을 확인하지 못했습니다. 잠시 뒤 다시 시도하세요.');
       const session = await request('session');
       if (!session.ok || (await session.json()).id !== id) throw new Error('휴대폰에 연결 정보를 저장하지 못했습니다. Safari에서 이 링크를 열어 다시 연결해 주세요. (R01)');
+      if (forgotten.has(id)) return;
       current = id;
       profiles = [{ id, name: (name || profiles.find((p) => p.id === id)?.name || '예배 컴퓨터').slice(0, 60) }, ...profiles.filter((p) => p.id !== id)].slice(0, 20);
-      try { localStorage.setItem('freecast.remote.computers', JSON.stringify(profiles)); } catch { /* cookie still remembers selection */ }
+      persistProfiles();
       saved(); frame.removeAttribute('src'); showRemote();
       // Refresh the personalized installation start URL after the device is paired.
       document.querySelector('link[rel="manifest"]').href = root + 'manifest.webmanifest?paired=' + Date.now();
@@ -95,7 +158,7 @@ const js = String.raw`(function launcher() {
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) throw new Error('연결 코드를 확인해 주세요.');
     return id;
   }
-  $('pair').addEventListener('submit', (e) => { e.preventDefault(); try { connect(parse($('link').value.trim()), $('name').value.trim()); } catch (error) { status(error.message); } });
+  $('pair').addEventListener('submit', (e) => { e.preventDefault(); try { connect(parse($('link').value.trim()), $('name').value.trim(), true); } catch (error) { status(error.message); } });
   function chooseComputer() { clearTimeout(retry); frame.hidden = true; $('setup').hidden = false; status(''); }
   $('devices').addEventListener('click', chooseComputer);
   $('resume').addEventListener('click', showRemote);
@@ -170,23 +233,28 @@ const js = String.raw`(function launcher() {
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   window.addEventListener('hashchange', () => {
     const value = location.hash.slice(1); history.replaceState(null, '', root);
-    if (!standalone && /^[A-Za-z0-9_-]{8,64}$/.test(value)) { $('link').value = value; connect(value, ''); }
+    if (!standalone && !forgotten.has(value) && /^[A-Za-z0-9_-]{8,64}$/.test(value)) { $('link').value = value; connect(value, '', true); }
   });
   history.replaceState(null, '', root);
   if (validIncoming) $('link').value = incoming;
-  if (validIncoming && !standalone) connect(incoming, '').finally(() => { booting = false; });
+  if (validIncoming && !standalone && !forgotten.has(incoming)) connect(incoming, '', true).finally(() => { booting = false; });
   else request('session').then(async (r) => {
-    if (r.ok) { current = (await r.json()).id; showRemote(); }
-    else {
+    const selected = r.ok ? (await r.json()).id : null;
+    if (selected && !forgotten.has(selected)) {
+      current = selected;
+      if (!profiles.some((p) => p.id === selected)) { profiles = [{ id: selected, name: '예배 컴퓨터' }, ...profiles].slice(0, 20); persistProfiles(); saved(); }
+      showRemote();
+    } else {
+      if (selected) { try { await request('forget', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: selected }) }); } catch { /* forgotten IDs cannot restore a remote */ } }
       const candidates = [...profiles];
-      if (validIncoming && !candidates.some((p) => p.id === incoming)) candidates.push({ id: incoming, name: '' });
+      if (validIncoming && !forgotten.has(incoming) && !candidates.some((p) => p.id === incoming)) candidates.push({ id: incoming, name: '' });
       for (const candidate of candidates) {
         if (await connect(candidate.id, candidate.name) !== 'missing') break;
       }
     }
   }).catch(() => status('인터넷 연결을 확인해 주세요.')).finally(() => { booting = false; });
 })();`;
-const sw = `const CACHE='freecast-remote-shell-v6',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png',ROOT+'icon-192.png',ROOT+'apple-touch-icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
+const sw = `const CACHE='freecast-remote-shell-v7',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png',ROOT+'icon-192.png',ROOT+'apple-touch-icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
 
 function offline(reason, detail = '') {
   const messages = {
@@ -219,6 +287,14 @@ export async function handleRemoteWebApp(request, env, fetchFn = fetch) {
       const record = await env.REMOTE_LINKS?.get('remote:' + id, 'json');
       return record && TUNNEL.test(record.url) ? json({ id }) : json({ error: 'not registered' }, 404);
     }
+  }
+  if (path === ROOT + 'forget') {
+    if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'origin not allowed' }, 403);
+    const body = await request.json().catch(() => ({}));
+    if (typeof body.id !== 'string' || !ID.test(body.id)) return json({ error: 'bad connection code' }, 400);
+    // Forget only this browser's selected computer. Its shared registration remains intact.
+    return json({ ok: true }, 200, selected(request) === body.id ? { 'set-cookie': `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` } : {});
   }
   if (path === ROOT + 'connect') {
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
