@@ -26,6 +26,9 @@ describe('Worker deployment preserves remote links', () => {
     const env = { REMOTE_LINKS: { get: async () => ({ url: 'https://church-test.trycloudflare.com' }) } };
     const response = await worker.fetch(new Request('https://proxy.test/freecast/remote/test12345'), env);
     expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toBe('https://church-test.trycloudflare.com/?view=remote');
+    expect(response.headers.get('location')).toBe('/freecast/remote/#test12345');
+    const home = await worker.fetch(new Request('https://proxy.test/freecast/remote/'), env);
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain('FreeCast Remote');
   });
 });
