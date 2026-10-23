@@ -17,7 +17,8 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta n
 
 const css = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eee;background:#13161e;color-scheme:dark}*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;height:100%;overflow:hidden}body{height:100vh;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}header{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;gap:12px;flex:none}header strong{font-size:14px}button,input{font:inherit;color:inherit;border:1px solid #444;border-radius:7px;padding:9px;background:#252830}button{cursor:pointer}button:disabled{opacity:.5}#status{margin:0;padding:0 12px;font-size:13px}#status:empty{display:none}main{position:relative;flex:1;min-height:0}#setup{height:100%;overflow:auto;max-width:560px;margin:auto;padding:16px}h1{font-size:22px}h2{font-size:17px;margin-top:28px}p{line-height:1.6;color:#c4c6cc}form,label{display:grid;gap:8px}form{gap:16px;margin:24px 0}input{min-width:0;width:100%;font-size:16px}form button{background:#32875a}#saved{display:flex;flex-wrap:wrap;gap:8px}iframe{width:100%;height:100%;border:0;display:block;background:#13161e}#offline{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:28px;background:rgba(19,22,30,.96)}header button{font-size:12px;padding:5px 8px}`;
 
-function launcher() {
+// Keep browser code as source text: bundlers add server-only helpers to function.toString().
+const js = String.raw`(function launcher() {
   const root = '/freecast/remote/';
   const $ = (id) => document.getElementById(id);
   const frame = $('remote');
@@ -93,9 +94,8 @@ function launcher() {
     else if (profiles.length) connect(profiles[0].id, profiles[0].name);
     else if (validIncoming) connect(incoming, '');
   }).catch(() => status('인터넷 연결을 확인해 주세요.'));
-}
-const js = `(${launcher.toString()})();`;
-const sw = `const CACHE='freecast-remote-shell-v1',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
+})();`;
+const sw = `const CACHE='freecast-remote-shell-v2',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
 
 const offline = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="15"><style>body{background:#13161e;color:#eee;font:16px system-ui;padding:24px;line-height:1.6}</style><h2>컴퓨터에 다시 연결하고 있습니다</h2><p>컴퓨터에서 FreeCast와 인터넷 리모컨을 켜 주세요. 이 화면은 자동으로 다시 연결합니다.</p></html>`;
 
