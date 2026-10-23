@@ -41,7 +41,7 @@ const js = String.raw`(function launcher() {
   frame.addEventListener('load', () => applyAppearance(appearance));
   applyAppearance(appearance);
 
-  let current = null, pending = false, installedPrompt = null, retry = null, repairing = false;
+  let current = null, pending = false, installedPrompt = null, retry = null, repairing = false, booting = true;
   async function request(path, options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -153,7 +153,7 @@ const js = String.raw`(function launcher() {
   }, 15000);
   function online() { $('offline').hidden = navigator.onLine; }
   function resume() {
-    if (!navigator.onLine || document.hidden) return;
+    if (booting || !navigator.onLine || document.hidden) return;
     if (!current && !pending && profiles.length) connect(profiles[0].id, profiles[0].name);
     else if (!ready()) recover();
   }
@@ -174,7 +174,7 @@ const js = String.raw`(function launcher() {
   });
   history.replaceState(null, '', root);
   if (validIncoming) $('link').value = incoming;
-  if (validIncoming && !standalone) connect(incoming, '');
+  if (validIncoming && !standalone) connect(incoming, '').finally(() => { booting = false; });
   else request('session').then(async (r) => {
     if (r.ok) { current = (await r.json()).id; showRemote(); }
     else {
@@ -184,7 +184,7 @@ const js = String.raw`(function launcher() {
         if (await connect(candidate.id, candidate.name) !== 'missing') break;
       }
     }
-  }).catch(() => status('인터넷 연결을 확인해 주세요.'));
+  }).catch(() => status('인터넷 연결을 확인해 주세요.')).finally(() => { booting = false; });
 })();`;
 const sw = `const CACHE='freecast-remote-shell-v6',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png',ROOT+'icon-192.png',ROOT+'apple-touch-icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
 
