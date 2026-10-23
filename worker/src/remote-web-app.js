@@ -79,11 +79,15 @@ function launcher() {
   $('install').addEventListener('click', async () => { if (installedPrompt) { await installedPrompt.prompt(); installedPrompt = null; $('install').hidden = true; } });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register(root + 'sw.js', { scope: root }).catch(() => {});
   const incoming = location.hash.slice(1);
+  const validIncoming = /^[A-Za-z0-9_-]{8,64}$/.test(incoming);
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   history.replaceState(null, '', root);
-  if (/^[A-Za-z0-9_-]{8,64}$/.test(incoming)) connect(incoming, '');
+  if (validIncoming) $('link').value = incoming;
+  if (validIncoming && !standalone) connect(incoming, '');
   else fetch(root + 'session', { cache: 'no-store' }).then(async (r) => {
     if (r.ok) { current = (await r.json()).id; showRemote(); }
     else if (profiles.length) connect(profiles[0].id, profiles[0].name);
+    else if (validIncoming) connect(incoming, '');
   }).catch(() => status('인터넷 연결을 확인해 주세요.'));
 }
 const js = `(${launcher.toString()})();`;
