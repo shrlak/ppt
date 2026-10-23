@@ -25,6 +25,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/prepare-deploy.mjs
 
+      - name: Check bundled phone remote connection button
+        working-directory: worker
+        run: |
+          npm ci --ignore-scripts
+          node scripts/check-remote-launcher.mjs
+
       # Cloudflare rejects `secret bulk` when the latest Worker version has
       # never been deployed (API error 10215). Bootstrap the current script
       # first; the next step can then update its secrets safely.
@@ -112,3 +118,6 @@ jobs:
           }
           if (failure) throw failure;
           JS
+
+      - name: Check the deployed phone remote script
+        run: node worker/scripts/check-remote-launcher.mjs --live
