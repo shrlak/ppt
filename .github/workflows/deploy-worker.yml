@@ -111,6 +111,10 @@ jobs:
               if (manifest.id !== '/freecast/remote/' || manifest.display !== 'standalone') throw new Error('Unexpected web app identity');
               const offline = await fetch(`${root}sw.js`);
               if (!offline.ok || !(await offline.text()).includes('freecast-remote-shell-')) throw new Error('Offline shell unavailable');
+              const teamHome = await fetch(`${base}/freecast/team/`);
+              if (!teamHome.ok || !(await teamHome.text()).includes('FreeCast 무대팀')) throw new Error('Stage-team fixed app unavailable');
+              const teamManifest = await (await fetch(`${base}/freecast/team/manifest.webmanifest`)).json();
+              if (teamManifest.id !== '/freecast/team/' || teamManifest.name !== 'FreeCast 무대팀') throw new Error('Unexpected stage-team web app identity');
               const lyrics = `${base}/libraries/lyrics`;
               const register = await fetch(lyrics, { method: 'PUT', headers: { Origin: 'https://shrlak.github.io', 'content-type': 'application/json' }, body: JSON.stringify({ entry: { title: '', sections: [] } }) });
               if (register.status !== 400) throw new Error(`Password-free registration validation returned ${register.status}`);

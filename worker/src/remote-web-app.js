@@ -1,6 +1,7 @@
 import { REMOTE_ICON, REMOTE_ICON_192, REMOTE_ICON_180 } from './remote-icon.js';
 
 const ROOT = '/freecast/remote/';
+const TEAM_ROOT = '/freecast/team/';
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const TUNNEL = /^https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com$/;
 const COOKIE = '__Host-freecast-remote';
@@ -8,8 +9,8 @@ const iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512
 const headers = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff' };
 const reply = (body, type, status = 200, extra = {}) => new Response(body, { status, headers: { ...headers, 'content-type': type, ...extra } });
 const json = (data, status = 200, extra = {}) => reply(JSON.stringify(data), 'application/json', status, extra);
-function selected(request) {
-  const value = (request.headers.get('cookie') || '').split(';').map((s) => s.trim()).find((s) => s.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
+function selected(request, cookieName = COOKIE) {
+  const value = (request.headers.get('cookie') || '').split(';').map((s) => s.trim()).find((s) => s.startsWith(cookieName + '='))?.slice(cookieName.length + 1);
   return value && ID.test(value) ? value : null;
 }
 
@@ -254,7 +255,7 @@ const js = String.raw`(function launcher() {
     }
   }).catch(() => status('인터넷 연결을 확인해 주세요.')).finally(() => { booting = false; });
 })();`;
-const sw = `const CACHE='freecast-remote-shell-v7',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png',ROOT+'icon-192.png',ROOT+'apple-touch-icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
+const sw = `const CACHE='freecast-remote-shell-v8',ROOT='${ROOT}',FILES=[ROOT,ROOT+'launcher.js',ROOT+'style.css',ROOT+'icon.png',ROOT+'icon-192.png',ROOT+'apple-touch-icon.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('freecast-remote-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!FILES.includes(u.pathname))return;e.respondWith(fetch(e.request).then(r=>{if(!r.ok)throw Error('offline');const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(u.pathname,copy)));return r}).catch(()=>caches.match(u.pathname).then(r=>r||Response.error())))});`;
 
 function offline(reason, detail = '') {
   const messages = {
@@ -268,62 +269,81 @@ function offline(reason, detail = '') {
 
 export async function handleRemoteWebApp(request, env, fetchFn = fetch) {
   const url = new URL(request.url), path = url.pathname;
-  if (path === ROOT || path === ROOT.slice(0, -1)) {
+  const team = path === TEAM_ROOT.slice(0, -1) || path.startsWith(TEAM_ROOT) || path === '/freecast-team-ws';
+  const root = team ? TEAM_ROOT : ROOT;
+  const cookieName = team ? '__Host-freecast-team' : COOKIE;
+  const view = team ? 'team' : 'remote';
+  const variant = (value) => !team ? value : value.replaceAll(ROOT, TEAM_ROOT).replaceAll('freecast.remote.', 'freecast.team.').replaceAll('freecast-remote-shell-', 'freecast-team-shell-').replaceAll('?view=remote', '?view=team').replaceAll('FreeCast Remote', 'FreeCast 무대팀').replaceAll('FreeCast 리모컨', 'FreeCast 무대팀').replaceAll('리모컨 앱 설치', '무대팀 앱 설치').replaceAll('리모컨으로 돌아가기', '무대팀으로 돌아가기').replaceAll('인터넷 리모컨에서 QR', '무대팀 고정 링크에서 QR');
+  const validRecord = (record) => record && TUNNEL.test(record.url) && (record.kind === 'team') === team && (!team || /^[a-f0-9]{64}$/.test(record.hash ?? ''));
+
+  if (path === root || path === root.slice(0, -1)) {
     if (request.method !== 'GET') return json({ error: 'method not allowed' }, 405);
-    return reply(html, 'text/html; charset=utf-8');
+    return reply(variant(html), 'text/html; charset=utf-8');
   }
   if (request.method === 'GET') {
-    if (path === ROOT + 'style.css') return reply(css, 'text/css; charset=utf-8');
-    if (path === ROOT + 'launcher.js') return reply(js, 'text/javascript; charset=utf-8');
-    if (path === ROOT + 'sw.js') return reply(sw, 'text/javascript; charset=utf-8', 200, { 'service-worker-allowed': ROOT });
-    if (path === ROOT + 'icon.png') return reply(Uint8Array.from(atob(REMOTE_ICON), (c) => c.charCodeAt(0)), 'image/png');
-    if (path === ROOT + 'icon-192.png') return reply(Uint8Array.from(atob(REMOTE_ICON_192), (c) => c.charCodeAt(0)), 'image/png');
-    if (path === ROOT + 'apple-touch-icon.png') return reply(Uint8Array.from(atob(REMOTE_ICON_180), (c) => c.charCodeAt(0)), 'image/png');
-    if (path === ROOT + 'icon.svg') return reply(iconSvg, 'image/svg+xml');
-    if (path === ROOT + 'manifest.webmanifest') return json({ id: ROOT, name: 'FreeCast Remote', short_name: 'FreeCast', lang: 'ko', start_url: ROOT + (selected(request) ? '#' + selected(request) : ''), scope: ROOT, display: 'standalone', background_color: '#13161e', theme_color: '#13161e', icons: [{ src: ROOT + 'icon.svg?v=remote-2', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }, { src: ROOT + 'icon-192.png?v=remote-2', sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: ROOT + 'icon.png?v=remote-2', sizes: '512x512', type: 'image/png', purpose: 'any' }] }, 200, { 'content-type': 'application/manifest+json' });
-    if (path === ROOT + 'session') {
-      const id = selected(request);
+    if (path === root + 'style.css') return reply(variant(css), 'text/css; charset=utf-8');
+    if (path === root + 'launcher.js') return reply(variant(js), 'text/javascript; charset=utf-8');
+    if (path === root + 'sw.js') return reply(variant(sw), 'text/javascript; charset=utf-8', 200, { 'service-worker-allowed': root });
+    if (path === root + 'icon.png') return reply(Uint8Array.from(atob(REMOTE_ICON), (c) => c.charCodeAt(0)), 'image/png');
+    if (path === root + 'icon-192.png') return reply(Uint8Array.from(atob(REMOTE_ICON_192), (c) => c.charCodeAt(0)), 'image/png');
+    if (path === root + 'apple-touch-icon.png') return reply(Uint8Array.from(atob(REMOTE_ICON_180), (c) => c.charCodeAt(0)), 'image/png');
+    if (path === root + 'icon.svg') return reply(iconSvg, 'image/svg+xml');
+    if (path === root + 'manifest.webmanifest') return json({ id: root, name: team ? 'FreeCast 무대팀' : 'FreeCast Remote', short_name: team ? '무대팀' : 'FreeCast', lang: 'ko', start_url: root + (selected(request, cookieName) ? '#' + selected(request, cookieName) : ''), scope: root, display: 'standalone', background_color: '#13161e', theme_color: '#13161e', icons: [{ src: root + 'icon.svg?v=remote-2', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }, { src: root + 'icon-192.png?v=remote-2', sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: root + 'icon.png?v=remote-2', sizes: '512x512', type: 'image/png', purpose: 'any' }] }, 200, { 'content-type': 'application/manifest+json' });
+    if (path === root + 'session') {
+      const id = selected(request, cookieName);
       if (!id) return json({ error: 'not paired' }, 401);
       const record = await env.REMOTE_LINKS?.get('remote:' + id, 'json');
-      return record && TUNNEL.test(record.url) ? json({ id }) : json({ error: 'not registered' }, 404);
+      return validRecord(record) ? json({ id }) : json({ error: 'not registered' }, 404);
     }
   }
-  if (path === ROOT + 'forget') {
+  if (path === root + 'forget') {
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
     if (request.headers.get('origin') !== url.origin) return json({ error: 'origin not allowed' }, 403);
-    const body = await request.json().catch(() => ({}));
+    const body = (await request.json().catch(() => ({}))) ?? {};
     if (typeof body.id !== 'string' || !ID.test(body.id)) return json({ error: 'bad connection code' }, 400);
     // Forget only this browser's selected computer. Its shared registration remains intact.
-    return json({ ok: true }, 200, selected(request) === body.id ? { 'set-cookie': `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` } : {});
+    return json({ ok: true }, 200, selected(request, cookieName) === body.id ? { 'set-cookie': `${cookieName}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` } : {});
   }
-  if (path === ROOT + 'connect') {
+  if (path === root + 'connect') {
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
     if (request.headers.get('origin') !== url.origin) return json({ error: 'origin not allowed' }, 403);
-    const body = await request.json().catch(() => ({}));
+    const body = (await request.json().catch(() => ({}))) ?? {};
     if (typeof body.id !== 'string' || !ID.test(body.id)) return json({ error: 'bad connection code' }, 400);
     const record = await env.REMOTE_LINKS?.get('remote:' + body.id, 'json');
-    if (!record || !TUNNEL.test(record.url)) return json({ error: 'not registered' }, 404);
-    return json({ ok: true }, 200, { 'set-cookie': `${COOKIE}=${body.id}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=315360000` });
+    if (!validRecord(record)) return json({ error: 'not registered' }, 404);
+    return json({ ok: true }, 200, { 'set-cookie': `${cookieName}=${body.id}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=315360000` });
   }
-  const app = path === ROOT + 'app';
-  const asset = /^\/(assets|backgrounds|templates)\//.test(path) || /^\/(favicon|church-logo-text|media-team-logo)\.png$/.test(path) || path === '/splash.js' || path === '/splash.css';
-  const relay = path === '/freecast-ws';
-  const media = /^\/remote-media\/[\w.-]{1,100}$/.test(path);
+  const app = path === root + 'app';
+  const localPath = team && path.startsWith(TEAM_ROOT) ? '/' + path.slice(TEAM_ROOT.length) : path;
+  const asset = /^\/(assets|backgrounds|templates)\//.test(localPath) || /^\/(favicon|church-logo-text|media-team-logo)\.png$/.test(localPath) || localPath === '/splash.js' || localPath === '/splash.css';
+  const relay = path === '/freecast-ws' || path === '/freecast-team-ws';
+  const media = /^\/remote-media\/[\w.-]{1,100}$/.test(localPath);
   if (!app && !asset && !relay && !media) return null;
-  if (app && url.searchParams.get('view') !== 'remote') return reply(null, 'text/plain', 302, { location: ROOT + 'app?view=remote' });
-  const id = selected(request);
-  if (!id) return app ? reply(offline('not-paired'), 'text/html; charset=utf-8', 401) : json({ error: 'not paired' }, 401);
+  if (app && url.searchParams.get('view') !== view) return reply(null, 'text/plain', 302, { location: root + 'app?view=' + view });
+  const id = selected(request, cookieName);
+  if (!id) return app ? reply(variant(offline('not-paired')), 'text/html; charset=utf-8', 401) : json({ error: 'not paired' }, 401);
   if (request.method !== 'GET') return json({ error: 'method not allowed' }, 405);
   const record = await env.REMOTE_LINKS?.get('remote:' + id, 'json');
-  if (!record || !TUNNEL.test(record.url)) return app ? reply(offline('not-registered'), 'text/html; charset=utf-8', 503) : json({ error: 'computer unavailable' }, 503);
-  const target = app ? record.url + '/?view=remote' : record.url + path + url.search;
+  if (!validRecord(record)) return app ? reply(variant(offline('not-registered')), 'text/html; charset=utf-8', 503) : json({ error: 'computer unavailable' }, 503);
+  const target = app ? record.url + '/?view=' + view : record.url + localPath + url.search;
   const forward = new Headers();
   for (const key of ['accept', 'range', 'upgrade', 'connection', 'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions']) if (request.headers.has(key)) forward.set(key, request.headers.get(key));
+  if (team && relay) forward.set('x-freecast-team-key', record.hash);
   try {
     const response = await fetchFn(target, { method: 'GET', headers: forward, redirect: 'manual', ...(app ? { signal: AbortSignal.timeout(15000) } : {}) });
     if (response.status === 101) return response;
-    if (app && !response.ok) return reply(offline('unreachable', `컴퓨터 연결 응답: HTTP ${response.status}`), 'text/html; charset=utf-8', 503);
+    if (app && !response.ok) return reply(variant(offline('unreachable', `컴퓨터 연결 응답: HTTP ${response.status}`)), 'text/html; charset=utf-8', 503);
     const out = new Headers(response.headers); out.delete('set-cookie'); out.set('cache-control', 'private, no-store'); out.set('referrer-policy', 'no-referrer');
+    if (team && asset && localPath.endsWith('.css')) {
+      const stylesheet = (await response.text()).replace(/url\(([\"']?)\/(assets|backgrounds|templates)\//g, `url($1${TEAM_ROOT}$2/`);
+      out.delete('content-length'); out.delete('content-encoding');
+      return new Response(stylesheet, { status: response.status, headers: out });
+    }
+    if (team && app) {
+      const page = (await response.text()).replace(/([\"'])\/(assets|backgrounds|templates)\//g, `$1${TEAM_ROOT}$2/`).replace(/([\"'])\/(splash\.(?:js|css)|favicon\.png)/g, `$1${TEAM_ROOT}$2`);
+      out.delete('content-length'); out.delete('content-encoding');
+      return new Response(page, { status: response.status, headers: out });
+    }
     return new Response(response.body, { status: response.status, headers: out });
-  } catch { return app ? reply(offline('unreachable'), 'text/html; charset=utf-8', 503) : json({ error: 'computer unavailable' }, 503); }
+  } catch { return app ? reply(variant(offline('unreachable')), 'text/html; charset=utf-8', 503) : json({ error: 'computer unavailable' }, 503); }
 }
