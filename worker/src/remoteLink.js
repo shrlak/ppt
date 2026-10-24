@@ -52,8 +52,10 @@ export async function handleRemoteLink(request, env) {
   }
   if (body.kind != null && !['team', 'remote'].includes(body.kind)) return json(400, { error: 'bad link type' });
   const kind = body.kind === 'team' ? 'team' : 'remote';
-  if (rec && (rec.kind ?? 'remote') !== kind) return json(409, { error: 'link type cannot change' });
+  // An older Worker may have accepted the first team registration but omitted its kind.
+  // The authenticated owner can migrate an untyped record; explicit kinds stay immutable.
+  if (rec?.kind && rec.kind !== kind) return json(409, { error: 'link type cannot change' });
   if (typeof body.url !== 'string' || !TUNNEL.test(body.url)) return json(400, { error: 'bad url' });
-  await env.REMOTE_LINKS.put(key, JSON.stringify({ hash, url: body.url, at: Date.now(), ...(kind === 'team' ? { kind } : {}) }));
+  await env.REMOTE_LINKS.put(key, JSON.stringify({ hash, url: body.url, at: Date.now(), kind }));
   return json(200, { ok: true, ...(kind === 'team' ? { kind } : {}) });
 }
