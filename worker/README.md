@@ -527,3 +527,10 @@ copyrighted 악보 and are far too large for git.
 Authenticated `GET /freecast/storage` returns the live SQLite `databaseSize` of the church's FreeCastStore and shared UsageTracker, combined `usedBytes`, `usedPercent`, and the Workers Free account quota (`limitBytes: 5000000000`, decimal GB). The account quota is shared: other Workers' Durable Objects are outside this church-Worker measurement. KV and R2 use separate quotas. A missing measurement is an error, never zero. `GET /freecast/storage-plan` returns the public plan/limit without storage contents.
 
 The deploy workflow resolves the existing REMOTE_LINKS KV namespace before deployment and stops if it cannot unambiguously preserve it. It uses the same namespace for the remote-link handler, which runs before Origin validation, and retains dashboard variables with `--keep-vars`. No token values are written to configuration files.
+
+
+### FreeCast stage-team web app
+
+`/freecast/team/` is a separate permanent installation for private stage-team requests. FreeCast registers a second random ID with `kind: "team"` through the existing remote-link endpoint; its hashed registration secret binds proxy WebSocket upgrades to the desktop's request-only endpoint. Team links cannot be paired in the control app, and control links cannot be paired in the team app. The team shell uses its own cookie, saved-computer keys, service-worker scope and asset namespace, so both installations can select different computers without interfering. Team IDs remain stable across tunnel changes and normal remote-key rotation. No new KV namespace or database migration is required.
+
+The desktop must be updated to support the team view and request-only relay. Existing control registrations and URLs remain compatible. The deployment smoke check verifies both permanent installation identities without writing church library data.

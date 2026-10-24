@@ -36,11 +36,11 @@ export async function handleRemoteLink(request, env) {
   if (request.method === 'GET') {
     const rec = await env.REMOTE_LINKS.get(key, 'json');
     if (!rec) return new Response('이 링크는 더 이상 사용할 수 없습니다. FreeCast에서 새 링크를 확인하세요.', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
-    return new Response(null, { status: 302, headers: { location: `/freecast/remote/#${m[1]}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
+    return new Response(null, { status: 302, headers: { location: `/freecast/${rec.kind === 'team' ? 'team' : 'remote'}/#${m[1]}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
   }
 
   if (request.method !== 'PUT' && request.method !== 'DELETE') return json(405, { error: 'method not allowed' });
-  const body = await request.json().catch(() => ({}));
+  const body = (await request.json().catch(() => ({}))) ?? {};
   if (typeof body.secret !== 'string' || body.secret.length < 16) return json(400, { error: 'secret required' });
   const hash = await sha256(body.secret);
   const rec = await env.REMOTE_LINKS.get(key, 'json');
@@ -50,7 +50,10 @@ export async function handleRemoteLink(request, env) {
     if (rec) await env.REMOTE_LINKS.delete(key);
     return json(200, { ok: true });
   }
+  if (body.kind != null && !['team', 'remote'].includes(body.kind)) return json(400, { error: 'bad link type' });
+  const kind = body.kind === 'team' ? 'team' : 'remote';
+  if (rec && (rec.kind ?? 'remote') !== kind) return json(409, { error: 'link type cannot change' });
   if (typeof body.url !== 'string' || !TUNNEL.test(body.url)) return json(400, { error: 'bad url' });
-  await env.REMOTE_LINKS.put(key, JSON.stringify({ hash, url: body.url, at: Date.now() }));
-  return json(200, { ok: true });
+  await env.REMOTE_LINKS.put(key, JSON.stringify({ hash, url: body.url, at: Date.now(), ...(kind === 'team' ? { kind } : {}) }));
+  return json(200, { ok: true, ...(kind === 'team' ? { kind } : {}) });
 }
