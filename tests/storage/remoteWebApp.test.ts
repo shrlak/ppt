@@ -27,6 +27,13 @@ describe('permanent remote web app', () => {
     expect(paired.start_url).toBe(root + '#' + id);
     expect(paired.id).toBe(manifest.id);
   });
+  it('keeps the remote shell installed and retries a disconnected computer promptly', async () => {
+    const launcher = await (await handleRemoteWebApp(req(root + 'launcher.js'), {})).text();
+    expect(launcher).toContain('retry = setTimeout(recover, 3000)');
+    expect(launcher).toContain('Date.now() - lastLoad >= 20000');
+    const fallback = await handleRemoteWebApp(req(root + 'app?view=remote', { cookie }), env(), async () => { throw new Error('computer unavailable'); });
+    expect(await fallback.text()).toContain('http-equiv="refresh" content="10"');
+  });
   it('pairs only from its own origin and keeps the selected capability in a secure private cookie', async () => {
     const pair = (from: string, value: string) => new Request(origin + root + 'connect', { method: 'POST', headers: { origin: from }, body: JSON.stringify({ id: value }) });
     expect((await handleRemoteWebApp(pair('https://other.example', id), env())).status).toBe(403);
