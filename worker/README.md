@@ -534,3 +534,12 @@ The deploy workflow resolves the existing REMOTE_LINKS KV namespace before deplo
 `/freecast/team/` is a separate permanent installation for private stage-team requests. FreeCast registers a second random ID with `kind: "team"` through the existing remote-link endpoint; its hashed registration secret binds proxy WebSocket upgrades to the desktop's request-only endpoint. Team links cannot be paired in the control app, and control links cannot be paired in the team app. The team shell uses its own cookie, saved-computer keys, service-worker scope and asset namespace, so both installations can select different computers without interfering. Team IDs remain stable across tunnel changes and normal remote-key rotation. No new KV namespace or database migration is required.
 
 The desktop must be updated to support the team view and request-only relay. Existing control registrations and URLs remain compatible. The deployment smoke check verifies both permanent installation identities without writing church library data.
+
+
+### FreeCast 전체 자료 삭제
+
+로그인한 사용자는 `GET /freecast/clear`에서 현재 서버·자료 수·미디어 용량·revision을 확인한 뒤 `POST /freecast/clear`에 `{ password, revision }`을 보내 FreeCast 자료 전체를 삭제할 수 있습니다. 관리자 비밀번호가 아닌 **해당 사용자의 로그인 비밀번호**를 서버에서 다시 확인합니다. 잘못된 비밀번호는 5회 후 5분 잠기며, 확인 후 자료가 바뀌면 409로 중단합니다.
+
+삭제는 FreeCast 라이브러리(보호 자료·재생목록·찬양·휴지통 포함)와 모든 미디어 청크에 한정합니다. 로그인 계정·Worker 설정·공용 찬양/PPT 라이브러리·고정 리모컨 링크는 유지합니다. 트랜잭션으로 삭제하고 기존 세션을 해제하며 요청자에게 새 토큰을 돌려줍니다. 삭제 후 라이브러리의 `cloudResetId`와 미디어 업로드의 `X-Freecast-Reset-Id`가 현재 세대와 일치해야 새 자료를 저장할 수 있습니다. 이전 앱의 동기화가 삭제한 파일을 되살리지 못하도록 하는 처리입니다.
+
+운영 확인은 GitHub Actions의 **FreeCast content maintenance**에서 `inventory`로 집계만 조회합니다. 실제 삭제는 조회 결과의 정확한 revision을 `clear` 실행에 입력해야 합니다. 보고서에는 집계와 검증 결과만 포함하며, 비밀번호·토큰·파일 내용은 저장하지 않습니다. 임시 확인 계정은 작업 후 삭제합니다.

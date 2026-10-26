@@ -1,0 +1,39 @@
+name: FreeCast content maintenance
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: FreeCast content only; accounts, settings and shared libraries are preserved
+        type: choice
+        options: [inventory, clear]
+        default: inventory
+        required: true
+      revision:
+        description: Exact reviewed revision from the inventory report; required to clear
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  maintenance:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Run reviewed FreeCast operation
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          FC_OPERATION: ${{ inputs.operation }}
+          FC_EXPECTED_REVISION: ${{ inputs.revision }}
+        run: node worker/scripts/freecast-content-maintenance.mjs
+      - name: Save aggregate-only report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: freecast-content-report
+          path: maintenance-report/freecast-content.json
+          if-no-files-found: ignore
+          retention-days: 7

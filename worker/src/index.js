@@ -153,7 +153,7 @@ function corsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': matched,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Freecast-Reset-Id',
     Vary: 'Origin',
   };
 }
