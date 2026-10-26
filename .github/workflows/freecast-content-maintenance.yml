@@ -29,6 +29,18 @@ jobs:
           FC_OPERATION: ${{ inputs.operation }}
           FC_EXPECTED_REVISION: ${{ inputs.revision }}
         run: node worker/scripts/freecast-content-maintenance.mjs
+      - name: Publish aggregate verification notice
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync } from 'node:fs';
+          const path = 'maintenance-report/freecast-content.json';
+          if (existsSync(path)) {
+            const report = JSON.stringify(JSON.parse(readFileSync(path, 'utf8')));
+            const escaped = report.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+            console.log('::notice title=FreeCast aggregate verification::' + escaped);
+          }
+          NODE
       - name: Save aggregate-only report
         if: always()
         uses: actions/upload-artifact@v7
