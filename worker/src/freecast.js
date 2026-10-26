@@ -1,5 +1,6 @@
 import { measureStorage, storagePlan } from './storage.js';
 import { reconcileDeletedMedia } from './mediaCleanup.js';
+import { emptyFreecastLibrary } from './freecastReset.js';
 // FreeCast cloud library: accounts, login and one shared church library (presentations,
 // themes, playlists… as JSON) plus media files, so FreeCast on any computer can open the same
 // slides after signing in. Stored in its own SQLite-backed Durable Object.
@@ -9,6 +10,8 @@ import { reconcileDeletedMedia } from './mediaCleanup.js';
 //   POST   /freecast/login         {username, password} → {token, username}
 //   POST   /freecast/logout        Authorization: Bearer <token>
 //   GET    /freecast/me            → {username}
+//   GET    /freecast/clear         signed-in deletion preview (counts and revision)
+//   POST   /freecast/clear         {password, revision}; any signed-in user, own login password
 //   GET    /freecast/library       → {version, data, updated, updatedBy}  (?known=<v> → 204 if unchanged)
 //   PUT    /freecast/library       {baseVersion, data} → {version} | 409 {version, data, …}
 //   GET    /freecast/media         → {items: [{id, type, size, updated}]}
@@ -80,6 +83,8 @@ export class FreeCastStore extends DurableObject {
       CREATE TABLE IF NOT EXISTS media_meta (id TEXT PRIMARY KEY, type TEXT NOT NULL, size INTEGER NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media_chunks (id TEXT NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (id, idx));
       CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL, message TEXT NOT NULL, name TEXT, version TEXT, platform TEXT, emailed INTEGER NOT NULL DEFAULT 0, email_error TEXT);
+      CREATE TABLE IF NOT EXISTS freecast_state (id INTEGER PRIMARY KEY CHECK (id = 1), reset_id TEXT, media_revision INTEGER NOT NULL DEFAULT 0);
+      INSERT OR IGNORE INTO freecast_state (id, media_revision) VALUES (1, 0);
     `);
     this.env = env;
   }
@@ -126,6 +131,8 @@ export class FreeCastStore extends DurableObject {
       if (path === '/storage-plan' && method === 'GET') return json(storagePlan());
       const user = this.sessionUser(request);
       if (!user) return fail('로그인이 필요합니다.', 401);
+      if (path === '/clear' && method === 'GET') return json(this.clearPreview(url.origin));
+      if (path === '/clear' && method === 'POST') return await this.clearLibrary(request, user);
       if (path === '/storage' && method === 'GET') return json(await measureStorage(this.sql, this.env));
       if (path === '/me') return json({ username: user });
       if (path === '/logout' && method === 'POST') {
@@ -144,8 +151,11 @@ export class FreeCastStore extends DurableObject {
         if (method === 'GET') return this.getMedia(id);
         if (method === 'PUT') return await this.putMedia(id, request);
         if (method === 'DELETE') {
-          this.sql.exec('DELETE FROM media_chunks WHERE id = ?', id);
-          this.sql.exec('DELETE FROM media_meta WHERE id = ?', id);
+          this.ctx.storage.transactionSync(() => {
+            this.sql.exec('DELETE FROM media_chunks WHERE id = ?', id);
+            this.sql.exec('DELETE FROM media_meta WHERE id = ?', id);
+            this.sql.exec('UPDATE freecast_state SET media_revision = media_revision + 1 WHERE id = 1');
+          });
           return json({ ok: true });
         }
       }
@@ -190,6 +200,55 @@ export class FreeCastStore extends DurableObject {
     return json({ token, username: name });
   }
 
+  resetState() {
+    return this.one('SELECT reset_id, media_revision FROM freecast_state WHERE id = 1') ?? { reset_id: null, media_revision: 0 };
+  }
+
+  librarySnapshot() {
+    const meta = this.one('SELECT version, updated, updated_by, chunks FROM library_meta WHERE id = 1');
+    const text = this.sql.exec('SELECT data FROM library_chunks ORDER BY idx').toArray().map((r) => r.data).join('');
+    return { version: meta?.version ?? 0, data: text ? JSON.parse(text) : null, updated: meta?.updated ?? 0, updatedBy: meta?.updated_by ?? null };
+  }
+
+  clearPreview(server) {
+    const { version, data } = this.librarySnapshot(), state = this.resetState();
+    const media = this.one('SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM media_meta');
+    return { server, revision: `${version}:${state.media_revision}:${state.reset_id ?? ''}`, version,
+      presentations: data?.presentations?.length ?? 0, playlists: data?.playlists?.length ?? 0, trash: data?.trash?.length ?? 0,
+      mediaCount: media.count, mediaBytes: media.bytes };
+  }
+
+  async clearLibrary(request, user) {
+    const body = await request.json().catch(() => ({}));
+    if (typeof body.password !== 'string' || !body.password || typeof body.revision !== 'string') return fail('로그인 비밀번호와 삭제 대상 확인이 필요합니다.', 400);
+    const row = this.one('SELECT salt, hash, failed, locked_until FROM users WHERE username = ?', user);
+    if (!row) return fail('로그인이 필요합니다.', 401);
+    if (row.locked_until > Date.now()) return fail('비밀번호를 여러 번 틀렸습니다. 5분 뒤에 다시 시도하세요.', 429);
+    if (!sameString(await hashPassword(body.password, row.salt), row.hash)) {
+      const failed = row.failed + 1;
+      this.sql.exec('UPDATE users SET failed = ?, locked_until = ? WHERE username = ?', failed >= 5 ? 0 : failed, failed >= 5 ? Date.now() + 300000 : 0, user);
+      return fail('로그인 비밀번호가 올바르지 않습니다.', 403);
+    }
+    if (this.sessionUser(request) !== user) return fail('다시 로그인해 주세요.', 401);
+    const preview = this.clearPreview(new URL(request.url).origin);
+    if (body.revision !== preview.revision) return fail('다른 기기에서 서버 자료가 변경되었습니다. 삭제 대상을 다시 확인해 주세요.', 409);
+    const resetId = crypto.randomUUID(), data = emptyFreecastLibrary(this.librarySnapshot().data, resetId);
+    const text = JSON.stringify(data), version = preview.version + 1, now = Date.now();
+    const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    // Nothing awaits inside this transaction: concurrent writes cannot land between review and deletion.
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM media_chunks'); this.sql.exec('DELETE FROM media_meta'); this.sql.exec('DELETE FROM library_chunks');
+      for (let i = 0; i * CHUNK < text.length; i++) this.sql.exec('INSERT INTO library_chunks (idx, data) VALUES (?, ?)', i, text.slice(i * CHUNK, (i + 1) * CHUNK));
+      this.sql.exec('INSERT INTO library_meta (id, version, updated, updated_by, chunks) VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version, updated = excluded.updated, updated_by = excluded.updated_by, chunks = excluded.chunks', version, now, user, Math.ceil(text.length / CHUNK));
+      this.sql.exec('UPDATE freecast_state SET reset_id = ?, media_revision = media_revision + 1 WHERE id = 1', resetId);
+      this.sql.exec('UPDATE users SET failed = 0, locked_until = 0 WHERE username = ?', user);
+      // Revocation also stops older apps and in-flight syncs from re-uploading the deleted files.
+      this.sql.exec('DELETE FROM sessions');
+      this.sql.exec('INSERT INTO sessions (token, username, expires) VALUES (?, ?, ?)', token, user, now + SESSION_DAYS * 86400000);
+    });
+    return json({ ok: true, version, data, token, username: user, deleted: preview });
+  }
+
   async addFeedback(request) {
     const body = await request.json().catch(() => ({}));
     const clip = (v, n) => String(v ?? '').trim().slice(0, n);
@@ -227,6 +286,9 @@ export class FreeCastStore extends DurableObject {
     if (raw.length > MAX_LIBRARY) return fail('라이브러리가 너무 큽니다.', 413);
     const { baseVersion, data } = JSON.parse(raw);
     if (!data || typeof data !== 'object') return fail('data required', 400);
+    if (this.sessionUser(request) !== user) return fail('다시 로그인해 주세요.', 401);
+    const reset = this.resetState().reset_id;
+    if (reset && data.cloudResetId !== reset) return json({ resetRequired: true, error: '서버가 초기화되었습니다. 최신 FreeCast로 업데이트한 뒤 다시 로그인해 주세요.' }, 409);
     const meta = this.one('SELECT version FROM library_meta WHERE id = 1');
     const current = meta?.version ?? 0;
     if (Number(baseVersion) !== current) {
@@ -245,6 +307,7 @@ export class FreeCastStore extends DurableObject {
         this.sql.exec('DELETE FROM media_chunks WHERE id = ?', id);
         this.sql.exec('DELETE FROM media_meta WHERE id = ?', id);
       }
+      if (reconciled.deletedIds.length) this.sql.exec('UPDATE freecast_state SET media_revision = media_revision + 1 WHERE id = 1');
       this.sql.exec('DELETE FROM library_chunks');
       for (let i = 0; i * CHUNK < text.length; i++) this.sql.exec('INSERT INTO library_chunks (idx, data) VALUES (?, ?)', i, text.slice(i * CHUNK, (i + 1) * CHUNK));
       this.sql.exec(
@@ -270,9 +333,13 @@ export class FreeCastStore extends DurableObject {
 
   async putMedia(id, request) {
     const bytes = new Uint8Array(await request.arrayBuffer());
+    if (!this.sessionUser(request)) return fail('다시 로그인해 주세요.', 401);
+    const reset = this.resetState().reset_id;
+    if (reset && request.headers.get('X-Freecast-Reset-Id') !== reset) return fail('서버가 초기화되었습니다. 최신 FreeCast에서 다시 동기화해 주세요.', 409);
     if (bytes.length > MAX_MEDIA) return fail('파일이 너무 큽니다 (최대 50MB).', 413);
     const type = (request.headers.get('Content-Type') || 'application/octet-stream').slice(0, 100);
     this.ctx.storage.transactionSync(() => {
+      this.sql.exec('UPDATE freecast_state SET media_revision = media_revision + 1 WHERE id = 1');
       this.sql.exec('DELETE FROM media_chunks WHERE id = ?', id);
       for (let i = 0; i * CHUNK < bytes.length; i++) this.sql.exec('INSERT INTO media_chunks (id, idx, data) VALUES (?, ?, ?)', id, i, bytes.slice(i * CHUNK, (i + 1) * CHUNK));
       this.sql.exec(
