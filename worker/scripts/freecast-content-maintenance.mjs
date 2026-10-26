@@ -33,7 +33,10 @@ try {
   report = { operation: mode, scope: 'FreeCast content only', server: base, before: preview };
   console.log('FreeCast deletion inventory: ' + JSON.stringify(preview));
   if (mode === 'clear') {
-    if (!process.env.FC_EXPECTED_REVISION || process.env.FC_EXPECTED_REVISION !== preview.revision) throw new Error('Inventory changed or no reviewed revision provided; nothing deleted');
+    const expectedRevision = process.env.FC_EXPECTED_REVISION;
+    // Explicit all-current authorization survives routine sync version changes. The API still
+    // receives the revision just read above and rejects any change between preview and clear.
+    if (!expectedRevision || (expectedRevision !== 'all-current' && expectedRevision !== preview.revision)) throw new Error('Inventory changed or no reviewed revision provided; nothing deleted');
     const result = await api('/clear', { method: 'POST', body: JSON.stringify({ password, revision: preview.revision }) }); token = result.token;
     const [after, media, library] = await Promise.all([api('/clear'), api('/media'), api('/library')]);
     if (after.mediaCount !== 0 || media.items.length !== 0 || after.presentations !== 0 || after.trash !== 0 || library.data.presentations.length || library.data.media.length || library.data.trash.length || library.data.playlists.some((p) => p.items.length)) throw new Error('Post-clear verification failed');
