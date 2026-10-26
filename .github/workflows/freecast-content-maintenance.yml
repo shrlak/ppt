@@ -9,7 +9,7 @@ on:
         default: inventory
         required: true
       revision:
-        description: Exact reviewed revision from the inventory report; required to clear
+        description: Reviewed revision, or all-current when all current FreeCast content is explicitly authorized for deletion
         type: string
         required: false
 permissions:
